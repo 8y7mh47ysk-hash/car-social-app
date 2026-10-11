@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // Compiles src/ to dist/ for `pnpm start`. Workspace packages are type-checked from source
+  // but not emitted here; at runtime Node loads their own dist/ output through the "@apex/dist"
+  // export condition (see packages/shared/package.json and docs/DECISIONS.md).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist",
+    "sourceMap": true
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}
