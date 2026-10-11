@@ -1,9 +1,9 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { createServer, type Server } from "node:net";
+import { createServer } from "node:net";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 
 const apiRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -22,13 +22,17 @@ interface ServerProcess {
 
 /**
  * Runs the real entrypoint from source (Node strips the types, as in `pnpm dev`) on a port
- * picked by the OS.
+ * picked by the OS. The process is killed when the test ends, even if the test failed or timed
+ * out while waiting for it, so a hanging server can never outlive the test run.
  */
 function startServer(env: Readonly<Record<string, string>> = {}): ServerProcess {
   const child = spawn(process.execPath, ["src/server.ts"], {
     cwd: apiRoot,
     env: { ...process.env, API_HOST: "127.0.0.1", API_PORT: "0", ...env },
     stdio: ["ignore", "pipe", "pipe"],
+  });
+  onTestFinished(() => {
+    child.kill("SIGKILL");
   });
   let output = "";
   const collect = (chunk: string): void => {
@@ -68,16 +72,20 @@ function listeningUrl(server: ServerProcess): Promise<URL> {
   });
 }
 
-async function occupyPort(): Promise<{ server: Server; port: number }> {
-  const server = createServer();
+/** Listens on a free loopback port until the test ends and returns that port. */
+async function occupyPort(): Promise<number> {
+  const blocker = createServer();
   await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", resolve);
+    blocker.listen(0, "127.0.0.1", resolve);
   });
-  const address = server.address();
+  onTestFinished(() => {
+    blocker.close();
+  });
+  const address = blocker.address();
   if (address === null || typeof address === "string") {
     throw new Error("expected a TCP address");
   }
-  return { server, port: address.port };
+  return address.port;
 }
 
 describe("server entrypoint", { timeout: 20_000 }, () => {
@@ -85,41 +93,29 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
     "serves /health, then shuts down cleanly on %s",
     async (signal) => {
       const server = startServer();
-      try {
-        const url = await listeningUrl(server);
+      const url = await listeningUrl(server);
 
-        const response = await fetch(new URL("/health", url));
-        expect(response.status).toBe(200);
-        expect(await response.json()).toEqual({ status: "ok" });
+      const response = await fetch(new URL("/health", url));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ status: "ok" });
 
-        server.child.kill(signal);
-        expect(await server.exited).toEqual({ code: 0, signal: null });
-        expect(server.output()).toContain("shutting down");
-      } finally {
-        server.child.kill("SIGKILL");
-      }
+      server.child.kill(signal);
+      expect(await server.exited).toEqual({ code: 0, signal: null });
+      expect(server.output()).toContain("shutting down");
     },
   );
 
   it("exits with code 1 when the port is already in use", async () => {
-    const blocker = await occupyPort();
-    const server = startServer({ API_PORT: String(blocker.port) });
-    try {
-      expect(await server.exited).toEqual({ code: 1, signal: null });
-      expect(server.output()).toContain("failed to start");
-    } finally {
-      server.child.kill("SIGKILL");
-      blocker.server.close();
-    }
+    const server = startServer({ API_PORT: String(await occupyPort()) });
+
+    expect(await server.exited).toEqual({ code: 1, signal: null });
+    expect(server.output()).toContain("failed to start");
   });
 
   it("refuses to start with an invalid API_PORT", async () => {
     const server = startServer({ API_PORT: "not-a-port" });
-    try {
-      expect(await server.exited).toEqual({ code: 1, signal: null });
-      expect(server.output()).toContain("API_PORT");
-    } finally {
-      server.child.kill("SIGKILL");
-    }
+
+    expect(await server.exited).toEqual({ code: 1, signal: null });
+    expect(server.output()).toContain("API_PORT");
   });
 });
