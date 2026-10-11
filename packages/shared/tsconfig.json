@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  // Shared code runs in browsers and in Node, so it gets neither DOM nor Node types.
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": []
+  },
+  "include": ["src", "*.ts"]
+}
