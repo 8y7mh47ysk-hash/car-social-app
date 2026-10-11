@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // Shared compiler options for every package. Packages add their own module settings
+  // (nodenext for Node code, bundler for code compiled by Next.js or Vite), lib and types.
+  "compilerOptions": {
+    "target": "es2025",
+    "lib": ["es2025"],
+    "moduleDetection": "force",
+    "skipLibCheck": true,
+    "noEmit": true,
+
+    // Type checking: strict plus the extra checks from @tsconfig/strictest.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+
+    // Modules: keep import/export syntax exactly as written and only allow TypeScript syntax
+    // that can be erased, so each file can be transpiled on its own (SWC, Oxc, Node.js).
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "erasableSyntaxOnly": true,
+    // Relative imports in Node packages name the real file ("./app.ts"); tsc rewrites them to
+    // ".js" in dist/. Turbopack cannot map "./x.js" to x.ts inside workspace packages.
+    "rewriteRelativeImportExtensions": true,
+    "resolveJsonModule": true,
+    "noUncheckedSideEffectImports": true,
+    "forceConsistentCasingInFileNames": true
+  }
+}

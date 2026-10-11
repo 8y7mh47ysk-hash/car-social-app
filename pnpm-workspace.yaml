@@ -1,0 +1,19 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Versions used by more than one workspace package live here once; package.json files refer to
+# them as "catalog:". The TypeScript and Vitest ranges are deliberate pins (docs/DECISIONS.md).
+catalog:
+  "@types/node": ^24.19.2
+  # Next.js and its ESLint config are released together; keep them on the same version.
+  eslint-config-next: ^16.4.0
+  next: ^16.4.0
+  typescript: ~6.0.3
+  vitest: ^4.1.11
+
+# Install scripts pnpm may run (true) or must skip (false); pnpm fails on any unlisted script.
+allowBuilds:
+  # Only downloads its native binding when the optional platform package is missing, which
+  # pnpm installs anyway. Used by eslint-config-next's import resolver.
+  unrs-resolver: false

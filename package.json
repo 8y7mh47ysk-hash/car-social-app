@@ -1,0 +1,34 @@
+{
+  "name": "apex-garage",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Apex Garage: a car-themed, self-hosted web app for car enthusiasts, with the Crew Chief AI assistant.",
+  "type": "module",
+  "packageManager": "pnpm@12.11.2",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @apex/api --filter @apex/web dev",
+    "build": "pnpm --recursive build",
+    "start": "pnpm --parallel --filter @apex/api --filter @apex/web start",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --project tsconfig.json && pnpm --recursive typecheck",
+    "test": "vitest run",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "catalog:",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "catalog:",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "next": "catalog:",
+    "prettier": "^3.9.10",
+    "typescript": "catalog:",
+    "typescript-eslint": "^8.71.1",
+    "vitest": "catalog:"
+  }
+}
