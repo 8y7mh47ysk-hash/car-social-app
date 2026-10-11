@@ -1,0 +1,9 @@
+# Normalise line endings: text files are stored and checked out with LF on every platform.
+* text=auto eol=lf
+
+# Several engineers append to these logs on parallel branches. A union merge keeps both
+# sides' new lines instead of raising a conflict; review the merged result for ordering.
+docs/BUILD_LOG.md merge=union
+docs/DECISIONS.md merge=union
+docs/DEPENDENCIES.md merge=union
+docs/REVIEW_LOG.md merge=union
