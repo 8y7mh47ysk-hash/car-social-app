@@ -1,0 +1,6 @@
+@import "tailwindcss";
+
+/* Placeholder styling until the design system (instructions 9-11) defines the real theme. */
+:root {
+  color-scheme: light dark;
+}
