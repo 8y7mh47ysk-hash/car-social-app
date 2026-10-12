@@ -1,24 +1,29 @@
 // The CI step "Fail on build warnings" (instruction 5: "fail on any warning"). It reads the saved
-// output of `pnpm build` and fails if the build printed a warning. Next.js is the reason: it prints
-// warnings and still finishes the build. (tsc, which builds packages/shared and the API, reports
-// only errors, and errors already fail `pnpm build`.) pnpm merges every package's stdout and
-// stderr into one stream, so warnings are recognised by how they are written.
-// docs/DECISIONS.md lists what CI enforces and why.
+// output of `pnpm build` and fails if the build printed a warning, or an error that did not stop
+// it. Next.js is the reason: it prints warnings, and errors that code logs while it prerenders a
+// page, and still finishes the build. (tsc, which builds packages/shared and the API, reports only
+// errors, and those fail `pnpm build`.) pnpm's default reporter merges every package's stdout and
+// stderr into one stream, so problems are recognised by how they are written. docs/DECISIONS.md
+// lists what CI enforces, what it cannot see and why.
 //
 // Usage: node scripts/check-build-warnings.ts <file holding the output of pnpm build>
-// Exit status: 0 no warnings, 1 warnings found, 2 wrong arguments or unreadable file.
+// Exit status: 0 nothing found, 1 warnings or errors found, 2 wrong arguments or unreadable file.
 
 import { readFileSync } from "node:fs";
 import { parseArgs, stripVTControlCharacters } from "node:util";
 
 /**
- * How warnings are marked: Next.js's "⚠" log prefix; "Warning:", used by older Next.js messages,
- * by each of Turbopack's compile warnings and, as "(node:123) Warning:" or "DeprecationWarning:",
- * by Node.js; the header above Turbopack's compile warnings; and pnpm's "WARN".
+ * How problems are marked: Next.js's log prefixes "⚠" (warning) and "⨯" (error); "Warning:", used
+ * by older Next.js messages, by each of Turbopack's compile warnings and, as "(node:123) Warning:"
+ * or "DeprecationWarning:", by Node.js; "Error:", which starts every printed error, such as one
+ * that code logs or leaves unhandled while Next.js prerenders a page ("TypeError:" included); the
+ * header above Turbopack's compile warnings; and pnpm's "WARN".
  */
-const WARNING_MARKERS = [
+const PROBLEM_MARKERS = [
   /⚠/u,
+  /⨯/u,
   /Warning:/u,
+  /Error:/u,
   /Turbopack build encountered \d+ warnings?/u,
   /\bWARN\b/u,
 ];
@@ -30,14 +35,17 @@ const WARNING_MARKERS = [
  */
 const NOT_WARNINGS = [/No build cache found\./u];
 
-/** Returns the lines of a build log that are warnings, without colour codes. */
+/**
+ * Returns the lines of a build log that report a warning, or an error that did not stop the build,
+ * without colour codes.
+ */
 export function findBuildWarnings(log: string): string[] {
   return log
     .split(/\r?\n/u)
     .map((line) => stripVTControlCharacters(line).trim())
     .filter(
       (line) =>
-        WARNING_MARKERS.some((marker) => marker.test(line)) &&
+        PROBLEM_MARKERS.some((marker) => marker.test(line)) &&
         !NOT_WARNINGS.some((notice) => notice.test(line)),
     );
 }
@@ -69,12 +77,12 @@ function main(args: readonly string[]): number {
 
   const warnings = findBuildWarnings(log);
   if (warnings.length === 0) {
-    console.log("The build printed no warnings.");
+    console.log("The build printed no warnings or errors.");
     return 0;
   }
   console.error(
     [
-      `The build printed ${String(warnings.length)} warning line(s), and CI fails on any warning:`,
+      `The build printed ${String(warnings.length)} warning or error line(s), and CI fails on any:`,
       ...warnings.map((warning) => `  ${warning}`),
       "The full messages are in the Build step's output.",
     ].join("\n"),

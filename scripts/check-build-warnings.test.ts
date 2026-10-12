@@ -9,7 +9,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import { findBuildWarnings } from "./check-build-warnings.ts";
 
 // The logs below are excerpts of real `pnpm build` output from this repository, captured with
-// CI=true as on GitHub Actions. The warnings were provoked on purpose in a scratch copy.
+// CI=true as on GitHub Actions. The warnings and errors were provoked on purpose in a scratch copy.
 
 /** A clean build. In CI it includes Next.js's notice that no build cache was restored. */
 const cleanBuild = [
@@ -55,6 +55,23 @@ const turbopackWarnings = [
   "apps/web build: Warning: Dynamic filesystem access causes tracing of the whole project",
 ].join("\n");
 
+/**
+ * Pages that log an error, or leave a promise rejection unhandled, while Next.js prerenders them:
+ * Next.js prints each error with a code frame and still finishes the build.
+ */
+const errorsWhilePrerendering = [
+  "apps/web build:   Generating static pages using 7 workers (0/6) ...",
+  "apps/web build: Error: probe: an error logged while prerendering",
+  "apps/web build:     at <unknown> (src/app/probe-error/page.tsx:2:17)",
+  "apps/web build:   1 | export default function Page() {",
+  'apps/web build: > 2 |   console.error(new Error("probe: an error logged while prerendering"));',
+  "apps/web build:     |                 ^",
+  "apps/web build: Error: probe: an unhandled rejection while prerendering",
+  "apps/web build:     at <unknown> (src/app/probe-rejection/page.tsx:2:23)",
+  'apps/web build: > 2 |   void Promise.reject(new Error("probe: an unhandled rejection while prerendering"));',
+  "apps/web build: ✓ Generating static pages using 7 workers (6/6) in 292ms",
+].join("\n");
+
 describe("findBuildWarnings", () => {
   it("finds no warnings in a clean build, ignoring the CI notice about the build cache", () => {
     expect(findBuildWarnings(cleanBuild)).toEqual([]);
@@ -76,6 +93,25 @@ describe("findBuildWarnings", () => {
     ]);
   });
 
+  it("finds errors that pages log or leave unhandled while Next.js prerenders them", () => {
+    expect(findBuildWarnings(errorsWhilePrerendering)).toEqual([
+      "apps/web build: Error: probe: an error logged while prerendering",
+      "apps/web build: Error: probe: an unhandled rejection while prerendering",
+    ]);
+  });
+
+  it("finds Next.js's error lines and other printed errors", () => {
+    // Not captured from a real build, unlike the logs above: the messages are made up. "⨯" is the
+    // prefix of Next.js's error log (next/dist/build/output/log.js), as "⚠" is of its warnings,
+    // and "TypeError:" is how Node.js prints a TypeError.
+    const log = [
+      "apps/web build: ⨯ Failed to generate the page",
+      "apps/web build: TypeError: Cannot read properties of undefined (reading 'name')",
+    ].join("\n");
+
+    expect(findBuildWarnings(log)).toHaveLength(2);
+  });
+
   it("finds Node.js warnings and pnpm warnings", () => {
     const log = [
       "apps/web build: (node:4242) [DEP0040] DeprecationWarning: The `punycode` module is deprecated.",
@@ -93,11 +129,12 @@ describe("findBuildWarnings", () => {
     expect(findBuildWarnings(log)).toEqual(["⚠ Invalid next.config.ts options detected:"]);
   });
 
-  it("does not flag lines that only mention warnings", () => {
+  it("does not flag lines that only mention warnings or errors", () => {
     const log = [
       "apps/web build: ├ ○ /settings/warnings",
+      "apps/web build: ├ ○ /errors/report",
       "apps/web build: ✓ Compiled successfully with no warnings in 868ms",
-      "apps/web build: Warnings are shown above",
+      "apps/web build: Warnings and errors are shown above",
     ].join("\n");
 
     expect(findBuildWarnings(log)).toEqual([]);
@@ -133,16 +170,24 @@ describe("check-build-warnings command", { timeout: 20_000 }, () => {
     const result = check(logFile(cleanBuild));
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe("The build printed no warnings.\n");
+    expect(result.stdout).toBe("The build printed no warnings or errors.\n");
   });
 
   it("fails a build with warnings and lists them", () => {
     const result = check(logFile(`${cleanBuild}${unknownConfigOption}`));
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("The build printed 3 warning line(s)");
+    expect(result.stderr).toContain("The build printed 3 warning or error line(s)");
     expect(result.stderr).toContain("Unrecognized key(s) in object: 'notARealOption'");
     expect(result.stdout).toBe("");
+  });
+
+  it("fails a build that printed errors but finished", () => {
+    const result = check(logFile(`${cleanBuild}${errorsWhilePrerendering}`));
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("The build printed 2 warning or error line(s)");
+    expect(result.stderr).toContain("Error: probe: an unhandled rejection while prerendering");
   });
 
   it.each([
