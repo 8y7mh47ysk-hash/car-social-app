@@ -16,7 +16,10 @@
     "typecheck": "tsc --project tsconfig.json && pnpm --recursive typecheck",
     "test": "vitest run",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "docker:up": "node scripts/check-docker.ts && docker compose up --detach --wait",
+    "docker:down": "node scripts/check-docker.ts && docker compose down",
+    "docker:logs": "node scripts/check-docker.ts && docker compose logs --follow"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
@@ -29,6 +32,7 @@
     "prettier": "^3.9.10",
     "typescript": "catalog:",
     "typescript-eslint": "^8.71.1",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
   }
 }
