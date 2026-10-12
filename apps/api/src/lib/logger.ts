@@ -154,9 +154,9 @@ function sendFrameworkError(
 
 /**
  * Formats lines with pino-pretty's synchronous formatter, after finishLogLine has redacted them.
- * Each log call then writes its line straight away, exactly as in the JSON format, with no extra
- * stream or worker thread (pino-pretty's stream and transport APIs add one), and tests can read
- * the output as soon as a request ends. pino-pretty is imported only here, so the JSON format
+ * Each log call then writes its formatted line straight to the destination, exactly as in the
+ * JSON format: no worker thread (pino-pretty's transport API runs one) and no extra stream
+ * pipeline (its stream API builds one). pino-pretty is imported only here, so the JSON format
  * never loads it.
  */
 async function prettyDestination(destination: LogDestination | undefined): Promise<LogDestination> {
