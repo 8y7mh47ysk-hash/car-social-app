@@ -1,31 +1,55 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { parse } from "yaml";
 import { z } from "zod";
 
-// Static checks for the GitHub Actions workflows (instruction 5). GitHub runs them, not this
-// machine, so these tests hold every workflow to the security rules in docs/DECISIONS.md and check
-// that CI calls scripts that really exist.
+// Checks for the GitHub Actions workflows (instruction 5). GitHub runs them, not this machine, so
+// these tests hold every workflow to the security rules in docs/DECISIONS.md, check that CI calls
+// scripts that really exist, and run ci.yml's own shell scripts the way GitHub runs them.
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const workflowsDir = join(repoRoot, ".github", "workflows");
+
+/** A `defaults` block, which sets the shell of the `run` steps that do not name one. */
+const defaultsSchema = z.object({ run: z.object({ shell: z.string().optional() }).optional() });
+
+/** Environment variables; GitHub also accepts numbers and booleans, which it turns into text. */
+const envSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]));
 
 /** The parts of a workflow file these tests read. */
 const workflowSchema = z.object({
   on: z.unknown(),
   permissions: z.unknown().optional(),
+  defaults: defaultsSchema.optional(),
   jobs: z.record(
     z.string(),
     z.object({
       "timeout-minutes": z.number().optional(),
       permissions: z.unknown().optional(),
+      defaults: defaultsSchema.optional(),
+      env: envSchema.optional(),
       steps: z.array(
         z.object({
+          name: z.string().optional(),
+          if: z.string().optional(),
           uses: z.string().optional(),
           with: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+          env: envSchema.optional(),
+          shell: z.string().optional(),
           run: z.string().optional(),
         }),
       ),
@@ -92,11 +116,17 @@ describe.each(workflows)("$file", ({ text, workflow }) => {
   });
 });
 
-describe("ci.yml", () => {
-  const ci = workflows.find(({ file }) => file === "ci.yml");
-  if (ci === undefined) {
+function findCi() {
+  const found = workflows.find(({ file }) => file === "ci.yml");
+  if (found === undefined) {
     throw new Error(".github/workflows/ci.yml is missing");
   }
+  return found;
+}
+
+const ci = findCi();
+
+describe("ci.yml", () => {
   const steps = Object.values(ci.workflow.jobs).flatMap((job) => job.steps);
   const runs = steps.flatMap((step) => (step.run === undefined ? [] : [step.run]));
 
@@ -124,10 +154,236 @@ describe("ci.yml", () => {
     expect(runs.some((run) => run.startsWith("node scripts/check-build-warnings.ts "))).toBe(true);
   });
 
+  it("runs each step after the install even when an earlier check failed", () => {
+    // Without a status function in `if`, GitHub adds `success()`, which skips every step after the
+    // first failure. `always()` would also keep going after the run was cancelled.
+    const checks = steps.slice(steps.findIndex((step) => step.run?.startsWith("pnpm install")) + 1);
+
+    expect(checks.length).toBeGreaterThan(0);
+    for (const check of checks) {
+      expect(check.if, check.name).toMatch(/^\$\{\{ !cancelled\(\) && /u);
+    }
+  });
+
   it("validates docker-compose.yml with every profile, from the .env template", () => {
     const compose = runs.find((run) => run.includes("docker compose"));
 
     expect(compose).toContain("cp .env.example .env");
     expect(compose).toContain("docker compose --profile '*' config --quiet");
+  });
+});
+
+/**
+ * The command GitHub runs a step's script file with on Linux, for the shell the step uses:
+ * https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax (jobs.<job_id>.
+ * steps[*].shell). Only `bash` adds `-o pipefail`, which makes a pipe fail when any command in it
+ * fails, not only the last.
+ */
+function shellCommand(
+  shell: string | undefined,
+  scriptFile: string,
+): [command: string, ...args: string[]] {
+  switch (shell) {
+    case undefined:
+      return ["/bin/bash", "-e", scriptFile];
+    case "bash":
+      return ["/bin/bash", "--noprofile", "--norc", "-eo", "pipefail", scriptFile];
+    case "sh":
+      return ["/bin/sh", "-e", scriptFile];
+    default:
+      throw new Error(`these tests cannot run a step with shell: ${shell}`);
+  }
+}
+
+/**
+ * Stand-ins for the commands that ci.yml's scripts call: each one appends its command line to
+ * $STUB_CALLS, prints $STUB_OUTPUT (docker to stderr, where Compose writes its warnings) and exits
+ * with $STUB_STATUS.
+ */
+const STUBS = {
+  pnpm: `#!/bin/sh
+printf 'pnpm %s\\n' "$*" >> "$STUB_CALLS"
+printf '%s' "$STUB_OUTPUT"
+exit "$STUB_STATUS"
+`,
+  docker: `#!/bin/sh
+printf 'docker %s\\n' "$*" >> "$STUB_CALLS"
+printf '%s' "$STUB_OUTPUT" >&2
+exit "$STUB_STATUS"
+`,
+};
+
+interface StepOptions {
+  /** What the pnpm and docker stand-ins print. */
+  readonly output?: string;
+  /** The exit status of the pnpm and docker stand-ins. */
+  readonly status?: number;
+  /** The runner's temporary directory, $RUNNER_TEMP: pass a previous step's to share its files. */
+  readonly runnerTemp?: string;
+  /** Files to put in the stand-in checkout, by name. */
+  readonly files?: Readonly<Record<string, string>>;
+}
+
+interface StepRun {
+  readonly status: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly runnerTemp: string;
+  /** The stand-in checkout that the step ran in. */
+  readonly checkout: string;
+  /** The command line of each call to the pnpm and docker stand-ins, in order. */
+  readonly calls: readonly string[];
+}
+
+/** Makes a temporary directory that is removed when the current test finishes. */
+function temporaryDirectory(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  onTestFinished(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  return dir;
+}
+
+/**
+ * Runs the script of the ci.yml step called `name` as GitHub would on Linux: from a file, with the
+ * shell that the step, its job or the workflow declares, and with the job's and the step's
+ * environment variables. PATH holds only the system directories, the stand-ins for pnpm and
+ * docker, and this Node.js as `node`. The step runs in a stand-in checkout, a temporary directory
+ * that holds `files` and a link to this repository's scripts/, so that a step can never change the
+ * real checkout (the Compose step writes .env, for example).
+ */
+function runStep(name: string, options: StepOptions = {}): StepRun {
+  const { workflow } = ci;
+  const found = Object.values(workflow.jobs).flatMap((job) =>
+    job.steps.filter((step) => step.name === name).map((step) => ({ job, step })),
+  );
+  const [match] = found;
+  if (match?.step.run === undefined || found.length > 1) {
+    throw new Error(`ci.yml must have exactly one run step named "${name}"`);
+  }
+  const { job, step } = match;
+  const script = match.step.run;
+  // GitHub replaces ${{ }} expressions before the shell runs; these tests cannot.
+  if (script.includes("${{")) {
+    throw new Error(`step "${name}" uses a \${{ }} expression in its script`);
+  }
+
+  const runnerTemp = options.runnerTemp ?? temporaryDirectory("apex-ci-runner-");
+  const checkout = temporaryDirectory("apex-ci-checkout-");
+  symlinkSync(join(repoRoot, "scripts"), join(checkout, "scripts"));
+  for (const [file, content] of Object.entries(options.files ?? {})) {
+    writeFileSync(join(checkout, file), content);
+  }
+  const bin = temporaryDirectory("apex-ci-bin-");
+  for (const [command, stub] of Object.entries(STUBS)) {
+    writeFileSync(join(bin, command), stub);
+    chmodSync(join(bin, command), 0o755);
+  }
+  symlinkSync(process.execPath, join(bin, "node"));
+  const calls = join(bin, "calls.log");
+  writeFileSync(calls, "");
+  const scriptFile = join(bin, "step.sh");
+  writeFileSync(scriptFile, script);
+
+  const shell = step.shell ?? job.defaults?.run?.shell ?? workflow.defaults?.run?.shell;
+  const [command, ...args] = shellCommand(shell, scriptFile);
+  const env = Object.fromEntries(
+    Object.entries({ ...job.env, ...step.env }).map(([key, value]) => [key, String(value)]),
+  );
+  const result = spawnSync(command, args, {
+    cwd: checkout,
+    env: {
+      ...env,
+      PATH: [bin, "/usr/bin", "/bin"].join(":"),
+      RUNNER_TEMP: runnerTemp,
+      STUB_CALLS: calls,
+      STUB_OUTPUT: options.output ?? "",
+      STUB_STATUS: String(options.status ?? 0),
+    },
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  if (result.error !== undefined) {
+    throw result.error;
+  }
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    runnerTemp,
+    checkout,
+    calls: readFileSync(calls, "utf8")
+      .split("\n")
+      .filter((line) => line !== ""),
+  };
+}
+
+describe("ci.yml steps, run as GitHub runs them", { timeout: 20_000 }, () => {
+  const clean = "apps/web build: ✓ Compiled successfully in 868ms\n";
+  const warning = "apps/web build: ⚠ Invalid next.config.ts options detected:\n";
+
+  it("fails the Build step when the build fails, although tee saves its output", () => {
+    // Without pipefail, the status of `pnpm build 2>&1 | tee ...` would be tee's: success.
+    const build = runStep("Build", { output: "apps/web build: Failed to compile.\n", status: 1 });
+
+    expect(build.status).not.toBe(0);
+    expect(build.calls).toEqual(["pnpm build"]);
+    expect(build.stdout).toBe("apps/web build: Failed to compile.\n");
+    expect(readFileSync(join(build.runnerTemp, "build.log"), "utf8")).toBe(build.stdout);
+  });
+
+  it("passes a clean build, and the warning check after it", () => {
+    const build = runStep("Build", { output: clean });
+    const check = runStep("Fail on build warnings", { runnerTemp: build.runnerTemp });
+
+    expect(build.status, build.stderr).toBe(0);
+    expect(check.status, check.stderr).toBe(0);
+  });
+
+  it("fails the warning check when the build printed a warning and still succeeded", () => {
+    const build = runStep("Build", { output: `${clean}${warning}` });
+    const check = runStep("Fail on build warnings", { runnerTemp: build.runnerTemp });
+
+    expect(build.status, build.stderr).toBe(0);
+    expect(check.status).toBe(1);
+    expect(check.stderr).toContain("⚠ Invalid next.config.ts options detected:");
+  });
+
+  it("validates docker-compose.yml with a copy of the .env template", () => {
+    const template = "POSTGRES_PASSWORD=\nREDIS_PASSWORD=\n";
+    const compose = runStep("Validate docker-compose.yml", { files: { ".env.example": template } });
+
+    expect(compose.status, compose.stderr).toBe(0);
+    expect(compose.calls).toEqual(["docker compose --profile * config --quiet"]);
+    expect(readFileSync(join(compose.checkout, ".env"), "utf8")).toBe(template);
+  });
+
+  it("fails when Compose prints a warning, although Compose itself succeeds", () => {
+    // Real output of Compose 5.1.3 for a variable that is not set; it exits with status 0.
+    const unsetVariable = `time="2026-10-12T19:11:59+01:00" level=warning msg="The \\"SHM_SIZE\\" variable is not set. Defaulting to a blank string."\n`;
+    const compose = runStep("Validate docker-compose.yml", {
+      files: { ".env.example": "" },
+      output: unsetVariable,
+    });
+
+    expect(compose.status).toBe(1);
+    expect(compose.stdout).toBe(unsetVariable);
+    expect(compose.stderr).toContain("CI fails on any warning");
+  });
+
+  it("fails when Compose fails, even without printing anything", () => {
+    const compose = runStep("Validate docker-compose.yml", {
+      files: { ".env.example": "" },
+      status: 15,
+    });
+
+    expect(compose.status).toBe(15);
+  });
+
+  it("fails when there is no .env template to copy", () => {
+    const compose = runStep("Validate docker-compose.yml");
+
+    expect(compose.status).not.toBe(0);
+    expect(compose.calls).toEqual([]);
   });
 });
