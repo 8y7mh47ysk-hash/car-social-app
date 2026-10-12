@@ -420,3 +420,55 @@ if [ "$name" = "\${STUB_FAIL-}" ]; then echo "$name failed"; exit 1; fi
     },
   );
 });
+
+describe("the pre-commit hook's test step in this repository", { timeout: 60_000 }, () => {
+  /**
+   * Runs `vitest related` on one file of this repository as the hook does, but only for the
+   * shared package's tests (a single quick test file) and listing each test that ran.
+   */
+  function relatedTests(file: string): Promise<Result> {
+    const args = ["related", "--run", "--passWithNoTests", "--project", "shared"];
+    return run(
+      join(rootBin, "vitest"),
+      [...args, "--reporter", "verbose", join(repoRoot, file)],
+      repoRoot,
+      hookEnv([rootBin]),
+    );
+  }
+
+  // Each of these matches a `forceRerunTriggers` glob in vitest.config.ts, wherever this checkout
+  // lives (Vitest's own defaults match nothing in a checkout inside a hidden directory).
+  it.for([
+    "package.json",
+    "pnpm-lock.yaml",
+    "apps/web/tsconfig.json",
+    "apps/web/vitest.config.ts",
+    "apps/web/vitest.setup.ts",
+    ".husky/pre-commit",
+    "commitlint.config.mjs",
+    "lint-staged.config.ts",
+  ])("runs every test when %s is staged", async (file) => {
+    const result = await relatedTests(file);
+
+    expect(result.code, result.output).toBe(0);
+    expect(result.output).toContain("|shared| src/health.test.ts");
+  });
+
+  it("runs the tests that import a staged source file", async () => {
+    const result = await relatedTests("packages/shared/src/health.ts");
+
+    expect(result.code, result.output).toBe(0);
+    expect(result.output).toContain("|shared| src/health.test.ts");
+  });
+
+  it.for(["README.md", "packages/shared/src/app-name.ts"])(
+    "runs no tests, and passes, when no test imports %s",
+    async (file) => {
+      const result = await relatedTests(file);
+
+      expect(result.code, result.output).toBe(0);
+      expect(result.output).toContain("No test files found");
+      expect(result.output).not.toContain("src/health.test.ts");
+    },
+  );
+});

@@ -107,11 +107,12 @@ None for this instruction.
 - Root `vitest.config.ts`: a `tooling` project for tests at the repository root, and
   `forceRerunTriggers` so that staging dependency, tsconfig, Vitest, hook or hook-config files
   runs every test.
-- `git-hooks.test.ts` (37 tests): 27 commit messages through the real commit-msg hook and
-  commitlint config, and 10 pre-commit scenarios that run the real lint-staged with this
+- `git-hooks.test.ts` (48 tests): 27 commit messages through the real commit-msg hook and
+  commitlint config; 10 pre-commit scenarios that run the real lint-staged with this
   repository's config in scratch git repositories, with stand-ins for ESLint, Prettier, pnpm and
   Vitest that record their calls (order, files, hiding and restoring, deleted files, fixes being
-  staged, a failure in each tool).
+  staged, a failure in each tool); and 11 runs of the real `vitest related` in this checkout,
+  which check that staging a rerun-trigger file runs every test and an unrelated file runs none.
 - README: "Git hooks" and "Commit messages" sections and a `.husky/` line in the layout.
 
 **How to verify**
@@ -121,7 +122,7 @@ Run from the repository root:
 ```sh
 pnpm install --frozen-lockfile          # a fresh install prints ". prepare$ husky"
 git config --get core.hooksPath         # prints .husky/_
-pnpm exec vitest run --project tooling  # "Tests  37 passed (37)"
+pnpm exec vitest run --project tooling  # "Tests  48 passed (48)"
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
