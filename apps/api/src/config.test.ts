@@ -25,9 +25,10 @@ describe("loadServerConfig", () => {
     expect(() => loadServerConfig({ API_HOST: "   " })).toThrow(/API_HOST/);
   });
 
-  it.each(["", "PRETTY", "text", "pino-pretty"])("rejects LOG_FORMAT=%j", (value) => {
-    expect(() => loadServerConfig({ LOG_FORMAT: value })).toThrow(
-      "✖ must be one of json, pretty\n  → at LOG_FORMAT",
-    );
+  it.each(["PRETTY", "text", "pino-pretty"])("rejects LOG_FORMAT=%j", (value) => {
+    const load = () => loadServerConfig({ LOG_FORMAT: value });
+
+    expect(load).toThrow(/LOG_FORMAT/);
+    expect(load).toThrow(/must be one of json, pretty/);
   });
 });

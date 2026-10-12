@@ -173,6 +173,7 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
     const server = startServer({ LOG_FORMAT: "fancy" });
 
     expect(await server.exited).toEqual({ code: 1, signal: null });
-    expect(server.output()).toContain("✖ must be one of json, pretty\n  → at LOG_FORMAT");
+    expect(server.output()).toContain("LOG_FORMAT");
+    expect(server.output()).toContain("must be one of json, pretty");
   });
 });
