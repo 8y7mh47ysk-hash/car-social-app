@@ -1,0 +1,7 @@
+# Settings for actionlint (https://github.com/rhysd/actionlint), which checks the workflows in
+# .github/workflows. CI does not run it; docs/BUILD_LOG.md (instruction 5) shows how to.
+self-hosted-runner:
+  # Not self-hosted: GitHub-hosted, but actionlint 1.7.12's list of GitHub's runner labels is older
+  # than Ubuntu 26.04 runners. Remove this once a release of actionlint knows the label.
+  labels:
+    - ubuntu-26.04

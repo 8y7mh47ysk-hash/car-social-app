@@ -45,6 +45,8 @@ apps/
 packages/
   shared/     @apex/shared  Zod schemas, types and helpers shared by the apps.
 infra/        Deployment and operations files (see infra/README.md).
+scripts/      Developer and CI scripts and their tests (not a workspace package).
+.github/      The CI workflow (see "Continuous integration").
 docs/         Playbook, build log, decisions, dependency register and review log.
 .husky/       Git hooks (see "Git hooks"); their tests are in git-hooks.test.ts.
 ```
@@ -96,11 +98,20 @@ Run these from the repository root.
 | `pnpm build`                    | Compiles packages/shared and the API to `dist/` and builds the web app. |
 | `pnpm start`                    | Runs the production builds. Run `pnpm build` first.                     |
 | `pnpm lint`                     | ESLint across the repository; any warning fails.                        |
-| `pnpm typecheck`                | TypeScript checks for every package and the root config files.          |
+| `pnpm typecheck`                | Type-checks every package, the root files, `infra/` and `scripts/`.     |
 | `pnpm test`                     | Every Vitest suite in one run.                                          |
 | `pnpm format`                   | Formats all files with Prettier.                                        |
 | `pnpm format:check`             | Checks formatting without changing files.                               |
+| `pnpm docker:up`                | Starts PostgreSQL and Redis in Docker and waits until both are healthy. |
+| `pnpm docker:down`              | Stops and removes those containers; their data volumes are kept.        |
+| `pnpm docker:logs`              | Follows their logs (`pnpm docker:logs postgres` for one); Ctrl+C stops. |
+| `pnpm db:migrate`               | Not available yet (instruction 26): prints a notice and fails.          |
+| `pnpm db:seed`                  | Not available yet (instruction 26): prints a notice and fails.          |
 | `pnpm --filter <package> <cmd>` | Runs one package's script, for example `pnpm --filter @apex/api test`.  |
+
+The `docker:*` scripts first check that Docker, its Compose plugin and its engine are ready, and
+say what to do if one is not. Docker Compose reads its passwords from the root `.env` file (see
+[infra/README.md](infra/README.md)). `pnpm run` with no arguments lists every script.
 
 ## Configuration
 
@@ -117,6 +128,27 @@ in a gitignored `.env` file next to the app: copy the app's template to create o
 Variables set in the shell win over the files. `WEB_HOST` and `WEB_PORT` work only from the
 shell, because Next.js opens its port before it reads `.env` files. The templates explain each
 variable and the rules for adding one; the design is in [docs/DECISIONS.md](docs/DECISIONS.md).
+
+## Continuous integration
+
+GitHub Actions runs [.github/workflows/ci.yml](.github/workflows/ci.yml) for every push to `main`
+and every pull request. It installs the locked dependencies (`pnpm install --frozen-lockfile`,
+with pnpm's package store cached between runs), runs `pnpm peers check`, `pnpm format:check`,
+`pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build`, and validates `docker-compose.yml`.
+Each check runs even when an earlier one fails, so one run lists every problem.
+
+CI fails on any warning: ESLint warnings, unformatted files, unmet peer dependencies, warnings in
+the build output and errors that did not stop the build (Next.js prints both but still finishes
+the build), and Docker Compose warnings. [docs/DECISIONS.md](docs/DECISIONS.md) lists exactly
+what is enforced, what is not and why. To run the same checks before pushing:
+
+```sh
+pnpm peers check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test
+pnpm build > build.log 2>&1 && node scripts/check-build-warnings.ts build.log
+```
+
+The second line saves the build's output in `build.log` (git ignores `*.log` files) and runs CI's
+check on it. If the build itself fails, the reason is in `build.log`.
 
 ## How the packages fit together
 

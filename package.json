@@ -17,7 +17,12 @@
     "typecheck": "tsc --project tsconfig.json && pnpm --recursive typecheck",
     "test": "vitest run",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "db:migrate": "echo 'db:migrate: not available yet. Database migrations arrive with playbook instruction 26.' >&2; exit 1",
+    "db:seed": "echo 'db:seed: not available yet. The seed script arrives with playbook instruction 26.' >&2; exit 1",
+    "docker:up": "node scripts/check-docker.ts && docker compose up --detach --wait",
+    "docker:down": "node scripts/check-docker.ts && docker compose down",
+    "docker:logs": "node scripts/check-docker.ts && docker compose logs --follow"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",

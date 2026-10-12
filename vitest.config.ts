@@ -7,13 +7,14 @@ const root = fileURLToPath(new URL(".", import.meta.url)).replace(/[*?!+@()[\]{}
 
 // `pnpm test` runs every package's tests in one Vitest process. Each package keeps its own
 // vitest.config.ts (environment, include patterns), so `pnpm --filter <package> test` also works.
-// infra/ is not a package; its tests run only from here.
+// infra/ and scripts/ are not packages; their tests run only from here.
 export default defineConfig({
   test: {
     projects: [
       "apps/*/vitest.config.ts",
       "packages/*/vitest.config.ts",
       "infra/vitest.config.ts",
+      "scripts/vitest.config.ts",
       // Tests for the repository's own tooling and rules (the git hooks, the .gitignore rules
       // for env files), next to the files they test.
       { test: { name: "tooling", include: ["*.test.ts"] } },
