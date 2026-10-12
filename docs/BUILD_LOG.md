@@ -147,3 +147,114 @@ instructions make; nothing needs deciding now.
   them may refine them and must update the document in the same change.
 - Nothing in CI renders the diagrams; the check above is manual. In sequence diagrams a bare `#`
   silently cuts a label while rendering still succeeds, so those diagrams write `#35;` instead.
+
+## #8 - Structured logging with request IDs
+
+**What changed**
+
+- The API logs through Fastify's built-in pino logger, set up in `apps/api/src/lib/logger.ts`:
+  one JSON object per line with an ISO 8601 time. `LOG_FORMAT=pretty` prints readable lines for a
+  terminal instead, through pino-pretty (a development dependency).
+- Request IDs (`apps/api/src/lib/request-id.ts`): a well-formed incoming `x-request-id` (8 to 64
+  letters, digits, `-` or `_`) is reused and anything else is replaced by a new UUID. Every
+  response sends the ID back in `x-request-id`, including the 400 and 414 responses that
+  Fastify's router sends for malformed URLs.
+- Request context (`apps/api/src/lib/request-context.ts`): an AsyncLocalStorage context entered in
+  the app's first `onRequest` hook, so every line logged while a request is handled carries its
+  ID as `reqId`, including lines from code that is never handed the request.
+- Redaction (`apps/api/src/lib/redact.ts` and the logger): the values of sensitive keys
+  (passwords, secrets, API keys, tokens, cookies, authorization headers, session IDs and similar)
+  become `[Redacted]` at any depth; URL credentials, query strings and fragments are hidden in
+  every string; strings are cut to 8192 characters and request URLs to 256. Request lines hold
+  only the method, the shortened URL and the client's address.
+- `buildApp` (`apps/api/src/app.ts`) takes `logLevel` (default `silent`, so tests stay quiet),
+  `logFormat` (default `json`) and `logDestination` (for tests) instead of Fastify's `logger`
+  option. `apps/api/src/config.ts` reads `LOG_FORMAT` (`json` or `pretty`, default `json`). The
+  entrypoint logs at `info` until instruction 4's `LOG_LEVEL` is merged.
+- `eslint.config.mjs`: `console` is an error in `apps/api/src` except `server.ts`, so every line
+  goes through the logger.
+- Tests: unit tests for each module; `apps/api/src/logging.test.ts` for the whole app (every line
+  of a request carries the same ID, including a service's line written without the request;
+  concurrent requests; a body that arrives in pieces over a real connection; two requests on one
+  keep-alive connection; the header sent back; malformed IDs replaced; router errors, 404s and
+  500s; redaction of headers, bodies, query strings, cookies and a malformed request's raw bytes;
+  the pretty format); and entrypoint tests that run the real server.
+
+**How to verify**
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter @apex/api test   # all pass: "Tests  185 passed (185)" on this branch alone
+pnpm lint                      # exits with code 0
+pnpm typecheck                 # shared, api and web each report "Done"
+```
+
+Run the API in terminal 1 and watch its log:
+
+```sh
+pnpm --filter @apex/api dev
+```
+
+In terminal 2:
+
+```sh
+curl -si -H 'x-request-id: owner-check-0001' 'http://127.0.0.1:4000/health?token=secret-value'
+curl -si -H 'x-request-id: bad id' http://127.0.0.1:4000/health
+curl -si http://127.0.0.1:4000/%zz
+```
+
+- The first `curl` shows `x-request-id: owner-check-0001`. In terminal 1, the `incoming request`
+  and `request completed` lines both have `"reqId":"owner-check-0001"`, the URL is logged as
+  `"/health?[Redacted]"`, and `secret-value` appears nowhere in the log.
+- The second shows a new UUID in `x-request-id`; the malformed ID is neither used nor logged.
+- The third returns `400 Bad Request` with an `x-request-id` header, and terminal 1 shows an
+  `incoming request` line and an error line with that ID.
+
+Press Ctrl+C in terminal 1 (the API logs `"msg":"shutting down"`), then start it with readable
+logs and repeat a `curl`:
+
+```sh
+LOG_FORMAT=pretty pnpm --filter @apex/api dev
+```
+
+Each entry is now a line such as `[00:30:13.189] INFO: incoming request {"reqId":"...", ...}`,
+with an error's details on the lines below it. An invalid format stops the API at startup:
+
+```sh
+LOG_FORMAT=fancy node apps/api/src/server.ts; echo "exit code $?"
+```
+
+It prints an error that names `LOG_FORMAT` and the allowed values (`json`, `pretty`), then
+`exit code 1`.
+
+**Dependencies added**
+
+`pino-pretty`, a development dependency of `apps/api`, for `LOG_FORMAT=pretty`. Why, and the
+alternatives, are in `docs/DEPENDENCIES.md`. pino itself is Fastify's own dependency.
+
+**Owner actions**
+
+None.
+
+**Notes & limitations**
+
+- Pretty output is opt-in: set `LOG_FORMAT=pretty` in the shell or in `apps/api/.env`. It needs
+  the development dependencies, so an install without them can only log JSON; asked for `pretty`
+  there, the API refuses to start and says to use `json`.
+- Until instruction 4's environment loader is merged, the API always logs at `info`; with it,
+  `LOG_LEVEL` sets the level.
+- Clients choose their request IDs when well formed, so an ID is a label for finding log lines,
+  never something to trust.
+- Two responses carry no `x-request-id`: the bare 400 that Node.js sends for bytes it cannot parse
+  as HTTP (Fastify logs it at trace level), and the 503 that Fastify sends to a request arriving
+  on an open connection during shutdown (its log line has the ID).
+- Redaction works on key names and URL parts. A secret written into a message's text cannot be
+  recognised, so never put one there.
+- Request lines record the client's IP address, which is personal data under UK GDPR; the privacy
+  policy (#114) must cover logs.
+- Redaction parses and re-serialises each line: about 3.3 µs per line instead of 0.5 µs, measured
+  on this Mac, which is negligible next to real routes.
+- Fastify logs client errors (4xx) at info level with a stack trace. Instruction 27's global error
+  handler should decide how errors are logged.
+- Only the API is covered: Next.js's own server output is not structured, and the web app does
+  not yet pass request IDs on to the API (with the typed API client, #29).

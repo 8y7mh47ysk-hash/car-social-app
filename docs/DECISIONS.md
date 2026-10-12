@@ -322,3 +322,115 @@ Keep entries brief. Details belong in code comments and the build log.
   unchanged.
 - Trade-offs: the "Superseded by" line is the one edit an old entry can get; in return, a reader
   sees at the entry itself that it no longer holds instead of searching the rest of the log.
+
+### API logging: Fastify's own pino logger, JSON lines, pretty output only on request
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Echo
+- Context: instruction 8 asks for structured logging with pino. Fastify already creates a pino
+  logger, with a child logger per request. The owner reads logs in a terminal while developing,
+  and through `docker compose logs` and monitoring in production.
+- Decision: `buildApp` configures Fastify's pino logger (pino is not a direct dependency): one
+  JSON object per line with an ISO 8601 UTC time. The level comes from `buildApp`'s options
+  (`LOG_LEVEL` through instruction 4's loader) and defaults to `silent`, so tests stay quiet; tests
+  pass an in-memory `logDestination`. `LOG_FORMAT` (`json` by default, or `pretty`) chooses the
+  output: `pretty` formats each finished, already redacted line with pino-pretty's synchronous
+  `prettyFactory`. pino-pretty is a development dependency imported only for that format; without
+  it the API refuses to start and says to use `json`.
+- Trade-offs: pretty output is opt-in (`LOG_FORMAT=pretty pnpm dev`, or a line in
+  `apps/api/.env`), so `pnpm dev` prints JSON unless asked; choosing the format from something
+  implicit such as a TTY could turn pretty logs on in production. Rejected: piping into the
+  pino-pretty CLI (the shell then reports pino-pretty's exit status, not the server's), and
+  pino-pretty's transport (a worker thread) or stream API (an extra stream pipeline), which work
+  but add parts. Production images should install production dependencies only (#102), so pretty
+  output cannot be switched on there by mistake.
+
+### Request IDs: a validated x-request-id or a new UUID, sent back on every response
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Echo
+- Context: every log line of a request needs its ID. Reusing the ID of an upstream hop (later the
+  web app's server-side calls, or a proxy) links their logs, but the value comes from the client
+  and ends up in logs and in a response header.
+- Decision: Fastify's `requestIdHeader` is off, because it trusts any value. `genReqId` reuses
+  `x-request-id` only if it matches `^[A-Za-z0-9_-]{8,64}$` (UUIDs, ULIDs, nanoids, hex IDs;
+  Node.js joins repeated headers with ", ", so those fail) and otherwise uses `randomUUID()`. The
+  app's first `onRequest` hook sends the ID back in `x-request-id`, and a `frameworkErrors` handler
+  does the same for the 400 and 414 responses that Fastify's router sends before any hook runs.
+  The log key stays Fastify's `reqId`, set through the `logController` option because the
+  top-level `requestIdLogLabel` option is deprecated in Fastify 5.12.
+- Trade-offs: a client can send any well-formed ID, even one another request used, so an ID is a
+  label for finding log lines, never a basis for authorisation, rate limits or idempotency (#36
+  needs its own keys). Two responses still go out without the header, both sent before any hook
+  can run: Node.js's bare 400 for bytes that are not HTTP, and Fastify's 503 for a request that
+  arrives on an open connection during shutdown (its log line has the ID).
+
+### Request context: a small AsyncLocalStorage module, not @fastify/request-context
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Echo
+- Context: code that never sees the request, such as a service given `app.log` at startup, and
+  later jobs and the AI gateway, must still log the request's ID.
+- Decision: `apps/api/src/lib/request-context.ts` (about 40 lines) holds an `AsyncLocalStorage` of
+  `{ requestId }`. The app's first `onRequest` hook runs the rest of the request inside it with
+  `run()`, and the logger adds the ID to any line that lacks one (see the next entry). Fastify 5
+  finishes body parsing in an `AsyncResource` created when parsing starts, so the context survives
+  a body that arrives in pieces. Tests check this over a real connection, with concurrent
+  requests, and with two requests on one keep-alive connection.
+- Trade-offs: @fastify/request-context 7 does the same with a dependency, a store typed through
+  module augmentation, and a `preValidation` hook that re-enters the context, which Fastify 5's
+  parser makes unnecessary; revisit it if the context grows (for example the signed-in user,
+  #40). pino's `mixin` option was rejected: it adds its keys to every line, so lines from
+  `request.log`, which already bind `reqId`, would hold the key twice (checked with pino 10).
+
+### Redact every log line after serialisation, in pino's streamWrite hook
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Echo
+- Context: no secret may reach the logs (Master Context; instruction 8 names authorization,
+  cookies, passwords and tokens). pino's `redact` option takes fixed paths with one `*` per level,
+  so it misses a secret at an unexpected depth (an HTTP client's error config, a whole object
+  logged carelessly) and cannot look inside strings. pino's `formatters.log` runs before the
+  serializers, so it sees raw errors and requests rather than what is written.
+- Decision: pino's `hooks.streamWrite` (`finishLogLine` in `apps/api/src/lib/logger.ts`) parses
+  each finished line and replaces the value of every sensitive key at any depth (keys compared in
+  lowercase without separators: anything containing password, passphrase, secret, credential, or
+  an API, private, encryption, signing or master key, or a recovery code; anything ending in
+  token(s), jwt, authorization, cookie(s), session ID, otp or signature; exactly auth or
+  rawPacket). It hides URL credentials, query strings and fragments in every string, the message
+  included, cuts strings to 8192 characters, and adds the running request's ID to a line that has
+  none. A line that does not parse is replaced by an error line, so nothing unredacted is written.
+  ESLint forbids `console` in `apps/api/src` (except `server.ts`, which may print before the
+  logger exists), so every line takes this path.
+- Trade-offs: parsing and re-serialising each line costs about 3.3 µs instead of pino's 0.5 µs
+  (measured on this Apple M5), about 5.5 µs per request for Fastify's two request lines: nothing
+  next to a real route, but worth revisiting if profiling (#119) says otherwise. Free text cannot
+  be checked, so code must never put a secret in a message. Key names decide what is hidden: a list
+  of AI token counts must be named like `promptTokenCount`, because "tokens" is sensitive.
+
+### Request lines hold method, shortened path and client address, never the query string
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Echo
+- Context: query strings carry secrets (password-reset links, OAuth callbacks, signed storage
+  URLs). Fastify's default request serializer logs the full URL, the client-supplied Host and
+  Accept-Version headers and the client's port, and its 404 line repeats the URL.
+- Decision: the `req` serializer logs `{ method, url, remoteAddress }`, with the query string and
+  fragment replaced by `?[Redacted]` and the URL cut to 256 characters. The 404 line says "route
+  not found" (a `LogController` override), because the request's first line already has the URL.
+  Headers and bodies are never logged by default.
+- Trade-offs: to debug a list endpoint's filters (#30), its handler must log the validated query on
+  purpose, where key-based redaction still applies. The client IP address is personal data under
+  UK GDPR, so the privacy policy and its retention periods must cover logs (#114). Behind the
+  tunnel `remoteAddress` is cloudflared's until the API trusts the address the tunnel forwards,
+  which rate limiting (#44) needs anyway.
+
+### LOG_FORMAT is an API setting, added to instruction 4's config module
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Echo
+- Context: the team contract gives the API's environment module to instruction 4 and names only
+  `LOG_LEVEL` for logging, but the pretty switch must be a validated setting too: apps read the
+  environment only through their env module.
+- Decision: this branch adds `LOG_FORMAT` (`json` or `pretty`, default `json`) to
+  `apps/api/src/config.ts` and passes it to `buildApp` as `logFormat`, next to the `logLevel` and
+  `logDestination` options the contract names. Until instruction 4's loader is merged, the
+  entrypoint passes `logLevel: "info"`, the level Fastify used before.
+- Trade-offs: a small, expected merge conflict with instruction 4 instead of an unvalidated read
+  of `process.env`. The merge adds `LOG_FORMAT` to the loader's schema, `ApiConfig` and
+  `apps/api/.env.example`, and the entrypoint calls
+  `buildApp({ logLevel: config.logLevel, logFormat: config.logFormat })`.
