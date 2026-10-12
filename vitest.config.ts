@@ -21,10 +21,10 @@ export default defineConfig({
     ],
     // When a changed file matches one of these, `vitest related` (run by the pre-commit hook) and
     // watch mode run every test instead of only the tests that import it: these files can change
-    // the result of any test, or tests run them as commands, which Vitest cannot trace. The globs
-    // are absolute because Vitest matches them against absolute paths, and "**" never enters a
-    // hidden directory, so relative globs (and Vitest's defaults) match nothing in a checkout
-    // inside one, such as a git worktree under ~/.claude/.
+    // the result of any test, or tests read them or run them as commands, which Vitest cannot
+    // trace. The globs are absolute because Vitest matches them against absolute paths, and "**"
+    // never enters a hidden directory, so relative globs (and Vitest's defaults) match nothing in
+    // a checkout inside one, such as a git worktree under ~/.claude/.
     forceRerunTriggers: [
       `${root}**/package.json`,
       `${root}pnpm-{lock,workspace}.yaml`,
@@ -33,6 +33,13 @@ export default defineConfig({
       `${root}**/vitest.setup.*`,
       `${root}.husky/*`,
       `${root}{commitlint,lint-staged}.config.*`,
+      // Read from disk or through git by infra/compose.test.ts (the compose file and the root
+      // template), env-files.test.ts (the ignore rules and the templates) and
+      // scripts/ci-workflow.test.ts (the workflows).
+      `${root}docker-compose.yml`,
+      `${root}**/.env.example`,
+      `${root}**/.gitignore`,
+      `${root}.github/workflows/*`,
     ],
   },
 });
