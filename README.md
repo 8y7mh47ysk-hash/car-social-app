@@ -83,7 +83,7 @@ Run these from the repository root.
 | `pnpm build`                    | Compiles packages/shared and the API to `dist/` and builds the web app. |
 | `pnpm start`                    | Runs the production builds. Run `pnpm build` first.                     |
 | `pnpm lint`                     | ESLint across the repository; any warning fails.                        |
-| `pnpm typecheck`                | TypeScript checks for every package and the root config files.          |
+| `pnpm typecheck`                | TypeScript checks for every package, root config files and `scripts/`.  |
 | `pnpm test`                     | Every Vitest suite in one run.                                          |
 | `pnpm format`                   | Formats all files with Prettier.                                        |
 | `pnpm format:check`             | Checks formatting without changing files.                               |
