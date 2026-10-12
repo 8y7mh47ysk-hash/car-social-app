@@ -123,6 +123,7 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
       API_HOST: "http://host-value",
       API_PORT: "port-value",
       LOG_LEVEL: "level-value",
+      LOG_FORMAT: "format-value",
     });
 
     expect(await server.exited).toEqual({ code: 1, signal: null });
@@ -133,6 +134,7 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
         "  - API_HOST: must be an IP address such as 127.0.0.1, or a hostname such as localhost",
         "  - API_PORT: must be a whole number from 0 to 65535",
         "  - LOG_LEVEL: must be one of fatal, error, warn, info, debug, trace, silent",
+        "  - LOG_FORMAT: must be one of json, pretty",
         "Set them in apps/api/.env (see apps/api/.env.example) or in the environment.",
         "",
       ].join("\n"),
