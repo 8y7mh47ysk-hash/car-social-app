@@ -351,7 +351,8 @@ Entry template:
 - Context: without Docker, `docker compose` fails with "docker: command not found" and pnpm's
   generic error, and an installed Docker Desktop that is not running is a common case on a Mac.
 - Decision: each script is `node scripts/check-docker.ts && docker compose <arguments>`. The
-  check runs `docker compose version` (client and Compose v2 plugin) and
+  check runs `docker compose version` (the client and its Compose plugin; the current Compose is
+  v5, and the legacy `docker-compose` v1 command is not used) and
   `docker version --format {{.Server.Version}}` (engine reachable), each with a 20-second limit,
   and explains how to fix the first problem it finds. Compose then runs straight from the shell,
   so its output, Ctrl+C and exit status are exactly as if typed by hand. `docker:up` uses

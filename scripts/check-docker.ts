@@ -1,8 +1,8 @@
 // Runs before every docker:* script in package.json (instruction 7). It checks that Docker is ready
-// to run Docker Compose (installed, with the Compose v2 plugin and a running engine) and, when it
-// is not, explains what to do instead of leaving the shell to fail with "docker: command not
-// found". Exits with status 1 after printing the problem; prints nothing and exits with status 0
-// when Docker is ready.
+// to run Docker Compose (installed, with the Compose plugin and a running engine) and, when it is
+// not, explains what to do instead of leaving the shell to fail with "docker: command not found".
+// Exits with status 1 after printing the problem; prints nothing and exits with status 0 when
+// Docker is ready.
 //
 // Usage, from the repository root: node scripts/check-docker.ts
 
@@ -28,13 +28,14 @@ export const DOCKER_PROBLEMS = {
     "https://docs.docker.com/get-started/get-docker/",
   ],
   composeMissing: [
-    "Docker is installed, but Docker Compose v2 (the `docker compose` command) is missing or broken.",
+    "Docker is installed, but its Compose plugin (the `docker compose` command) is missing or broken.",
     "Install or repair the Compose plugin: https://docs.docker.com/compose/install/",
   ],
   notRunning: [
     "Docker is installed, but its engine is not running, or this user cannot reach it.",
     "Start Docker Desktop or OrbStack (macOS), or Docker Engine (Linux: sudo systemctl start docker),",
-    "then try again.",
+    "then try again. On Linux, if Docker works only with sudo, see",
+    "https://docs.docker.com/engine/install/linux-postinstall/",
   ],
 } as const satisfies Record<string, readonly string[]>;
 
@@ -47,7 +48,7 @@ const TIMEOUT_MS = 20_000;
 const runQuietly: RunCommand = (command, args) =>
   spawnSync(command, args, { stdio: "ignore", timeout: TIMEOUT_MS });
 
-/** Checks, in order, that Docker is installed, has Compose v2 and has a running engine. */
+/** Checks, in order, that Docker is installed, has the Compose plugin and has a running engine. */
 export function findDockerProblem(run: RunCommand = runQuietly): DockerProblem | undefined {
   // Needs only the client and the Compose plugin, not the engine.
   const compose = run("docker", ["compose", "version"]);

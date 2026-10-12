@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { findDockerProblem, type CommandResult } from "./check-docker.ts";
+import { DOCKER_PROBLEMS, findDockerProblem, type CommandResult } from "./check-docker.ts";
 
 const ok: CommandResult = { status: 0 };
 const failed: CommandResult = { status: 1 };
@@ -63,4 +63,13 @@ describe("findDockerProblem", () => {
 
     expect(findDockerProblem(docker.run)).toBe("notRunning");
   });
+});
+
+describe("DOCKER_PROBLEMS", () => {
+  it.each(Object.entries(DOCKER_PROBLEMS))(
+    "says how to fix %s, with a link to Docker's documentation",
+    (_problem, lines) => {
+      expect(lines.join(" ")).toMatch(/https:\/\/docs\.docker\.com\/\S+/u);
+    },
+  );
 });

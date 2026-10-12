@@ -184,7 +184,8 @@ in `docs/DEPENDENCIES.md`.
   - `db:migrate` and `db:seed`: placeholders that print "not available yet" and exit with status
     1 until instruction 26 adds migrations and seed data.
 - `scripts/check-docker.ts` runs before each `docker:*` script. It explains what to do when
-  Docker is not installed, has no Compose v2 plugin or its engine is not running.
+  Docker is not installed, has no Compose plugin (`docker compose`) or its engine is not running
+  or not reachable, with a link to Docker's documentation for each case.
 - Tests: `scripts/check-docker.test.ts`, and `scripts/package-scripts.test.ts`, which runs the
   real `package.json` scripts the way pnpm does against a stand-in `docker` command.
   `scripts/vitest.config.ts` makes them a Vitest project of the root config; the root
