@@ -1,29 +1,50 @@
+import { envHostSchema, envPortSchema, parseEnv, type EnvSource } from "@apex/shared";
+import type { LogLevel } from "fastify";
 import { z } from "zod";
 
-// Instruction 4 replaces this with the full typed environment loader. Until then the API only
-// needs to know where to listen, so parallel checkouts can run on different ports.
-const serverEnvSchema = z.object({
-  API_HOST: z.string().trim().min(1).default("127.0.0.1"),
-  API_PORT: z
-    .string()
-    .regex(/^\d{1,5}$/, "must be a port number from 0 to 65535")
-    .transform(Number)
-    .pipe(z.number().max(65_535, "must be a port number from 0 to 65535"))
-    .default(4000),
+/** The log levels pino understands, from most to least severe; "silent" turns logging off. */
+const LOG_LEVELS = [
+  "fatal",
+  "error",
+  "warn",
+  "info",
+  "debug",
+  "trace",
+  "silent",
+] as const satisfies readonly LogLevel[];
+
+/**
+ * Every environment variable the API reads. Each one has a safe default today; the first
+ * variable without one (for example the database URL in Phase 2) makes startup fail until it
+ * is set. Document every variable in apps/api/.env.example.
+ */
+const apiEnvSchema = z.object({
+  API_HOST: envHostSchema.default("127.0.0.1"),
+  API_PORT: envPortSchema.default(4000),
+  LOG_LEVEL: z
+    .enum(LOG_LEVELS, { error: `must be one of ${LOG_LEVELS.join(", ")}` })
+    .default("info"),
 });
 
-export interface ServerConfig {
-  /** Interface to bind. Defaults to loopback so the API is never exposed by accident. */
+/** The API's settings, validated. The entrypoint reads them once, at startup. */
+export interface ApiConfig {
+  /** Interface to listen on. Defaults to loopback so the API is never exposed by accident. */
   readonly host: string;
-  /** TCP port. 0 asks the OS for a free port (used by tests). */
+  /** TCP port. 0 asks the operating system for a free port (used by tests). */
   readonly port: number;
+  /** The lowest log level written. */
+  readonly logLevel: LogLevel;
 }
 
-/** Reads the listen address from environment variables; throws if a value is invalid. */
-export function loadServerConfig(env: Readonly<Record<string, string | undefined>>): ServerConfig {
-  const result = serverEnvSchema.safeParse(env);
-  if (!result.success) {
-    throw new Error(`Invalid API environment:\n${z.prettifyError(result.error)}`);
-  }
-  return { host: result.data.API_HOST, port: result.data.API_PORT };
+/**
+ * Reads the API's settings from environment variables, such as `process.env`.
+ *
+ * @throws {EnvValidationError} naming every missing or invalid variable, never their values.
+ */
+export function loadConfig(env: EnvSource): ApiConfig {
+  const values = parseEnv(apiEnvSchema, env, {
+    app: "the API",
+    hint: "Set them in apps/api/.env (see apps/api/.env.example) or in the environment.",
+  });
+  return { host: values.API_HOST, port: values.API_PORT, logLevel: values.LOG_LEVEL };
 }

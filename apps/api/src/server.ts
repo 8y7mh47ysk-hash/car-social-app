@@ -1,11 +1,31 @@
+import { EnvValidationError } from "@apex/shared";
+
 import { buildApp } from "./app.ts";
-import { loadServerConfig } from "./config.ts";
+import { loadConfig, type ApiConfig } from "./config.ts";
 
 /** How long in-flight requests get to finish after SIGINT/SIGTERM before the process exits. */
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
-const config = loadServerConfig(process.env);
-const app = await buildApp({ logger: true });
+/**
+ * Reads the settings from the environment, which only this entrypoint touches. If a variable is
+ * missing or invalid, prints every problem (never a value) and exits with code 1 before anything
+ * starts. The message goes straight to stderr because the logger is configured from these
+ * settings.
+ */
+function loadConfigOrExit(): ApiConfig {
+  try {
+    return loadConfig(process.env);
+  } catch (error) {
+    if (!(error instanceof EnvValidationError)) {
+      throw error;
+    }
+    console.error(error.message);
+    process.exit(1);
+  }
+}
+
+const config = loadConfigOrExit();
+const app = await buildApp({ logger: { level: config.logLevel } });
 
 function shutDown(signal: NodeJS.Signals): void {
   app.log.info({ signal }, "shutting down");

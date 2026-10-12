@@ -15,7 +15,8 @@ coverage/
 playwright-report/
 test-results/
 
-# Environment files: only templates are committed
+# Environment files hold settings and secrets: only the .env.example templates are committed.
+# env-files.test.ts checks these rules.
 .env
 .env.*
 !.env.example

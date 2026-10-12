@@ -53,6 +53,24 @@ export default defineConfig(
     },
   },
 
+  // Application code reads environment variables only through its app's env module, which
+  // validates them with Zod: apps/api/src/server.ts and apps/web/src/env/ (instruction 4). Shared
+  // code never reads them, because it also runs in browsers.
+  {
+    files: ["apps/*/src/**", "packages/*/src/**"],
+    ignores: ["apps/api/src/server.ts", "apps/web/src/env/public.ts", "apps/web/src/env/server.ts"],
+    rules: {
+      "no-restricted-properties": [
+        "error",
+        {
+          object: "process",
+          property: "env",
+          message: "Read environment variables through the app's env module (docs/DECISIONS.md).",
+        },
+      ],
+    },
+  },
+
   // Plain JavaScript config files are not part of any tsconfig, so skip type-aware rules.
   {
     files: ["**/*.{js,mjs,cjs}"],
