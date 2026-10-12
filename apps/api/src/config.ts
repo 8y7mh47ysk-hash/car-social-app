@@ -2,6 +2,8 @@ import { envHostSchema, envPortSchema, parseEnv, type EnvSource } from "@apex/sh
 import type { LogLevel } from "fastify";
 import { z } from "zod";
 
+import { LOG_FORMATS, type LogFormat } from "./lib/logger.ts";
+
 /** The log levels pino understands, from most to least severe; "silent" turns logging off. */
 const LOG_LEVELS = [
   "fatal",
@@ -24,6 +26,9 @@ const apiEnvSchema = z.object({
   LOG_LEVEL: z
     .enum(LOG_LEVELS, { error: `must be one of ${LOG_LEVELS.join(", ")}` })
     .default("info"),
+  LOG_FORMAT: z
+    .enum(LOG_FORMATS, { error: `must be one of ${LOG_FORMATS.join(", ")}` })
+    .default("json"),
 });
 
 /** The API's settings, validated. The entrypoint reads them once, at startup. */
@@ -34,6 +39,8 @@ export interface ApiConfig {
   readonly port: number;
   /** The lowest log level written. */
   readonly logLevel: LogLevel;
+  /** "json" (the default) for production and log tools, "pretty" for a developer's terminal. */
+  readonly logFormat: LogFormat;
 }
 
 /**
@@ -46,5 +53,10 @@ export function loadConfig(env: EnvSource): ApiConfig {
     app: "the API",
     hint: "Set them in apps/api/.env (see apps/api/.env.example) or in the environment.",
   });
-  return { host: values.API_HOST, port: values.API_PORT, logLevel: values.LOG_LEVEL };
+  return {
+    host: values.API_HOST,
+    port: values.API_PORT,
+    logLevel: values.LOG_LEVEL,
+    logFormat: values.LOG_FORMAT,
+  };
 }

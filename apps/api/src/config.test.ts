@@ -17,24 +17,33 @@ function configError(env: Readonly<Record<string, string>>): EnvValidationError 
 }
 
 describe("loadConfig", () => {
-  it("listens on loopback port 4000 and logs at info level by default", () => {
-    expect(loadConfig({})).toEqual({ host: "127.0.0.1", port: 4000, logLevel: "info" });
-  });
-
-  it("treats empty values as not set", () => {
-    expect(loadConfig({ API_HOST: "", API_PORT: "", LOG_LEVEL: "" })).toEqual({
+  it("listens on loopback port 4000 and logs JSON at info level by default", () => {
+    expect(loadConfig({})).toEqual({
       host: "127.0.0.1",
       port: 4000,
       logLevel: "info",
+      logFormat: "json",
     });
   });
 
-  it("reads API_HOST, API_PORT and LOG_LEVEL", () => {
-    expect(loadConfig({ API_HOST: "0.0.0.0", API_PORT: "4010", LOG_LEVEL: "debug" })).toEqual({
-      host: "0.0.0.0",
-      port: 4010,
-      logLevel: "debug",
+  it("treats empty values as not set", () => {
+    expect(loadConfig({ API_HOST: "", API_PORT: "", LOG_LEVEL: "", LOG_FORMAT: "" })).toEqual({
+      host: "127.0.0.1",
+      port: 4000,
+      logLevel: "info",
+      logFormat: "json",
     });
+  });
+
+  it("reads API_HOST, API_PORT, LOG_LEVEL and LOG_FORMAT", () => {
+    expect(
+      loadConfig({
+        API_HOST: "0.0.0.0",
+        API_PORT: "4010",
+        LOG_LEVEL: "debug",
+        LOG_FORMAT: "pretty",
+      }),
+    ).toEqual({ host: "0.0.0.0", port: 4010, logLevel: "debug", logFormat: "pretty" });
   });
 
   it("accepts port 0 so the OS can pick a free port", () => {
@@ -98,5 +107,11 @@ describe("loadConfig", () => {
     expect(loadConfig({ HOST: "bad host", PORT: "bad", NODE_ENV: "production" })).toEqual(
       loadConfig({}),
     );
+  });
+
+  it.each(["PRETTY", "text", "pino-pretty"])("rejects LOG_FORMAT=%j", (value) => {
+    expect(configError({ LOG_FORMAT: value }).issues).toEqual([
+      { variable: "LOG_FORMAT", problem: "must be one of json, pretty" },
+    ]);
   });
 });

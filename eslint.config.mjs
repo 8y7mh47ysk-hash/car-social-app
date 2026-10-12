@@ -77,6 +77,15 @@ export default defineConfig(
     extends: [tseslint.configs.disableTypeChecked],
   },
 
+  // The API logs only through its pino logger, which adds request IDs and redacts secrets
+  // (instruction 8); console output would skip both. The entrypoint is exempt because it may have
+  // to print before the logger exists, for example when the environment is invalid.
+  {
+    files: ["apps/api/src/**"],
+    ignores: ["apps/api/src/server.ts"],
+    rules: { "no-console": "error" },
+  },
+
   // Last: turn off every rule that would fight Prettier's formatting.
   prettier,
 );

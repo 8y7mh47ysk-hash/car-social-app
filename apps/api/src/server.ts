@@ -25,7 +25,7 @@ function loadConfigOrExit(): ApiConfig {
 }
 
 const config = loadConfigOrExit();
-const app = await buildApp({ logger: { level: config.logLevel } });
+const app = await buildApp({ logLevel: config.logLevel, logFormat: config.logFormat });
 
 function shutDown(signal: NodeJS.Signals): void {
   app.log.info({ signal }, "shutting down");
