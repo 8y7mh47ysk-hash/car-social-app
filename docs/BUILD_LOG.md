@@ -174,8 +174,9 @@ resolution commit passes the hooks and is still a merge commit with both parents
 **Dependencies added**
 
 `husky`, `lint-staged`, `@commitlint/cli` and `@commitlint/config-conventional`, as root
-development dependencies (57 packages in the lockfile in total, 51 of them commitlint's; none has
-an install script). Reasons and alternatives are in `docs/DEPENDENCIES.md`.
+development dependencies. They add 57 packages to the lockfile: husky; lint-staged and 2 of its
+dependencies that were not there yet; and 53 for commitlint. None has an install script. Reasons
+and alternatives are in `docs/DEPENDENCIES.md`.
 
 **Owner actions**
 
