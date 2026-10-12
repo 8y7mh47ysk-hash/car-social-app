@@ -1,5 +1,7 @@
 import {
   LogController,
+  type FastifyError,
+  type FastifyReply,
   type FastifyRequest,
   type FastifyServerOptions,
   type LogLevel,
@@ -7,7 +9,7 @@ import {
 
 import { REDACTED, isSensitiveKey, redactUrls } from "./redact.ts";
 import { getRequestContext } from "./request-context.ts";
-import { requestIdFor } from "./request-id.ts";
+import { REQUEST_ID_HEADER, requestIdFor } from "./request-id.ts";
 
 /**
  * "json" writes one JSON object per line: the format for production and for log tools. "pretty"
@@ -137,6 +139,20 @@ class ApiLogController extends LogController {
 }
 
 /**
+ * Fastify's router rejects a malformed URL (400) or an over-long route parameter (414) before any
+ * hook runs, so enterRequestContext never sees those requests. Fastify hands them here with a
+ * request ID from genReqId, having logged "incoming request" under it; this sends the ID back and
+ * replies with the error as usual, which Fastify's error handler logs under the same ID.
+ */
+function sendFrameworkError(
+  error: FastifyError,
+  request: FastifyRequest,
+  reply: FastifyReply,
+): void {
+  void reply.header(REQUEST_ID_HEADER, request.id).send(error);
+}
+
+/**
  * Formats lines with pino-pretty's synchronous formatter, after finishLogLine has redacted them.
  * Each log call then writes its line straight away, exactly as in the JSON format, with no extra
  * stream or worker thread (pino-pretty's stream and transport APIs add one), and tests can read
@@ -168,9 +184,11 @@ async function prettyDestination(destination: LogDestination | undefined): Promi
 
 /**
  * The Fastify factory options that set up logging and request IDs: pino writing one JSON object
- * (or one pretty line) per entry; a request ID that is validated or generated for every request
- * and appears on every line logged while that request is handled; and no secrets, query strings
- * or unbounded client input in the output. `buildApp` passes these to `fastify()`.
+ * (or one readable entry) per line; a request ID that is validated or generated for every
+ * request, appears on every line logged while that request is handled and goes back in the
+ * x-request-id header, also when the router rejects the URL; and no secrets, query strings or
+ * unbounded client input in the output. `buildApp` passes these to `fastify()` and registers
+ * enterRequestContext, which covers every other response.
  */
 export async function loggingServerOptions(
   settings: LoggingSettings,
@@ -194,5 +212,6 @@ export async function loggingServerOptions(
     requestIdHeader: false,
     genReqId: (request) => requestIdFor(request.headers),
     logController: new ApiLogController({ requestIdLogLabel: REQUEST_ID_LOG_KEY }),
+    frameworkErrors: sendFrameworkError,
   };
 }

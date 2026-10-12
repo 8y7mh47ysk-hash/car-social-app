@@ -225,6 +225,41 @@ describe("request IDs in the logs", () => {
     expect(output()).not.toContain("query-secret");
   });
 
+  // Fastify's router answers these itself, before any hook runs.
+  it.each([
+    ["a malformed URL", "/cars/%zz?token=query-secret", 400, "FST_ERR_BAD_URL"],
+    ["an over-long route parameter", `/cars/${"x".repeat(101)}`, 414, "FST_ERR_MAX_PARAM_LENGTH"],
+  ])(
+    "sends the ID back and logs it when the router rejects %s",
+    async (_name, url, statusCode, code) => {
+      const { app, output, lines } = await buildLoggedApp();
+      app.get("/cars/:id", () => ({ ok: true }));
+
+      const response = await app.inject({ url });
+
+      expect(response.statusCode).toBe(statusCode);
+      expect(response.json()).toMatchObject({ statusCode, code });
+      const requestId = response.headers["x-request-id"];
+      expect(requestId).toMatch(UUID_V4);
+      expect(lines().map((line) => line.reqId)).toEqual([requestId, requestId]);
+      expect(lines()[0]?.msg).toBe("incoming request");
+      expect(lines()[1]).toMatchObject({ err: { code } });
+      expect(output()).not.toContain("query-secret");
+    },
+  );
+
+  it("reuses a well-formed x-request-id when the router rejects the URL", async () => {
+    const { app } = await buildLoggedApp();
+
+    const response = await app.inject({
+      url: "/%zz",
+      headers: { "x-request-id": "edge-0123456789abcdef" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.headers["x-request-id"]).toBe("edge-0123456789abcdef");
+  });
+
   it("logs a failing request at error level with its ID, and still sends the ID back", async () => {
     const { app, lines } = await buildLoggedApp();
     app.get("/boom", () => {
