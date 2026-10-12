@@ -1,4 +1,4 @@
-import { request as httpRequest } from "node:http";
+import { Agent, request as httpRequest } from "node:http";
 import { connect } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -69,23 +69,40 @@ function createGarageService(log: FastifyBaseLogger) {
 
 const carBodySchema = z.object({ name: z.string() });
 
-/** Sends a POST whose body arrives in pieces, `gapMs` apart, over a real connection. */
+interface PostResult {
+  readonly status: number | undefined;
+  readonly requestId: unknown;
+  /** The client's port: two requests with the same port shared one connection. */
+  readonly clientPort: number | undefined;
+}
+
+/**
+ * Sends a POST whose body arrives in pieces, `gapMs` apart, over a real connection. An agent
+ * with keep-alive lets several calls share one connection.
+ */
 function postInPieces(
   url: URL,
   pieces: readonly string[],
   gapMs: number,
-): Promise<{ status: number | undefined; requestId: unknown }> {
+  agent?: Agent,
+): Promise<PostResult> {
   return new Promise((resolve, reject) => {
     const request = httpRequest(
       url,
       {
         method: "POST",
         headers: { "content-type": "application/json", "transfer-encoding": "chunked" },
+        ...(agent === undefined ? {} : { agent }),
       },
       (response) => {
+        const clientPort = response.socket.localPort;
         response.resume();
         response.on("end", () => {
-          resolve({ status: response.statusCode, requestId: response.headers["x-request-id"] });
+          resolve({
+            status: response.statusCode,
+            requestId: response.headers["x-request-id"],
+            clientPort,
+          });
         });
       },
     );
@@ -345,6 +362,35 @@ describe("request IDs over a real connection", () => {
     expect(response.status).toBe(200);
     expect(response.requestId).toMatch(UUID_V4);
     expect(lines().find((line) => line.msg === "car saved")?.reqId).toBe(response.requestId);
+  });
+
+  // Browsers and Cloudflare's tunnel send many requests over one connection, one after another.
+  it("gives each request on a keep-alive connection its own ID", async () => {
+    const { app, lines } = await buildLoggedApp({ logLevel: "info" });
+    const garage = createGarageService(app.log);
+    app.post("/cars", async (request) => {
+      const { name } = carBodySchema.parse(request.body);
+      await garage.saveCar(name);
+      return { saved: name };
+    });
+    const url = new URL("/cars", await app.listen({ host: "127.0.0.1", port: 0 }));
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    onTestFinished(() => {
+      agent.destroy();
+    });
+
+    const first = await postInPieces(url, ['{"name":', '"MX-5"}'], 20, agent);
+    const second = await postInPieces(url, ['{"name":', '"GR86"}'], 20, agent);
+
+    expect(second.clientPort).toBe(first.clientPort);
+    expect(second.requestId).not.toBe(first.requestId);
+    const savedBy = lines()
+      .filter((line) => line.msg === "car saved")
+      .map((line) => [line["car"], line.reqId]);
+    expect(savedBy).toEqual([
+      ["MX-5", first.requestId],
+      ["GR86", second.requestId],
+    ]);
   });
 });
 
