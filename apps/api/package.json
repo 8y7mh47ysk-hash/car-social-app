@@ -5,9 +5,9 @@
   "description": "Apex Garage HTTP API (Fastify).",
   "type": "module",
   "scripts": {
-    "dev": "node --watch --watch-preserve-output src/server.ts",
+    "dev": "node --env-file-if-exists=.env --watch --watch-preserve-output src/server.ts",
     "build": "rm -rf dist && tsc --project tsconfig.build.json",
-    "start": "node --conditions=@apex/dist --enable-source-maps dist/server.js",
+    "start": "node --env-file-if-exists=.env --conditions=@apex/dist --enable-source-maps dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
