@@ -441,3 +441,6 @@ These are decided by later instructions, not here:
 
   It writes one SVG file per diagram next to the output file (`/tmp/architecture-1.svg` and so
   on) and exits with an error on any syntax error. Instruction 6 checked every diagram this way.
+
+- In sequence diagrams, write `#35;` for `#`. A bare `#` there starts a comment that silently cuts
+  the rest of the label, and the check above still passes. Flowcharts are not affected.
