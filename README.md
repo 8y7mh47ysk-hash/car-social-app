@@ -45,6 +45,8 @@ apps/
 packages/
   shared/     @apex/shared  Zod schemas, types and helpers shared by the apps.
 infra/        Deployment and operations files (see infra/README.md).
+scripts/      Developer and CI scripts and their tests (not a workspace package).
+.github/      The CI workflow (see "Continuous integration").
 docs/         Playbook, build log, decisions, dependency register and review log.
 ```
 
@@ -85,7 +87,33 @@ Run these from the repository root.
 | `pnpm test`                     | Every Vitest suite in one run.                                          |
 | `pnpm format`                   | Formats all files with Prettier.                                        |
 | `pnpm format:check`             | Checks formatting without changing files.                               |
+| `pnpm docker:up`                | Starts PostgreSQL and Redis in Docker and waits until both are healthy. |
+| `pnpm docker:down`              | Stops and removes those containers; their data volumes are kept.        |
+| `pnpm docker:logs`              | Follows their logs (`pnpm docker:logs postgres` for one); Ctrl+C stops. |
+| `pnpm db:migrate`               | Not available yet (instruction 26): prints a notice and fails.          |
+| `pnpm db:seed`                  | Not available yet (instruction 26): prints a notice and fails.          |
 | `pnpm --filter <package> <cmd>` | Runs one package's script, for example `pnpm --filter @apex/api test`.  |
+
+The `docker:*` scripts first check that Docker, its Compose plugin and its engine are ready, and
+say what to do if one is not. Docker Compose reads its passwords from the root `.env` file (see
+[infra/README.md](infra/README.md)). `pnpm run` with no arguments lists every script.
+
+## Continuous integration
+
+GitHub Actions runs [.github/workflows/ci.yml](.github/workflows/ci.yml) for every push to `main`
+and every pull request. It installs the locked dependencies (`pnpm install --frozen-lockfile`,
+with pnpm's package store cached between runs), runs `pnpm peers check`, `pnpm format:check`,
+`pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build`, and validates `docker-compose.yml`.
+Each check runs even when an earlier one fails, so one run lists every problem.
+
+CI fails on any warning: ESLint warnings, unmet peer dependencies, warnings in the build output
+(Next.js prints them but still finishes the build) and Docker Compose warnings.
+[docs/DECISIONS.md](docs/DECISIONS.md) lists exactly what is enforced and why. To run the same
+checks before pushing, and then read the `pnpm build` output for warnings:
+
+```sh
+pnpm peers check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build
+```
 
 ## How the packages fit together
 
