@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import {
@@ -132,5 +132,38 @@ describe("loggableUrl", () => {
     expect(loggableUrl(url)).toBe(
       `/${"a".repeat(MAX_LOGGED_URL_LENGTH - 1)}... (100 more characters)`,
     );
+  });
+});
+
+describe("loggingServerOptions without pino-pretty installed", () => {
+  // Production installs leave out development dependencies such as pino-pretty.
+  async function loadWithoutPinoPretty() {
+    vi.resetModules();
+    vi.doMock("pino-pretty", () => {
+      throw new Error("Cannot find package 'pino-pretty'");
+    });
+    return import("./logger.ts");
+  }
+
+  afterEach(() => {
+    vi.doUnmock("pino-pretty");
+    vi.resetModules();
+  });
+
+  it("explains what to do when pretty output is asked for", async () => {
+    const { loggingServerOptions } = await loadWithoutPinoPretty();
+
+    await expect(loggingServerOptions({ level: "info", format: "pretty" })).rejects.toThrow(
+      "LOG_FORMAT=pretty needs pino-pretty, a development dependency that production installs " +
+        "leave out. Use LOG_FORMAT=json.",
+    );
+  });
+
+  it("does not need it for JSON output", async () => {
+    const { loggingServerOptions } = await loadWithoutPinoPretty();
+
+    await expect(loggingServerOptions({ level: "info", format: "json" })).resolves.toMatchObject({
+      requestIdHeader: false,
+    });
   });
 });

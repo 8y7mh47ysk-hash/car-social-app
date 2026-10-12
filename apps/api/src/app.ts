@@ -1,6 +1,6 @@
 import { fastify, type FastifyInstance, type LogLevel } from "fastify";
 
-import { loggingServerOptions, type LogDestination } from "./lib/logger.ts";
+import { loggingServerOptions, type LogDestination, type LogFormat } from "./lib/logger.ts";
 import { enterRequestContext } from "./lib/request-context.ts";
 import { healthRoutes } from "./routes/health.ts";
 
@@ -10,6 +10,8 @@ export interface BuildAppOptions {
    * default, "silent", keeps tests quiet unless they ask for logs.
    */
   readonly logLevel?: LogLevel;
+  /** "json" (the default) or "pretty", which is for development only (see LogFormat). */
+  readonly logFormat?: LogFormat;
   /** Where log lines go instead of standard output. Tests pass a sink and read the lines back. */
   readonly logDestination?: LogDestination;
 }
@@ -20,8 +22,9 @@ export interface BuildAppOptions {
  */
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const app = fastify(
-    loggingServerOptions({
+    await loggingServerOptions({
       level: options.logLevel ?? "silent",
+      format: options.logFormat ?? "json",
       destination: options.logDestination,
     }),
   );

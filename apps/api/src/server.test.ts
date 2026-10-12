@@ -124,7 +124,7 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
   });
 
   it("logs JSON lines that carry the request ID it sends back", async () => {
-    const server = startServer();
+    const server = startServer({ LOG_FORMAT: "json" });
     const url = await listeningUrl(server);
 
     const response = await fetch(new URL("/health?token=query-secret", url), {
@@ -146,5 +146,33 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
       ["shutting down", undefined],
     ]);
     expect(server.output()).not.toContain("query-secret");
+  });
+
+  it("logs readable lines with LOG_FORMAT=pretty", async () => {
+    const server = startServer({ LOG_FORMAT: "pretty" });
+    const url = await listeningUrl(server);
+
+    await fetch(new URL("/health", url), { headers: { "x-request-id": "entrypoint-test-0002" } });
+    server.child.kill("SIGTERM");
+    expect(await server.exited).toEqual({ code: 0, signal: null });
+
+    const lines = server.output().trimEnd().split("\n");
+    const messages = lines.map(
+      (line) => /^\[\d\d:\d\d:\d\d\.\d{3}\] INFO: (.+?)(?: \{.*\})?$/.exec(line)?.[1],
+    );
+    expect(messages).toEqual([
+      `Server listening at ${url.origin}`,
+      "incoming request",
+      "request completed",
+      "shutting down",
+    ]);
+    expect(lines[1]).toContain('"reqId":"entrypoint-test-0002"');
+  });
+
+  it("refuses to start with an invalid LOG_FORMAT", async () => {
+    const server = startServer({ LOG_FORMAT: "fancy" });
+
+    expect(await server.exited).toEqual({ code: 1, signal: null });
+    expect(server.output()).toContain("✖ must be one of json, pretty\n  → at LOG_FORMAT");
   });
 });

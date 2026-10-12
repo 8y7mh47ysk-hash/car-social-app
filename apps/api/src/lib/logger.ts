@@ -9,6 +9,14 @@ import { REDACTED, isSensitiveKey, redactUrls } from "./redact.ts";
 import { getRequestContext } from "./request-context.ts";
 import { requestIdFor } from "./request-id.ts";
 
+/**
+ * "json" writes one JSON object per line: the format for production and for log tools. "pretty"
+ * writes readable single lines for a developer's terminal; it needs pino-pretty, a development
+ * dependency that production installs leave out.
+ */
+export const LOG_FORMATS = ["json", "pretty"] as const;
+export type LogFormat = (typeof LOG_FORMATS)[number];
+
 /** Somewhere log lines can go, one line per call. Tests pass an in-memory sink. */
 export interface LogDestination {
   write(line: string): void;
@@ -17,6 +25,7 @@ export interface LogDestination {
 export interface LoggingSettings {
   /** The lowest level that is written; "silent" writes nothing. */
   readonly level: LogLevel;
+  readonly format: LogFormat;
   /** Where lines go. Defaults to standard output. */
   readonly destination?: LogDestination | undefined;
 }
@@ -127,13 +136,48 @@ class ApiLogController extends LogController {
 }
 
 /**
- * The Fastify factory options that set up logging and request IDs: pino writing one JSON object
- * per entry; a request ID that is validated or generated for every request and appears on every
- * line logged while that request is handled; and no secrets, query strings or unbounded client
- * input in the output. `buildApp` passes these to `fastify()`.
+ * Formats lines with pino-pretty's synchronous formatter, after finishLogLine has redacted them.
+ * Each log call then writes its line straight away, exactly as in the JSON format, with no extra
+ * stream or worker thread (pino-pretty's stream and transport APIs add one), and tests can read
+ * the output as soon as a request ends. pino-pretty is imported only here, so the JSON format
+ * never loads it.
  */
-export function loggingServerOptions(settings: LoggingSettings): FastifyServerOptions {
-  const { destination } = settings;
+async function prettyDestination(destination: LogDestination | undefined): Promise<LogDestination> {
+  const pinoPretty = await import("pino-pretty").catch((error: unknown) => {
+    throw new Error(
+      "LOG_FORMAT=pretty needs pino-pretty, a development dependency that production installs " +
+        "leave out. Use LOG_FORMAT=json.",
+      { cause: error },
+    );
+  });
+  const target: LogDestination = destination ?? process.stdout;
+  const prettify = pinoPretty.prettyFactory({
+    // Colour only on a terminal, never in output that tests or files read back.
+    colorize: destination === undefined && pinoPretty.isColorSupported,
+    translateTime: "SYS:HH:MM:ss.l",
+    ignore: "pid,hostname",
+    singleLine: true,
+  });
+  return {
+    write(line) {
+      target.write(prettify(line));
+    },
+  };
+}
+
+/**
+ * The Fastify factory options that set up logging and request IDs: pino writing one JSON object
+ * (or one pretty line) per entry; a request ID that is validated or generated for every request
+ * and appears on every line logged while that request is handled; and no secrets, query strings
+ * or unbounded client input in the output. `buildApp` passes these to `fastify()`.
+ */
+export async function loggingServerOptions(
+  settings: LoggingSettings,
+): Promise<FastifyServerOptions> {
+  const destination =
+    settings.format === "pretty"
+      ? await prettyDestination(settings.destination)
+      : settings.destination;
   return {
     logger: {
       level: settings.level,

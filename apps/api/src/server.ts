@@ -7,7 +7,7 @@ const SHUTDOWN_TIMEOUT_MS = 10_000;
 const config = loadServerConfig(process.env);
 // Info level, as before instruction 8; the typed environment loader (instruction 4) supplies
 // LOG_LEVEL.
-const app = await buildApp({ logLevel: "info" });
+const app = await buildApp({ logLevel: "info", logFormat: config.logFormat });
 
 function shutDown(signal: NodeJS.Signals): void {
   app.log.info({ signal }, "shutting down");

@@ -378,3 +378,25 @@ describe("secrets in the logs", () => {
     });
   });
 });
+
+describe("pretty format", () => {
+  it("writes one readable line per entry, with the request ID and the same redaction", async () => {
+    const { app, output } = await buildLoggedApp({ logFormat: "pretty", logLevel: "info" });
+
+    const response = await app.inject({
+      url: "/health?token=query-secret",
+      headers: { "x-request-id": "pretty-0123456789" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const written = output().trimEnd().split("\n");
+    expect(written).toHaveLength(2);
+    expect(written[0]).toMatch(/^\[\d\d:\d\d:\d\d\.\d{3}\] INFO: incoming request /);
+    expect(written[1]).toMatch(/^\[\d\d:\d\d:\d\d\.\d{3}\] INFO: request completed /);
+    for (const line of written) {
+      expect(line).toContain('"reqId":"pretty-0123456789"');
+    }
+    expect(output()).toContain(`"url":"/health?${REDACTED}"`);
+    expect(output()).not.toContain("query-secret");
+  });
+});

@@ -3,15 +3,14 @@ import { describe, expect, it } from "vitest";
 import { loadServerConfig } from "./config.ts";
 
 describe("loadServerConfig", () => {
-  it("listens on loopback port 4000 by default", () => {
-    expect(loadServerConfig({})).toEqual({ host: "127.0.0.1", port: 4000 });
+  it("listens on loopback port 4000 and logs JSON by default", () => {
+    expect(loadServerConfig({})).toEqual({ host: "127.0.0.1", port: 4000, logFormat: "json" });
   });
 
-  it("reads API_HOST and API_PORT", () => {
-    expect(loadServerConfig({ API_HOST: "0.0.0.0", API_PORT: "4010" })).toEqual({
-      host: "0.0.0.0",
-      port: 4010,
-    });
+  it("reads API_HOST, API_PORT and LOG_FORMAT", () => {
+    expect(
+      loadServerConfig({ API_HOST: "0.0.0.0", API_PORT: "4010", LOG_FORMAT: "pretty" }),
+    ).toEqual({ host: "0.0.0.0", port: 4010, logFormat: "pretty" });
   });
 
   it("accepts port 0 so the OS can pick a free port", () => {
@@ -24,5 +23,11 @@ describe("loadServerConfig", () => {
 
   it("rejects a blank API_HOST", () => {
     expect(() => loadServerConfig({ API_HOST: "   " })).toThrow(/API_HOST/);
+  });
+
+  it.each(["", "PRETTY", "text", "pino-pretty"])("rejects LOG_FORMAT=%j", (value) => {
+    expect(() => loadServerConfig({ LOG_FORMAT: value })).toThrow(
+      "✖ must be one of json, pretty\n  → at LOG_FORMAT",
+    );
   });
 });
