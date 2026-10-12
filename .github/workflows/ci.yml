@@ -83,7 +83,8 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: pnpm build 2>&1 | tee "$RUNNER_TEMP/build.log"
 
-      # Next.js prints warnings but still finishes the build, so the saved log is checked.
+      # Next.js prints warnings, and errors that pages log while it prerenders them, but still
+      # finishes the build, so the saved log is checked.
       - name: Fail on build warnings
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: node scripts/check-build-warnings.ts "$RUNNER_TEMP/build.log"
