@@ -243,3 +243,122 @@ Entry template:
 - Decision: support macOS, Linux and WSL.
 - Trade-offs: native Windows shells are not supported. The deployment target is a Linux home
   server, so this costs nothing today.
+
+### CI is one GitHub Actions job that runs the root scripts
+
+- Date: 2026-10-11 · Instruction: #5 · Author: Delta
+- Context: the playbook asks for install, lint, type-check, test and build in CI, with pnpm
+  cached. GitHub bills private repositories per job and rounds each job up to a whole minute.
+  `ubuntu-latest` still means Ubuntu 24.04 and moves to 26.04 in November 2026; Ubuntu 26.04
+  runners are generally available.
+- Decision: `.github/workflows/ci.yml` runs one job, "Checks", on `ubuntu-26.04` for every push
+  to `main` and every pull request. `pnpm/action-setup` installs the pnpm version in
+  `packageManager`; `actions/setup-node` installs the Node.js version in `.nvmrc` and caches
+  pnpm's store (`cache: pnpm`, keyed on `pnpm-lock.yaml`; since setup-node 6 only npm is cached
+  automatically). Then `pnpm install --frozen-lockfile`, `pnpm peers check`, `pnpm format:check`,
+  `pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build`, the build-log warning check and
+  the Compose check. Every check runs once the install has worked, even after an earlier check
+  failed, so one run reports every problem. A new push to a pull request cancels the older run;
+  each commit on `main` gets its own concurrency group, so all of them are checked to the end.
+  CI sets `NEXT_TELEMETRY_DISABLED=1`.
+- Trade-offs: the checks run one after another instead of in parallel jobs, which would each
+  repeat the setup and each bill at least a minute. Next.js's own build cache (`.next/cache`)
+  is not cached: the build takes seconds today, so revisit when it slows down. Pinning
+  `ubuntu-26.04` means the runner image changes only when we change the label. actionlint 1.7.12,
+  the latest release, does not know that label yet, so `.github/actionlint.yaml` declares it.
+  `pnpm/setup`, a newer action that installs pnpm and Node.js in one step, was considered; the
+  established pair is used instead.
+
+### What "fail on any warning" means in CI
+
+- Date: 2026-10-11 · Instruction: #5 · Author: Delta
+- Context: the playbook says "fail on any warning", but each tool reports warnings differently,
+  and several print one and still exit with status 0.
+- Decision: CI fails on:
+  - ESLint warnings: `pnpm lint` runs with `--max-warnings 0`.
+  - TypeScript errors in `pnpm typecheck` and `pnpm build`; `tsc` has no warning level.
+  - Unformatted files: `pnpm format:check`.
+  - Failing tests, and unhandled errors or rejections, which fail a Vitest run by default.
+  - Unmet or missing peer dependencies: `pnpm peers check` exits with status 1.
+    `strictPeerDependencies: true` alone would not work in CI: with pnpm 12.11.2, a
+    `--frozen-lockfile` install skips resolution and never checks peers (tested).
+  - A lockfile that does not match `package.json`, or a dependency install script that is not
+    in `allowBuilds`: both fail `pnpm install --frozen-lockfile`.
+  - Warnings in the build output. Next.js prints them and still exits with status 0: an unknown
+    `next.config.ts` option produced three "⚠" lines and a successful build (tested). pnpm
+    merges every package's stdout and stderr into its own stdout, whatever reporter is chosen
+    (tested), so CI cannot just watch stderr. The Build step saves the output and
+    `scripts/check-build-warnings.ts` fails on lines with Next.js's "⚠", "Warning:" (older
+    Next.js messages, Turbopack's warnings and Node.js process warnings), Turbopack's "build
+    encountered N warnings" header or pnpm's "WARN". It ignores Next.js's "No build cache found"
+    notice, which is about the CI machine rather than the code (Next.js prints it to stdout so
+    that CI checks on stderr skip it).
+  - Docker Compose warnings: `docker compose --profile '*' config --quiet` must print nothing.
+    Compose reports an unset variable as a warning and exits with status 0 (tested).
+    `--profile '*'` also validates the services in the `app` profile: without it, a broken
+    `depends_on` there passes (tested).
+- Not enforced: console output or Node.js warnings printed while tests, lint or the type check
+  pass (no signal that works across tools; tests should assert on the logs they expect); pnpm's
+  deprecation notices, which appear only when the lockfile is resolved, never during CI's frozen
+  install (the ESLint 9 one is expected, see the ESLint pin); and warnings that GitHub shows
+  about the runner or the actions, which a step cannot read.
+- Trade-offs: the build-log check matches the formats of Next.js 16.4, Node.js 24 and pnpm 12; a
+  warning worded differently would slip through, so re-check after major upgrades by provoking
+  one (docs/BUILD_LOG.md, instruction 5, shows how). A line that merely contains "Warning:"
+  fails the build, which errs on the safe side.
+
+### CI supply-chain and token safety
+
+- Date: 2026-10-11 · Instruction: #5 · Author: Delta
+- Context: third-party actions run with the workflow's token, and a release tag can be moved to
+  different code after it is reviewed.
+- Decision: each action is pinned to the full commit SHA of its latest release, with the release
+  in a comment: `actions/checkout` v7.0.1, `pnpm/action-setup` v6.1.0 (an annotated tag,
+  dereferenced to its commit) and `actions/setup-node` v7.1.0. Each SHA was read from the GitHub
+  API and checked to be on the action repository's default branch, not a commit pushed to a
+  fork. The token is read-only (`permissions: contents: read`), the checkout keeps no
+  credentials (`persist-credentials: false`), the workflow uses `pull_request` (fork pull
+  requests get no secrets) and the job stops after 15 minutes. `scripts/ci-workflow.test.ts`
+  holds every workflow to these rules and checks that each `pnpm` script and `scripts/` file a
+  workflow calls exists. zizmor 1.30.1 reports no findings (offline audits, pedantic persona).
+- Trade-offs: pinned SHAs never update themselves; Dependabot (instruction 106) will propose
+  updates. A future workflow that needs more than read access must say why, and the test needs
+  a matching exception.
+
+### Developer commands are package.json scripts; no Makefile
+
+- Date: 2026-10-11 · Instruction: #7 · Author: Delta
+- Context: the playbook asks for "a Makefile or npm scripts for dev, test, build, db:migrate,
+  db:seed and docker:up". The root `package.json` already holds the other scripts.
+- Decision: root `package.json` scripts only: `db:migrate`, `db:seed`, `docker:up`,
+  `docker:down` and `docker:logs` join the existing ones. `pnpm run` lists them all and the
+  README describes them.
+- Trade-offs: no `make` interface. A Makefile would be a second list of commands to keep in step
+  with `package.json`, and `make` is missing on Macs without the Xcode command line tools.
+
+### db:migrate and db:seed fail until instruction 26
+
+- Date: 2026-10-11 · Instruction: #7 · Author: Delta
+- Context: there is no schema, migration tool or seed data until instruction 26.
+- Decision: both scripts print "not available yet" with the instruction number to stderr and
+  exit with status 1.
+- Trade-offs: anything that calls them fails until instruction 26 replaces them, which is the
+  point: a placeholder that exits with status 0 would look like a migrated database.
+
+### docker:* scripts check Docker, then run Compose directly
+
+- Date: 2026-10-11 · Instruction: #7 · Author: Delta
+- Context: without Docker, `docker compose` fails with "docker: command not found" and pnpm's
+  generic error, and an installed Docker Desktop that is not running is a common case on a Mac.
+- Decision: each script is `node scripts/check-docker.ts && docker compose <arguments>`. The
+  check runs `docker compose version` (client and Compose v2 plugin) and
+  `docker version --format {{.Server.Version}}` (engine reachable), each with a 20-second limit,
+  and explains how to fix the first problem it finds. Compose then runs straight from the shell,
+  so its output, Ctrl+C and exit status are exactly as if typed by hand. `docker:up` uses
+  `up --detach --wait`, which returns once every service is healthy and fails if one never is;
+  `docker:down` keeps the data volumes; `docker:logs` follows the logs, and pnpm passes extra
+  arguments on (`pnpm docker:logs postgres`). A missing password is left to Compose, whose
+  message from `docker-compose.yml` names the variable and the file.
+- Trade-offs: about 0.1 to 0.3 seconds of checks per command. The check is TypeScript run by
+  Node.js, not a shell wrapper, so it is type-checked, linted and unit-tested like the rest of
+  the code.
