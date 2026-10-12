@@ -13,12 +13,12 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it, onTestFinished } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 
 // These tests run the real hook scripts in .husky/ the way husky runs them, `sh -e .husky/<hook>`
-// with node_modules/.bin on PATH: pre-commit against this repository's lint-staged config in a
-// scratch git repository, with stand-ins for ESLint, Prettier, pnpm and Vitest that record how
-// they were called.
+// with node_modules/.bin on PATH: commit-msg against this repository's commitlint config, and
+// pre-commit against this repository's lint-staged config in a scratch git repository, with
+// stand-ins for ESLint, Prettier, pnpm and Vitest that record how they were called.
 
 const repoRoot = fileURLToPath(new URL(".", import.meta.url));
 const rootBin = join(repoRoot, "node_modules", ".bin");
@@ -75,6 +75,117 @@ function run(
     });
   });
 }
+
+describe("commit-msg hook", { timeout: 20_000 }, () => {
+  const coAuthoredBy = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>";
+  let messageDir = "";
+
+  beforeAll(async () => {
+    messageDir = await mkdtemp(join(tmpdir(), "apex-commit-msg-"));
+  });
+
+  afterAll(async () => {
+    await rm(messageDir, { recursive: true, force: true });
+  });
+
+  /** Runs .husky/commit-msg on a message, as git does for `git commit -m <message>`. */
+  async function commitMsgHook(message: string): Promise<Result> {
+    const file = join(await mkdtemp(join(messageDir, "commit-")), "COMMIT_EDITMSG");
+    await writeFile(file, message);
+    return run("sh", ["-e", ".husky/commit-msg", file], repoRoot, hookEnv([rootBin]));
+  }
+
+  it.concurrent.for([
+    ["a type, a scope and a subject", "feat(api): add the health route\n"],
+    [
+      "a body and the Co-Authored-By trailer, each after a blank line",
+      `docs: explain the git hooks\n\nSay what they check and how to skip them.\n\n${coAuthoredBy}\n`,
+    ],
+    ["the Co-Authored-By trailer as the only footer", `fix: reject port 0\n\n${coAuthoredBy}\n`],
+    [
+      "names in backticks or quotes in a lowercase subject",
+      'build: upgrade `Next.js` and "TypeScript"\n',
+    ],
+    [
+      "a breaking change marked with ! and a BREAKING CHANGE footer",
+      "feat(api)!: remove the v1 routes\n\nThe old routes are gone.\n\nBREAKING CHANGE: use /v2.\n",
+    ],
+    ["a subject of 72 characters", `test: ${"s".repeat(72)}\n`],
+    ["a body line of 100 characters", `chore: tidy up\n\n${"b".repeat(100)}\n`],
+    [
+      "a longer body line that holds a URL",
+      `docs: cite the source\n\nSee https://example.com/${"u".repeat(100)}\n`,
+    ],
+    ["git's merge message", "Merge branch 'w0/build/alpha'\n"],
+    [
+      "git's revert message",
+      `Revert "feat(api): add the health route"\n\nThis reverts commit ${"0".repeat(40)}.\n`,
+    ],
+    ["a fixup! commit for git rebase --autosquash", "fixup! feat(api): add the health route\n"],
+    [
+      "the comment lines and diff that git adds for an editor, however long",
+      `feat: add the garage page\n\n# ${"c".repeat(120)}\n` +
+        `# ------------------------ >8 ------------------------\n+${"d".repeat(120)}\n`,
+    ],
+  ] as const)("accepts %s", async ([, message], { expect }) => {
+    const result = await commitMsgHook(message);
+
+    expect(result.code, result.output).toBe(0);
+  });
+
+  it.concurrent.for([
+    ["no type", "add the health route\n", ["type-empty", "subject-empty"]],
+    ["an unknown type", "feature: add the health route\n", ["type-enum"]],
+    ["a capitalised type", "Feat: add the health route\n", ["type-case"]],
+    ["no space after the colon", "feat:add the health route\n", ["type-empty", "subject-empty"]],
+    ["an uppercase scope", "feat(API): add the health route\n", ["scope-case"]],
+    ["a capitalised subject", "feat: Add the health route\n", ["subject-case"]],
+    ["a capital letter later in the subject", "feat: add the Next.js app\n", ["subject-case"]],
+    [
+      "a subject that ends with a full stop",
+      "feat: add the health route.\n",
+      ["subject-full-stop"],
+    ],
+    ["a subject of 73 characters", `test: ${"s".repeat(73)}\n`, ["subject-max-length"]],
+    [
+      "a first line over 100 characters",
+      `feat(${"x".repeat(30)}): ${"s".repeat(70)}\n`,
+      ["header-max-length"],
+    ],
+    [
+      "a body line of 101 characters",
+      `chore: tidy up\n\n${"b".repeat(101)}\n`,
+      ["body-max-line-length"],
+    ],
+    [
+      "a body with no blank line after the subject",
+      "feat: add the health route\nIt returns ok.\n",
+      ["body-leading-blank"],
+    ],
+    [
+      "a trailer with no blank line after the subject",
+      `fix: reject port 0\n${coAuthoredBy}\n`,
+      ["footer-leading-blank"],
+    ],
+    [
+      "a trailer with no blank line after the body",
+      `fix: reject port 0\n\nPort 0 picks a random port.\n${coAuthoredBy}\n`,
+      ["footer-leading-blank"],
+    ],
+    [
+      "a BREAKING CHANGE footer with no blank line before it",
+      "feat!: remove the v1 routes\n\nThe old routes are gone.\nBREAKING CHANGE: use /v2.\n",
+      ["footer-leading-blank"],
+    ],
+  ] as const)("rejects %s", async ([, message, rules], { expect }) => {
+    const result = await commitMsgHook(message);
+
+    expect(result.code, result.output).toBe(1);
+    for (const rule of rules) {
+      expect(result.output).toContain(`[${rule}]`);
+    }
+  });
+});
 
 describe("pre-commit hook", { timeout: 30_000 }, () => {
   /** The tools that lint-staged.config.ts runs. The tests replace them with stand-ins. */

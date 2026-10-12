@@ -28,7 +28,7 @@ export default defineConfig({
       `${root}**/{vite,vitest}.config.*`,
       `${root}**/vitest.setup.*`,
       `${root}.husky/*`,
-      `${root}lint-staged.config.*`,
+      `${root}{commitlint,lint-staged}.config.*`,
     ],
   },
 });
