@@ -341,7 +341,9 @@ Entry template:
   workflow calls exists. zizmor 1.30.1 reports no findings (offline audits, pedantic persona).
 - Trade-offs: pinned SHAs never update themselves; Dependabot (instruction 106) will propose
   updates. A future workflow that needs more than read access must say why, and the test needs
-  a matching exception.
+  a matching exception. actionlint and zizmor are run by hand when a workflow changes, not in
+  CI: each would be one more downloaded binary for CI to trust, and the workflow tests already
+  hold this repository's own rules. Instruction 106 (scanning in CI) can revisit this.
 
 ### Developer commands are package.json scripts; no Makefile
 

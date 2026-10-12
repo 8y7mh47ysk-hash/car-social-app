@@ -128,7 +128,9 @@ rm build.log
 ```
 
 With [actionlint](https://github.com/rhysd/actionlint) installed, `actionlint` in the repository
-root prints nothing and exits with status 0. With Docker installed and the root `.env` created
+root prints nothing and exits with status 0. With [zizmor](https://docs.zizmor.sh) installed,
+`zizmor --offline .github/workflows/ci.yml` ends with "No findings to report. Good job!". Neither
+runs in CI (docs/DECISIONS.md explains why). With Docker installed and the root `.env` created
 (instruction 3), `docker compose --profile '*' config --quiet` prints nothing.
 
 After the first push to GitHub: the repository's Actions tab shows the "CI" workflow, and its
