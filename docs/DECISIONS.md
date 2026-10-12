@@ -1,18 +1,27 @@
 # Decisions
 
-A running log of key technical choices and their trade-offs, following the Master Context rule
-"explain trade-offs briefly". Changes of plan against `docs/PLAYBOOK.md` are recorded here
-instead of editing the playbook.
+A running log of the project's key technical choices and their trade-offs, following the Master
+Context rule "explain trade-offs briefly". Changes of plan against `docs/PLAYBOOK.md` are
+recorded here instead of editing the playbook. The log started with instruction 1; instruction 6
+set the format and rules below.
 
-Rules:
+## What goes here
 
-- Append new entries at the end. Entries have no numeric IDs, because engineers add entries on
-  parallel branches and numbers would collide.
-- Never silently reverse an earlier decision: add a new entry that names the one it replaces and
-  explains why.
-- Instruction 6 formalises this log. Until then, entries use the template below.
+Write an entry when you choose between real alternatives, when a choice affects other code or
+other engineers, or when someone would otherwise ask "why is it like this?". That includes:
 
-Entry template:
+- choices of design, tools, versions and settings, and what was rejected;
+- changes of plan against the playbook or against a contract agreed between engineers;
+- surprises, such as a tool behaving differently from its documentation, that shaped a decision.
+
+Other records live elsewhere: what changed for each instruction and how to verify it in
+[BUILD_LOG.md](BUILD_LOG.md), why each dependency is here in [DEPENDENCIES.md](DEPENDENCIES.md),
+how the system fits together in [ARCHITECTURE.md](ARCHITECTURE.md), and issues found in review in
+[REVIEW_LOG.md](REVIEW_LOG.md).
+
+## How to write an entry
+
+Every entry has exactly this form:
 
 ```markdown
 ### <title>
@@ -22,6 +31,29 @@ Entry template:
 - Decision: ...
 - Trade-offs: ...
 ```
+
+- **Title:** what was decided, specific enough to be unique ("Pin ESLint to ^9.39, not 10").
+  Other documents refer to an entry by its title.
+- **Date:** the day of the decision (YYYY-MM-DD). **Instruction:** the playbook instruction it
+  belongs to (`#N`, or several, such as `#5, #7`); a decision made in review belongs to the
+  instruction whose work it changes. **Author:** who made it.
+- **Context:** the problem and its constraints, in a few sentences.
+- **Decision:** what was chosen, concretely: names, files, settings.
+- **Trade-offs:** what it costs, what was rejected and why, and when to revisit it.
+
+Keep entries brief. Details belong in code comments and the build log.
+
+## Rules
+
+- Append new entries at the end. Entries have no numeric IDs, because engineers add entries on
+  parallel branches and numbers would collide. `.gitattributes` merges this file with
+  `merge=union`, so whoever merges checks the result for duplicated or interleaved lines.
+- Entries are a record. Once merged, an entry's decision is never edited; correcting a fact, a
+  typo or a link in it is fine.
+- Never silently reverse an earlier decision. Add a new entry whose Context names the title of the
+  entry it replaces and explains why, and add one line to the end of the replaced entry:
+  `- Superseded by: <title of the new entry>`. That line is the only addition an old entry gets.
+- To find the decisions for an instruction, search for its number, for example `#8`.
 
 ## Entries
 
