@@ -87,6 +87,22 @@ Run these from the repository root.
 | `pnpm format:check`             | Checks formatting without changing files.                               |
 | `pnpm --filter <package> <cmd>` | Runs one package's script, for example `pnpm --filter @apex/api test`.  |
 
+## Configuration
+
+Each app reads its settings from environment variables and validates them with Zod: the API as
+it starts, the web app whenever Next.js starts or builds it. If a variable is missing or invalid,
+the command stops and names every problem, without ever printing a value. Settings can also live
+in a gitignored `.env` file next to the app: copy the app's template to create one.
+
+| File            | Read by                                            | Template                |
+| --------------- | -------------------------------------------------- | ----------------------- |
+| `apps/api/.env` | The API, in `pnpm dev` and `pnpm start`            | `apps/api/.env.example` |
+| `apps/web/.env` | Next.js, in `pnpm dev`, `pnpm build`, `pnpm start` | `apps/web/.env.example` |
+
+Variables set in the shell win over the files. `WEB_HOST` and `WEB_PORT` work only from the
+shell, because Next.js opens its port before it reads `.env` files. The templates explain each
+variable and the rules for adding one; the design is in [docs/DECISIONS.md](docs/DECISIONS.md).
+
 ## How the packages fit together
 
 The apps import `@apex/shared` as TypeScript source: Next.js, Vitest and Node.js (in

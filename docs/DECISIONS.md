@@ -243,3 +243,98 @@ Entry template:
 - Decision: support macOS, Linux and WSL.
 - Trade-offs: native Windows shells are not supported. The deployment target is a Linux home
   server, so this costs nothing today.
+
+### Typed environment loader: one Zod helper in packages/shared, one schema per app
+
+- Date: 2026-10-11 · Instruction: #4 · Author: Charlie
+- Context: instruction 4 asks for a typed environment loader that crashes on startup when a
+  variable is missing. Both apps need the same behaviour, and the messages must never put a
+  secret into a terminal or a log.
+- Decision: `parseEnv(schema, source, options)` in packages/shared reads only the variables a Zod
+  object schema declares, collects every problem into one `EnvValidationError` (variable name and
+  problem, never the value), and treats an empty value as not set, as `${NAME:-default}` does in
+  a shell and in Docker Compose. Each app owns its schema and is the only code that reads
+  `process.env`: the API in `src/server.ts` (through `loadConfig` in `src/config.ts`), the web
+  app in `src/env/`. ESLint's `no-restricted-properties` rejects `process.env` everywhere else in
+  `apps/*/src` and `packages/*/src`. Only variables that something uses today are declared, with
+  a default only where it is safe: `API_HOST` defaults to loopback, `API_PORT` to 4000 and
+  `LOG_LEVEL` to `info`. `API_HOST` must be an IP address or a hostname, so a URL or `host:port`
+  fails at startup instead of in a DNS lookup.
+- Trade-offs: an empty value can never mean "deliberately empty"; such a variable would need its
+  own optional schema and check. The lint rule catches `process.env`, including destructuring,
+  but not every route to the environment (`import { env } from "node:process"`), and it does not
+  cover config files, scripts or root-level tests. A library (t3-env, envalid) would add a
+  dependency for about 60 lines of code and would still need our value-free messages.
+
+### The API loads apps/api/.env with Node's --env-file-if-exists
+
+- Date: 2026-10-11 · Instruction: #4 · Author: Charlie
+- Context: developers need a file for local settings. Next.js reads its own `.env` files; the
+  API needs a way to read one.
+- Decision: the API's `dev` and `start` scripts run `node --env-file-if-exists=.env`, so
+  `apps/api/.env` is optional and variables set in the shell win over it. `server.ts` never reads
+  files, so tests that start it directly cannot pick up a developer's `.env`. Each program reads
+  its own file: `apps/api/.env`, `apps/web/.env`, and the root `.env` for Docker Compose.
+- Trade-offs: no dotenv dependency, and `node --watch` restarts the API when the file changes.
+  Node's parser differs from Compose's and Next.js's (Next.js expands `$NAME`, Node does not), so
+  the templates stick to plain `NAME=value` lines. Without the file, Node prints ".env not found.
+  Continuing without it." at every start. Separate files keep each process to the settings it
+  needs (the web server never sees database passwords), but a value that two programs need, such
+  as the database password from Phase 2, will have to be written into both files.
+
+### Web env: server-only and NEXT_PUBLIC_ variables apart, checked per Next.js phase
+
+- Date: 2026-10-11 · Instruction: #4 · Author: Charlie
+- Context: Next.js copies `NEXT_PUBLIC_` values into browser JavaScript when it compiles the app,
+  and only where code names the variable literally; other variables stay on the server, but a
+  module that reads them can still be imported by a Client Component by mistake. The web app
+  reads no variables yet.
+- Decision: `apps/web/src/env/schema.ts` declares two groups, both empty for now; the public
+  group's type accepts only `NEXT_PUBLIC_` names. `server.ts` exports `serverEnv` and starts with
+  `import "server-only"`, so a Client Component that imports it, even indirectly, fails
+  `next dev` and `next build` with an import trace. `public.ts` exports `publicEnv` and reads each
+  variable by name in brackets (`process.env["NEXT_PUBLIC_X"]`; TypeScript's
+  `noPropertyAccessFromIndexSignature` rejects the dot form), and a type check fails until every
+  declared variable is listed. `next.config.ts` exports a function of the phase that calls
+  `validateWebEnv`: public variables in `next dev` and `next build`, server variables in
+  `next dev` and `next start`. Verified with temporary variables: Next.js 16.4 inlines the
+  bracket form into browser JavaScript; a build without the server secret succeeds;
+  `next start` without it exits with code 1; a Server Component can import `serverEnv` without
+  the secret reaching any browser file; a Client Component that imports it fails the build.
+- Trade-offs: the scaffolding exists before the first variable does, so that variable needs no
+  new mechanism. A production build (for example a Docker image) can run without server secrets,
+  but a page that reads one while it is prerendered still needs it at build time. `next typegen`
+  (`pnpm typecheck`) loads the config in the build phase, so required public variables must also
+  be set for type checks. The check runs inside the exported function, not when the file loads,
+  because only the function receives the phase. A standalone build's `server.js` (if instruction
+  102 uses one) does not load `next.config.ts`, so the server check would move to
+  `instrumentation.ts`. `server-only` is installed although Next.js handles the import itself, so
+  that Vitest and Storybook can resolve it.
+
+### WEB_HOST and WEB_PORT stay shell variables
+
+- Date: 2026-10-11 · Instruction: #4 · Author: Charlie
+- Context: the web app's scripts pass `${WEB_HOST:-127.0.0.1}` and `${WEB_PORT:-3000}` to the
+  Next.js CLI (instruction 1). Next.js opens the port before it reads `.env` files or its config,
+  so neither can set them, and a check in `next.config.ts` would run after the port is open.
+- Decision: keep them as shell variables, documented in `apps/web/.env.example` and the README,
+  and leave them out of the web env schemas. Next.js's CLI rejects a non-numeric port, and an
+  out-of-range port or a bad host fails to bind.
+- Trade-offs: unlike `apps/api/.env`, `apps/web/.env` cannot set the port, and a bad value gets
+  Next.js's or Node's error rather than ours. A wrapper script that validates them and then
+  starts Next.js would fix both, at the cost of another process that must forward signals and
+  exit codes, for two development settings.
+
+### Every .env file is ignored, and a test asks git to prove it
+
+- Date: 2026-10-11 · Instruction: #4 · Author: Charlie
+- Context: instruction 4 asks to confirm that `.env` is gitignored. Next.js's documentation
+  suggests committing default files such as `.env.development` and `.env.production`.
+- Decision: keep the rules from instruction 1 (`.env`, `.env.*`, `!.env.example`): every env
+  file in every folder is ignored, and only the `.env.example` templates are committed; defaults
+  live in the Zod schemas instead. `env-files.test.ts` asks git itself
+  (`git check-ignore --no-index --verbose`, with the user's global excludes file left out) about
+  17 env-file names and the three templates, and fails if any `.env` file is committed. It runs in
+  a root `tooling` Vitest project for tests of repository-wide rules.
+- Trade-offs: a template with any other name (such as `.env.sample`) would be ignored. The test
+  needs `git`, which every checkout and CI runner has.
