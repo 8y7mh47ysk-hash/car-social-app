@@ -11,8 +11,9 @@ import { requestIdFor } from "./request-id.ts";
 
 /**
  * "json" writes one JSON object per line: the format for production and for log tools. "pretty"
- * writes readable single lines for a developer's terminal; it needs pino-pretty, a development
- * dependency that production installs leave out.
+ * writes a readable line per entry for a developer's terminal (an error's details and stack
+ * follow on the next lines); it needs pino-pretty, a development dependency that production
+ * installs leave out.
  */
 export const LOG_FORMATS = ["json", "pretty"] as const;
 export type LogFormat = (typeof LOG_FORMATS)[number];
