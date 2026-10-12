@@ -4,8 +4,12 @@ import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, onTestFinished } from "vitest";
+import { z } from "zod";
 
 const apiRoot = fileURLToPath(new URL("..", import.meta.url));
+
+/** The fields the logging tests read from a JSON log line. */
+const logLineSchema = z.looseObject({ msg: z.string(), reqId: z.string().optional() });
 
 interface Exit {
   readonly code: number | null;
@@ -117,5 +121,30 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
 
     expect(await server.exited).toEqual({ code: 1, signal: null });
     expect(server.output()).toContain("API_PORT");
+  });
+
+  it("logs JSON lines that carry the request ID it sends back", async () => {
+    const server = startServer();
+    const url = await listeningUrl(server);
+
+    const response = await fetch(new URL("/health?token=query-secret", url), {
+      headers: { "x-request-id": "entrypoint-test-0001" },
+    });
+    expect(response.headers.get("x-request-id")).toBe("entrypoint-test-0001");
+    server.child.kill("SIGTERM");
+    expect(await server.exited).toEqual({ code: 0, signal: null });
+
+    const lines = server
+      .output()
+      .trimEnd()
+      .split("\n")
+      .map((line) => logLineSchema.parse(JSON.parse(line)));
+    expect(lines.map((line) => [line.msg, line.reqId])).toEqual([
+      [`Server listening at ${url.origin}`, undefined],
+      ["incoming request", "entrypoint-test-0001"],
+      ["request completed", "entrypoint-test-0001"],
+      ["shutting down", undefined],
+    ]);
+    expect(server.output()).not.toContain("query-secret");
   });
 });
