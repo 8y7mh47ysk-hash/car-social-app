@@ -30,10 +30,10 @@ numbered instructions, is in [docs/PLAYBOOK.md](docs/PLAYBOOK.md).
 | Animation  | Motion (formerly Framer Motion)                                           | Phase 1 (design system)                      |
 | Backend    | Fastify 5, TypeScript, ES modules                                         | In place                                     |
 | Validation | Zod 4, at every input boundary                                            | In place                                     |
-| Data       | PostgreSQL, Redis                                                         | Instruction 3 (containers), Phase 2 (schema) |
+| Data       | PostgreSQL, Redis                                                         | Containers in place; schema in Phase 2 (#25) |
 | AI         | Ollama (local LLM, never publicly exposed)                                | Phase 5                                      |
 | Billing    | Stripe Checkout, Customer Portal and webhooks                             | Phase 6                                      |
-| Hosting    | Docker Compose on a home server, reached only through Cloudflare Tunnel   | Instruction 3 (Compose), Phase 7 (Tunnel)    |
+| Hosting    | Docker Compose on a home server, reached only through Cloudflare Tunnel   | Compose in place; Tunnel in Phase 7 (#99)    |
 | Tooling    | pnpm 12 workspaces, TypeScript 6 (strict), ESLint 9, Prettier 3, Vitest 4 | In place                                     |
 
 ## Repository layout
@@ -56,7 +56,8 @@ docs/         Playbook, build log, decisions, dependency register and review log
 - pnpm 12. The exact version is pinned in `package.json` (`packageManager`). Run
   `corepack enable` once (Corepack ships with Node.js 24), or install pnpm 12 any other way;
   either picks up the pinned version.
-- Docker, from instruction 3 onwards (PostgreSQL and Redis). It is not needed yet.
+- Docker with Compose (Docker Desktop or OrbStack on macOS) to run PostgreSQL and Redis; see
+  [Local services](#local-services). The apps do not use them yet, so `pnpm dev` works without it.
 
 ## Quick start
 
@@ -71,6 +72,19 @@ pnpm dev
 Press Ctrl+C to stop both. Both servers listen on 127.0.0.1 only. To use other ports, set
 `WEB_PORT` and `API_PORT`, for example `WEB_PORT=3010 API_PORT=4010 pnpm dev`. `WEB_HOST` and
 `API_HOST` change the bind address; only widen it (for example to `0.0.0.0`) on purpose.
+
+## Local services
+
+PostgreSQL (with pgvector) and Redis run in Docker, defined in
+[docker-compose.yml](docker-compose.yml):
+
+```sh
+cp .env.example .env          # then set POSTGRES_PASSWORD and REDIS_PASSWORD (see the file)
+docker compose up -d --wait   # starts both and waits until they are healthy
+```
+
+Both listen on 127.0.0.1 only (ports 5432 and 6379). Day-to-day commands, connection details and
+how to reset the data are in [infra/README.md](infra/README.md).
 
 ## Common commands
 

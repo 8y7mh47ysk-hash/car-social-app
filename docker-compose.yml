@@ -1,0 +1,119 @@
+# Local services for Apex Garage (playbook instruction 3): PostgreSQL and Redis, plus placeholders
+# for the API and web apps. How to use it: infra/README.md. Trade-offs: docs/DECISIONS.md.
+#
+#   cp .env.example .env          # then set POSTGRES_PASSWORD and REDIS_PASSWORD in .env
+#   docker compose up -d --wait   # starts postgres and redis only; waits until both are healthy
+#   docker compose ps             # both show "(healthy)"
+#
+# Ports are published on 127.0.0.1 only, so these services are not reachable from other machines.
+
+name: apex-garage
+
+services:
+  postgres:
+    # PostgreSQL 18.6 with pgvector 0.8.7 (needed by instruction 77) on Debian 13 "trixie". The
+    # digest pins this exact multi-platform build: always change the tag and the digest together.
+    image: pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0
+    restart: unless-stopped
+    environment:
+      # The image creates this superuser and database only when the data volume is empty.
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set it in .env (see .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-apex_garage}
+    ports:
+      - 127.0.0.1:${POSTGRES_PORT:-5432}:5432
+    volumes:
+      # PostgreSQL 18+ images keep the data in /var/lib/postgresql/18/docker and refuse to start
+      # with a volume at the old /var/lib/postgresql/data path.
+      - postgres-data:/var/lib/postgresql
+    # Docker's default /dev/shm (64 MB) is too small for large parallel queries and parallel
+    # pgvector index builds; the image's documentation suggests 256 MB. It is an upper limit, not
+    # memory set aside.
+    shm_size: 256mb
+    healthcheck:
+      # Over TCP on purpose: while the image initialises an empty volume, its temporary server
+      # listens only on a Unix socket, so this check passes only once the real server is up.
+      test:
+        - CMD-SHELL
+        - pg_isready --host=127.0.0.1 --username="$${POSTGRES_USER}" --dbname="$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+      start_interval: 1s
+    # Docker's default log driver never rotates its files; "local" keeps at most 100 MB.
+    logging:
+      driver: local
+
+  redis:
+    # Redis 8.10.2 on Alpine 3.23 (licence notes in docs/DECISIONS.md). The digest pins this exact
+    # multi-platform build: always change the tag and the digest together.
+    image: redis:8.10.2-alpine3.23@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+    restart: unless-stopped
+    # The image turns Redis's protected mode off, so without a password any client that can reach
+    # the port gets in. Keep redis-server as the first word: the image drops root privileges only
+    # when it starts redis-server.
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?set it in .env (see .env.example)}
+      # Also log every write to an append-only file, synced once a second. Redis's default
+      # snapshots alone can lose up to an hour of writes (queued jobs, sessions) in a crash.
+      - --appendonly
+      - "yes"
+    environment:
+      # redis-cli reads its password from this variable, so neither the health check nor
+      # `docker compose exec redis redis-cli` needs the password on its command line.
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?set it in .env (see .env.example)}
+    ports:
+      - 127.0.0.1:${REDIS_PORT:-6379}:6379
+    volumes:
+      # The image declares no volume: without this one the data would go with the container.
+      - redis-data:/data
+    healthcheck:
+      # -e makes redis-cli exit with an error when Redis replies with one, such as NOAUTH for a
+      # wrong password or LOADING while the data is read back after a restart. Without -e both
+      # would count as healthy.
+      test: [CMD, redis-cli, -e, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+      start_interval: 1s
+    logging:
+      driver: local
+
+  # Placeholders for the apps, in the "app" profile so that a plain `docker compose up` skips them.
+  # Neither app has a container image yet: run both on the host with `pnpm dev`. With the profile
+  # (`docker compose --profile app up`), each placeholder prints that reminder and exits with
+  # status 1 once the services it depends on are up.
+  api:
+    profiles: [app]
+    image: alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+    command:
+      - sh
+      - -c
+      - 'echo "Placeholder: the API has no image yet. Run it on the host: pnpm dev" >&2; exit 1'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    profiles: [app]
+    image: alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+    command:
+      - sh
+      - -c
+      - 'echo "Placeholder: the web app has no image yet. Run it on the host: pnpm dev" >&2; exit 1'
+    depends_on:
+      # Becomes service_healthy once the API image has a health check (endpoints: instruction 33).
+      api:
+        condition: service_started
+    restart: "no"
+
+volumes:
+  postgres-data:
+  redis-data:

@@ -343,3 +343,122 @@ Entry template:
   `footer-leading-blank`; add a blank line or reword it. Messages that start like git's own
   (`Merge ...`, `Revert ...`, `fixup!`, `squash!`, `amend!`) are accepted without any checks,
   including hand-written ones.
+
+### PostgreSQL 18 with pgvector, from the pgvector/pgvector image
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Bravo
+- Context: instruction 3 needs a PostgreSQL container and instruction 77 needs the pgvector
+  extension. PostgreSQL 18.6 is the newest stable release (19 is still a beta, and pgvector
+  publishes no image for it), and pgvector 0.8.7 is the newest pgvector release. pgvector's
+  author publishes `pgvector/pgvector` images, built on the official `postgres` image.
+- Decision: `pgvector/pgvector:0.8.7-pg18-trixie` (Debian 13; bookworm is the older Debian 12),
+  pinned to its multi-platform digest (amd64 and arm64). The named volume is mounted at
+  `/var/lib/postgresql`: PostgreSQL 18+ images keep data in `/var/lib/postgresql/18/docker` and
+  refuse to start with a volume at the old `/var/lib/postgresql/data` (checked in the image's
+  entrypoint). `shm_size: 256mb`, the value the image's documentation suggests: Docker's 64 MB
+  `/dev/shm` breaks large parallel queries, and pgvector's README asks for at least
+  `maintenance_work_mem` for parallel HNSW index builds. The extension is installed but not
+  enabled; migrations enable it (instructions 26 and 77).
+- Trade-offs: the image is not a Docker official image, but it is the official `postgres` image
+  plus one extension, maintained by that extension's author. Building our own image (official
+  `postgres` plus the PGDG `postgresql-18-pgvector` package) needs a Dockerfile that cannot be
+  built or tested here without Docker. Moving to PostgreSQL 19 later needs `pg_upgrade` or a dump
+  and restore. The cluster's default collation (the image's `en_US.utf8`, from glibc) is fixed
+  when the volume is first initialised, so instruction 25 or 26 should settle collation before
+  real data exists.
+
+### Redis 8 under its AGPLv3 option, with Valkey as the fallback
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Bravo
+- Context: the Master Context names Redis. Redis 7.2 and earlier are BSD-3-Clause; 7.4 moved to
+  a choice of RSALv2 or SSPLv1, neither of them open source; Redis 8 added AGPLv3 as a third
+  choice (`LICENSE.txt` in the 8.10.2 source). Valkey, the Linux Foundation's fork of Redis
+  7.2.4, stays BSD-3-Clause (9.1.2 is current, with an official `valkey/valkey` image).
+- Decision: Redis 8.10.2, the newest release, on Alpine 3.23, pinned to its digest, used under
+  the AGPLv3 option as an unmodified program in its own container. AGPLv3's extra duty (offering
+  the source to users who interact with it over a network) applies to modified versions of Redis
+  itself; our code only talks to Redis over its protocol. RSALv2 and SSPLv1 restrict offering
+  Redis itself as a service to others, which we do not. This is not legal advice: the owner
+  should confirm the choice (owner action in the build log).
+- Trade-offs: Valkey would remove the licence question and speaks the same protocol for what is
+  planned: queues (BullMQ, instruction 37, documents a Valkey client adapter), rate limits,
+  sessions, caching (instruction 35) and sorted-set leaderboards (instruction 147). If the code
+  sticks to core commands and avoids Redis-only modules (the Query Engine, JSON, time series),
+  switching stays a one-line image change plus a test run. Redis's default `maxmemory-policy` of
+  `noeviction` is kept on purpose: BullMQ's production guide says it is the only setting that
+  keeps queues correct, so a cache that needs eviction should get its own Redis instance.
+
+### Compose secure defaults: required passwords, loopback ports, pinned images
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Bravo
+- Context: the compose file must be safe to run as it is, on a laptop and later on the home
+  server, and must never contain a secret.
+- Decision: both passwords use Compose's required form, `${POSTGRES_PASSWORD:?...}`, with no
+  default; the root `.env.example` leaves them blank. Every port is published on `127.0.0.1`
+  only. Redis gets `--requirepass`, because the official image compiles Redis's protected mode
+  off; `redis-cli` reads the password from `REDISCLI_AUTH`, so neither the health check nor
+  `docker compose exec redis redis-cli` passes it as an argument. Every image is pinned to a tag
+  plus the digest of its multi-platform index. PostgreSQL and Redis use Docker's `local` log
+  driver, which keeps at most 100 MB per container, because the default `json-file` driver never
+  rotates.
+- Trade-offs: every `docker compose` command (`config`, `ps` and `down` too) fails without the
+  two passwords, so CI must pass throwaway values to `docker compose config`. The passwords are
+  visible to anyone who can run `docker inspect`, which on Linux already means root-equivalent
+  access; Docker secrets come with instruction 104. Digest pins stop silent changes but also stop
+  base-image security fixes until someone bumps them; instruction 106 adds automated updates.
+  The API will connect as the PostgreSQL superuser until the migrations (instruction 26) add a
+  least-privilege role. Other containers on the Compose network can still reach both services;
+  instruction 103 moves them to an internal network.
+
+### Health checks that mean "ready": pg_isready over TCP and redis-cli -e
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Bravo
+- Context: `depends_on: condition: service_healthy` is only as good as the check. On first start
+  the postgres image initialises the database with a temporary server that listens only on a
+  Unix socket, then restarts it; and `redis-cli ping` exits 0 even when Redis answers with an
+  error.
+- Decision: `pg_isready --host=127.0.0.1` with the configured user and database (with wrong
+  names, PostgreSQL logs a failed connection attempt on every check). For Redis,
+  `redis-cli -e ping`, authenticated through `REDISCLI_AUTH`. Checked against Redis 8.10.2 built
+  from source: it exits 0 only on `PONG`, and 1 with a wrong or missing password, while the data
+  loads (`LOADING`) and when the server is down; without `-e`, a wrong password still exits 0.
+  Timings: every 10 s, 5 s timeout, 5 retries, start period 30 s (PostgreSQL) or 10 s (Redis),
+  checking every second during it (`start_interval`).
+- Trade-offs: `start_interval` needs Compose 2.20.2 and Docker Engine 25 or later, which any
+  current Docker Desktop or OrbStack meets. `pg_isready` only shows that the server accepts
+  connections, not that migrations have run; readiness of the app itself is instruction 33.
+
+### App placeholders: Alpine stubs in the "app" profile, no Dockerfiles yet
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Bravo
+- Context: the playbook asks for placeholders for the API and web apps. Without Docker on this
+  machine a Dockerfile cannot be built or tested, and a Dockerfile that has never been built would
+  not be honest. Hardened app containers are instruction 102.
+- Decision: `api` and `web` are in the `app` profile, so a plain `docker compose up` starts only
+  PostgreSQL and Redis. Each runs the pinned `alpine:3.24.2` image to print "Placeholder: ...
+  Run it on the host: pnpm dev" to stderr and exit 1, with `restart: "no"`. `api` waits for
+  healthy PostgreSQL and Redis; `web` waits for `api` to start (it has no health check to wait
+  for). Alpine rather than BusyBox: the newest BusyBox release that upstream calls stable (1.36.1,
+  Docker Hub's `stable` tag) was built in 2023, while Alpine 3.24.2 is from September 2026.
+- Trade-offs: `docker compose --profile app up` deliberately ends with both placeholders exited
+  with status 1 until real images replace them. The placeholders document the dependency graph
+  but do not run the apps; run them on the host with `pnpm dev`.
+
+### Static compose tests as a root Vitest project, using the yaml package
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Bravo
+- Context: the Master Context requires tests for every feature, Docker is not installed on the
+  build machine, and `infra/` is not a workspace package (instruction 1).
+- Decision: `infra/compose.test.ts` parses `docker-compose.yml` with `yaml` (a YAML 1.2
+  parser), checks the parts it relies on with Zod, and asserts the rules above: only
+  `postgres` and `redis` start by default, ports stay on 127.0.0.1, secrets use the required
+  form, health checks, volumes, restart policies, log rotation, pinned images, and that
+  `.env.example` documents every variable with the same defaults. It runs as the `infra` project
+  of the root `vitest.config.ts`; the root `tsconfig.json` includes `infra/**/*.ts` so that
+  `pnpm typecheck` and ESLint cover it. `yaml` and `zod` became root dev dependencies. Validating
+  against the compose-spec JSON Schema and with the real Compose parser was done once, outside
+  the repository (see the build log), so the repository gains no validator dependencies.
+- Trade-offs: static checks cannot prove that the containers start; that needs Docker (an owner
+  action) and CI's `docker compose config`. The tests read the files from disk, which Vitest's
+  import graph cannot see, so `vitest related` only runs them for a change to
+  `docker-compose.yml` or `.env.example` if those files are listed as force-rerun triggers.
