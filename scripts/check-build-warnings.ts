@@ -1,8 +1,9 @@
 // The CI step "Fail on build warnings" (instruction 5: "fail on any warning"). It reads the saved
-// output of `pnpm build` and fails if the build printed a warning. Only Next.js prints warnings
-// there: tsc, which builds packages/shared and the API, reports only errors, and errors already
-// fail `pnpm build`. pnpm merges every package's stdout and stderr into one stream, so warnings
-// are recognised by how they are written. docs/DECISIONS.md lists what CI enforces and why.
+// output of `pnpm build` and fails if the build printed a warning. Next.js is the reason: it prints
+// warnings and still finishes the build. (tsc, which builds packages/shared and the API, reports
+// only errors, and errors already fail `pnpm build`.) pnpm merges every package's stdout and
+// stderr into one stream, so warnings are recognised by how they are written.
+// docs/DECISIONS.md lists what CI enforces and why.
 //
 // Usage: node scripts/check-build-warnings.ts <file holding the output of pnpm build>
 // Exit status: 0 no warnings, 1 warnings found, 2 wrong arguments or unreadable file.
@@ -11,9 +12,9 @@ import { readFileSync } from "node:fs";
 import { parseArgs, stripVTControlCharacters } from "node:util";
 
 /**
- * How warnings start: Next.js's "⚠" log prefix; "Warning:", used by older Next.js messages and,
- * as "(node:123) Warning:" or "DeprecationWarning:", by Node.js; the header of Turbopack's
- * compile warnings; and pnpm's "WARN".
+ * How warnings are marked: Next.js's "⚠" log prefix; "Warning:", used by older Next.js messages,
+ * by each of Turbopack's compile warnings and, as "(node:123) Warning:" or "DeprecationWarning:",
+ * by Node.js; the header above Turbopack's compile warnings; and pnpm's "WARN".
  */
 const WARNING_MARKERS = [
   /⚠/u,

@@ -1,6 +1,7 @@
-# Continuous integration (playbook instruction 5). Every push to main and every pull request is
-# installed, checked, tested and built with the root package.json scripts that developers run, and
-# the run fails on any warning. docs/DECISIONS.md lists what counts as a warning here, and why.
+# Continuous integration (playbook instruction 5). For every push to main and every pull request,
+# CI installs the dependencies, then checks, tests and builds the code with the root package.json
+# scripts that developers run, and fails on any warning. docs/DECISIONS.md lists what counts as a
+# warning here, and why.
 name: CI
 
 on:
@@ -27,7 +28,7 @@ jobs:
   checks:
     name: Checks
     runs-on: ubuntu-26.04
-    # A normal run takes a few minutes. This stops a hung step from burning Actions minutes.
+    # A normal run should take a few minutes. This stops a hung step from burning Actions minutes.
     timeout-minutes: 15
     env:
       # CI builds are not usage worth reporting to Next.js's telemetry.

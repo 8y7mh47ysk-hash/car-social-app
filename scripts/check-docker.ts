@@ -1,7 +1,8 @@
-// Runs before every docker:* script in package.json (instruction 7). It checks that Docker can run
-// this project's docker-compose.yml and, when it cannot, explains what to do instead of leaving
-// the shell to fail with "docker: command not found". Exits with status 1 after printing the
-// problem; prints nothing and exits with status 0 when Docker is ready.
+// Runs before every docker:* script in package.json (instruction 7). It checks that Docker is ready
+// to run Docker Compose (installed, with the Compose v2 plugin and a running engine) and, when it
+// is not, explains what to do instead of leaving the shell to fail with "docker: command not
+// found". Exits with status 1 after printing the problem; prints nothing and exits with status 0
+// when Docker is ready.
 //
 // Usage, from the repository root: node scripts/check-docker.ts
 
