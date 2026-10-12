@@ -85,3 +85,123 @@ None for this instruction.
   loader and `.env.example` files are instruction 4.
 - There are no git hooks yet (instruction 2) and no CI yet (instruction 5).
 - Next.js collects anonymous telemetry by default; the README explains how to opt out.
+
+## #2 - Git hooks and conventional commits
+
+**What changed**
+
+- `pnpm install` now installs two git hooks with husky 9: the root `prepare` script points git's
+  `core.hooksPath` at `.husky/_`, a generated and gitignored folder. Run `pnpm install` once in
+  every clone and git worktree.
+- `.husky/pre-commit` runs lint-staged with `lint-staged.config.ts` on exactly what is being
+  committed (unstaged changes and untracked files are set aside meanwhile and restored after, and
+  deleted files count as staged). One task at a time: ESLint `--max-warnings=0 --fix`, then
+  Prettier, on staged code; Prettier on other staged files; `pnpm typecheck` for the whole
+  repository when a staged file is TypeScript, JSON or a pnpm workspace file; then
+  `vitest related --run --passWithNoTests` for the tests that import a staged file. ESLint and
+  Prettier fixes are added to the commit. A failing task does not stop the others.
+- `.husky/commit-msg` runs commitlint with `commitlint.config.mjs`: Conventional Commits
+  (`@commitlint/config-conventional`) plus the team rules (lowercase scope and subject, subject at
+  most 72 characters, a blank line before the body and before the footer, so the
+  `Co-Authored-By:` trailer passes when it has a paragraph of its own).
+- Root `vitest.config.ts`: a `tooling` project for tests at the repository root, and
+  `forceRerunTriggers` so that staging dependency, tsconfig, Vitest, hook or hook-config files
+  runs every test.
+- `git-hooks.test.ts` (48 tests): 27 commit messages through the real commit-msg hook and
+  commitlint config; 10 pre-commit scenarios that run the real lint-staged with this
+  repository's config in scratch git repositories, with stand-ins for ESLint, Prettier, pnpm and
+  Vitest that record their calls (order, files, hiding and restoring, deleted files, fixes being
+  staged, a failure in each tool); and 11 runs of the real `vitest related` in this checkout,
+  which check that staging a rerun-trigger file runs every test and an unrelated file runs none.
+- README: "Git hooks" and "Commit messages" sections and a `.husky/` line in the layout.
+
+**How to verify**
+
+Run from the repository root:
+
+```sh
+pnpm install --frozen-lockfile          # a fresh install prints ". prepare$ husky"
+git config --get core.hooksPath         # prints .husky/_
+pnpm exec vitest run --project tooling  # "Tests  48 passed (48)"
+pnpm lint && pnpm typecheck && pnpm test
+```
+
+Then try the hooks in a scratch clone (not in your main checkout). Each rejected commit prints
+the reason and leaves your files as they were:
+
+```sh
+git clone . /tmp/apex-hooks-try && cd /tmp/apex-hooks-try && pnpm install --frozen-lockfile
+git commit --allow-empty -m "Add stuff"         # rejected: [subject-empty] [type-empty]
+git commit --allow-empty -m "feat: Add stuff"   # rejected: [subject-case]
+printf 'export const parse = (text: string): any => JSON.parse(text);\n' > apps/api/src/try.ts
+git add apps/api/src/try.ts
+git commit -m "feat(api): add a parser"         # rejected: @typescript-eslint/no-explicit-any
+printf 'export const port: number = "4000";\n' > apps/api/src/try.ts
+git add apps/api/src/try.ts
+git commit -m "feat(api): add a port"           # rejected: error TS2322
+git rm --quiet --force apps/api/src/try.ts
+sed -i.bak 's/z.strictObject(/z.object(/' packages/shared/src/health.ts
+rm packages/shared/src/health.ts.bak
+git add packages/shared/src/health.ts
+git commit -m "fix(shared): relax the schema"   # rejected: × rejects an unexpected extra field
+git restore --staged --worktree packages/shared/src/health.ts
+printf '\nA note.\n' >> infra/README.md && git add infra/README.md
+git commit -m "docs(infra): add a note"         # passes in about a second
+cd - && rm -rf /tmp/apex-hooks-try
+```
+
+Measured on the Apple M5 in a scratch clone, committing from a non-interactive shell:
+
+| Commit                                                  | Result   | Time   |
+| ------------------------------------------------------- | -------- | ------ |
+| Nothing staged (`--allow-empty`): the hooks' overhead   | passes   | 0.3 s  |
+| A bad message                                           | rejected | 0.3 s  |
+| A documentation change                                  | passes   | 0.7 s  |
+| A deleted module that is still imported                 | rejected | 1.2 s  |
+| A type error                                            | rejected | 2.6 s  |
+| A lint error                                            | rejected | 2.7 s  |
+| A change that breaks a related test                     | rejected | 3.2 s  |
+| A source file and its test (ESLint and Prettier fix it) | passes   | 3.0 s  |
+| `git commit -a` with two changed files                  | passes   | 2.9 s  |
+| `package.json` staged, so every test runs               | passes   | 12.9 s |
+
+That run also checked that a rejected commit keeps the staged file, its unstaged edit and an
+untracked file; that a new git worktree runs the hooks once `pnpm install` has run in it; and
+that `HUSKY=0` skips them. Separate checks in a scratch clone showed that Ctrl+C during
+the type check restores everything and leaves no stash behind, and that a merge-conflict
+resolution commit passes the hooks and is still a merge commit with both parents.
+
+**Dependencies added**
+
+`husky`, `lint-staged`, `@commitlint/cli` and `@commitlint/config-conventional`, as root
+development dependencies. They add 57 packages to the lockfile: husky; lint-staged and 2 of its
+dependencies that were not there yet; and 53 for commitlint. None has an install script. Reasons
+and alternatives are in `docs/DEPENDENCIES.md`.
+
+**Owner actions**
+
+None. If you commit from a GUI git client that cannot find `node` or `pnpm`, add a `PATH` line to
+`~/.config/husky/init.sh` (see the README section "Git hooks").
+
+**Notes & limitations**
+
+- Hooks are local and can be skipped (`git commit --no-verify`, `HUSKY=0`); CI (instruction 5) is
+  the check that cannot be bypassed. Skip them only in an emergency.
+- husky stores `core.hooksPath` in the repository's git config, which every worktree shares; a
+  worktree runs the hooks only once `pnpm install` has run in it.
+- `vitest related` follows imports only. Tests that run code in a separate process are not
+  selected when that code changes: editing `apps/api/src/server.ts` runs no tests in the hook,
+  because `server.test.ts` starts it with `node`. CI runs every test.
+- Changing `eslint.config.mjs` or the Prettier settings lints and formats only the staged files;
+  run `pnpm lint` and `pnpm format:check` to check the whole repository.
+- Untracked files are stashed and restored on every commit; keep large scratch files gitignored.
+- The hook's backup lives in the git stash, which all worktrees of a repository share. Committing
+  in two worktrees at the same moment worked every time (30 commits in 15 simultaneous pairs, no
+  failures, nothing lost) but left a stray `lint-staged automatic backup` entry 3 times; such an
+  entry is a copy and safe to drop. With several worktrees, pop your own stash entry by name, not
+  the top one, which may be another worktree's backup during a commit.
+- When the type check fails in one package, `pnpm --recursive` stops the other packages' checks,
+  so the output also shows `Command failed with signal SIGKILL` for them.
+- The commit message rules are stricter than `config-conventional`: names in a subject must be
+  lowercase or in backticks or quotes. A body line such as `Note: ...` directly after other body
+  text is read as the start of the footer and rejected; add a blank line before it.

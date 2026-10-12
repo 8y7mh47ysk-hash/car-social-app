@@ -243,3 +243,103 @@ Entry template:
 - Decision: support macOS, Linux and WSL.
 - Trade-offs: native Windows shells are not supported. The deployment target is a Linux home
   server, so this costs nothing today.
+
+### Git hooks with husky, lint-staged and commitlint
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Alpha
+- Context: instruction 2 asks for pre-commit hooks that lint, type-check and unit-test the staged
+  files, and a Conventional Commits check. The hooks must work for every engineer, in git
+  worktrees and when commits are made from scripts.
+- Decision: husky 9 installs the hooks from the root `prepare` script, which `pnpm install` runs.
+  `.husky/pre-commit` runs lint-staged and `.husky/commit-msg` runs commitlint, both called
+  straight from `node_modules/.bin` (husky puts it on `PATH`) to avoid the start-up time of
+  `pnpm exec` or `npx`. Verified: `pnpm install --prod` does not run `prepare`, and husky prints
+  ".git can't be found" and exits 0 when there is no `.git`, so production installs and Docker
+  builds are unaffected.
+- Trade-offs: husky writes `core.hooksPath = .husky/_` to the repository's git config, which all
+  worktrees share; a worktree only runs the hooks once `pnpm install` has created its own
+  `.husky/_`, and commits made there before that are not checked. Hooks can always be skipped
+  (`--no-verify`, `HUSKY=0`), so CI remains the gate that cannot be bypassed.
+
+### The pre-commit hook checks exactly the staged snapshot, one task at a time
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Alpha
+- Context: by default lint-staged hides only the unstaged parts of partially staged files, so the
+  type check and the tests would also see untracked files and unstaged edits and could pass for
+  code that is not in the commit (for example a new module that was never `git add`ed). It also
+  ignores deleted files, so a commit that only deletes a module that is still imported would skip
+  every check, and it stops the remaining tasks after the first failure.
+- Decision: `lint-staged --hide-all --diff-filter=ACMRD --concurrent false --continue-on-error`.
+  `--hide-all` stashes unstaged changes and untracked files while the tasks run and restores them
+  afterwards (also on failure and on Ctrl+C, both verified). Tasks run one at a time in the
+  config's order, so ESLint `--fix` and Prettier finish before the type check and the tests read
+  the files. ESLint and Prettier get `--no-error-on-unmatched-pattern`, so deleted paths are
+  skipped instead of failing.
+- Trade-offs: every commit stashes and restores untracked files: large untracked files make
+  commits slower and should be gitignored, and editors or dev servers see them vanish for a few
+  seconds. Running tasks one at a time costs about a second per commit compared with running them
+  in parallel. A failing commit takes as long as a passing one, because every task still runs.
+  lint-staged keeps its backup in the git stash, which all worktrees share: during a commit the
+  top stash entry may be another worktree's backup, and two worktrees committing at the same
+  moment occasionally leave a stray backup entry (3 in 30 simultaneous commits in testing, with
+  no failures or lost files). The only way to avoid the stash, `--no-stash`, would also give up
+  hiding unstaged changes and untracked files and the revert on failure, so we document it
+  instead (README, "Git hooks").
+
+### Whole-repository type check in the pre-commit hook
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Alpha
+- Context: the hook could type-check the whole repository or only the workspaces that a commit
+  touches (plus the packages that depend on them).
+- Decision: run `pnpm typecheck`, the same command as CI, once per commit when a staged file
+  (deleted files included) is TypeScript, JSON, `pnpm-lock.yaml` or `pnpm-workspace.yaml`.
+- Trade-offs: measured on the Apple M5 with warm caches: the whole repository takes 1.3 s, while
+  single packages take 0.31 s (shared), 0.48 s (api), 0.69 s (web, including `next typegen`) and
+  0.31 s (the root files), and pnpm already checks packages in parallel. Checking only affected
+  workspaces would save at most about half a second, but it needs the dependents of every changed
+  package and special cases for root files such as `tsconfig.base.json` and the lockfile, and a
+  mistake there lets type errors through. If `pnpm typecheck` grows beyond about 10 s, switch to
+  a filter such as `pnpm --filter "...[HEAD]" typecheck` (changed packages and their dependents)
+  plus the root check.
+
+### Related unit tests in the pre-commit hook, with absolute rerun triggers
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Alpha
+- Context: `vitest related` runs only the tests whose import graph contains a staged file. Files
+  that change test results without being imported (dependencies, tsconfig files, Vitest configs
+  and setup files, and the hook files that git-hooks.test.ts runs as commands) need Vitest's
+  `forceRerunTriggers`, which run every test. Surprise: Vitest matches these globs against
+  absolute paths, and `**` never enters a directory whose name starts with a dot, so its default
+  triggers (`**/package.json/**`) match nothing when the checkout sits inside a hidden directory,
+  such as the git worktrees under `~/.claude/`. The default `**/{vitest,vite}.config.*/**` does
+  not match the config file itself even in an ordinary path.
+- Decision: the hook runs `vitest related --run --passWithNoTests` on every staged file, and the
+  root `vitest.config.ts` lists absolute triggers built from the repository root (with glob
+  characters in the path escaped): package.json files, the pnpm lockfile and workspace file,
+  tsconfig files, Vite and Vitest configs and setup files, `.husky/*`, and the commitlint and
+  lint-staged configs. Tests for repository tooling live at the root in a `tooling` project.
+- Trade-offs: staging a trigger file runs every test (about 13 s today). Vitest follows imports
+  only, so a test that runs code in a child process is not selected when that code changes:
+  `apps/api/src/server.test.ts` starts `src/server.ts` with `node`, so editing `server.ts` runs
+  no tests in the hook. CI runs every test.
+
+### Commit message rules
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Alpha
+- Context: the team rule is "type(scope): subject" with a lowercase subject of at most 72
+  characters, body lines of at most 100 characters, and a `Co-Authored-By:` trailer after a blank
+  line. `@commitlint/config-conventional` rejects only subjects in sentence, start, Pascal or
+  upper case, so "add the Next.js app" passes it, and it only warns about missing blank lines.
+- Decision: commitlint with config-conventional plus `subject-case` and `scope-case` set to
+  lower-case (commitlint ignores text in backticks or quotes, so names can keep their case:
+  `` fix(api): validate `API_PORT` ``), `subject-max-length` 72, and `body-leading-blank` and
+  `footer-leading-blank` raised from warnings to errors: git treats the whole first paragraph as
+  the subject and reads trailers such as `Co-Authored-By` only from a paragraph of their own. The
+  config is plain `commitlint.config.mjs`: commitlint's types live in `@commitlint/types`, which
+  is not a direct dependency, and every rule is covered by git-hooks.test.ts instead.
+- Trade-offs: stricter than most projects, as names must be lowercased or quoted. The commit
+  parser treats any line that starts with one word, a colon and a space as the start of the
+  footer, so a body line such as "Note: ..." straight after other body text is rejected by
+  `footer-leading-blank`; add a blank line or reword it. Messages that start like git's own
+  (`Merge ...`, `Revert ...`, `fixup!`, `squash!`, `amend!`) are accepted without any checks,
+  including hand-written ones.

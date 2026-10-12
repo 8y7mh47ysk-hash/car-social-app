@@ -9,6 +9,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "prepare": "husky",
     "dev": "pnpm --parallel --filter @apex/api --filter @apex/web dev",
     "build": "pnpm --recursive build",
     "start": "pnpm --parallel --filter @apex/api --filter @apex/web start",
@@ -19,12 +20,16 @@
     "format:check": "prettier --check ."
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.3",
+    "@commitlint/config-conventional": "^21.2.3",
     "@eslint/js": "^9.39.5",
     "@types/node": "catalog:",
     "eslint": "^9.39.5",
     "eslint-config-next": "catalog:",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-jsx-a11y": "^6.10.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
     "next": "catalog:",
     "prettier": "^3.9.10",
     "typescript": "catalog:",
