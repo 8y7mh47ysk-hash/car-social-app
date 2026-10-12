@@ -81,7 +81,8 @@ describe.each(workflows)("$file", ({ text, workflow }) => {
 
   it("calls only root package.json scripts and repository files that exist", () => {
     for (const run of steps.flatMap((step) => (step.run === undefined ? [] : [step.run]))) {
-      for (const [, name = ""] of run.matchAll(/\bpnpm ([\w:-]+)/gu)) {
+      // The first word after `pnpm` that is not an option, as in `pnpm --silent lint`.
+      for (const [, name = ""] of run.matchAll(/\bpnpm (?:--?[\w-]+ )*([\w:-]+)/gu)) {
         expect(PNPM_COMMANDS.has(name) || name in rootScripts, `pnpm ${name}`).toBe(true);
       }
       for (const [, path = ""] of run.matchAll(/\bnode (scripts\/[\w./-]+)/gu)) {
