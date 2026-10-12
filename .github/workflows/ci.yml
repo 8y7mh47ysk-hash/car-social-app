@@ -1,0 +1,106 @@
+# Continuous integration (playbook instruction 5). Every push to main and every pull request is
+# installed, checked, tested and built with the root package.json scripts that developers run, and
+# the run fails on any warning. docs/DECISIONS.md lists what counts as a warning here, and why.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The token can only read the repository: nothing here pushes, comments or publishes.
+permissions:
+  contents: read
+
+concurrency:
+  # A new push to a pull request cancels the run for the previous push. Each push to main has a
+  # group of its own (its commit SHA), so every commit on main is checked to the end.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # Runs each step with `bash -eo pipefail`, so a failing command fails the step, also in a pipe.
+    shell: bash
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-26.04
+    # A normal run takes a few minutes. This stops a hung step from burning Actions minutes.
+    timeout-minutes: 15
+    env:
+      # CI builds are not usage worth reporting to Next.js's telemetry.
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check out the repository
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes, so leave no token behind in .git/config.
+          persist-credentials: false
+
+      # Before setup-node, whose pnpm cache needs the pnpm command to find the store.
+      - name: Set up pnpm (the version in package.json "packageManager")
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Set up Node.js (the version in .nvmrc) and the pnpm store cache
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          # Restores pnpm's package store, keyed on pnpm-lock.yaml; saves it after a green run.
+          cache: pnpm
+
+      - name: Install dependencies
+        id: install
+        run: pnpm install --frozen-lockfile
+
+      # Each check runs once the install has worked, even if an earlier check failed, so a single
+      # run reports every problem.
+      - name: Check peer dependencies
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm peers check
+
+      - name: Check formatting
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm format:check
+
+      - name: Lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm lint
+
+      - name: Type-check
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm typecheck
+
+      - name: Test
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm test
+
+      - name: Build
+        id: build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm build 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      # Next.js prints warnings but still finishes the build, so the saved log is checked.
+      - name: Fail on build warnings
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: node scripts/check-build-warnings.ts "$RUNNER_TEMP/build.log"
+
+      # Needs only Docker, which the runner has, so it also runs when the install failed.
+      - name: Validate docker-compose.yml
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        env:
+          # docker-compose.yml requires both. Compose prefers these to the empty values in the .env
+          # copied from the template. Throwaway values: this step starts nothing.
+          POSTGRES_PASSWORD: ci-only-not-a-secret
+          REDIS_PASSWORD: ci-only-not-a-secret
+        run: |
+          cp .env.example .env
+          # --profile '*' also checks the services in the "app" profile. --quiet prints nothing
+          # unless something is wrong, so any output (an error or a warning) fails the step.
+          docker compose --profile '*' config --quiet 2>&1 | tee "$RUNNER_TEMP/compose.log"
+          if [ -s "$RUNNER_TEMP/compose.log" ]; then
+            echo "docker compose printed the warnings above, and CI fails on any warning." >&2
+            exit 1
+          fi
