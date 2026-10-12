@@ -158,17 +158,18 @@ Measured on the Apple M5 in a scratch clone, committing from a non-interactive s
 | A bad message                                           | rejected | 0.3 s  |
 | A documentation change                                  | passes   | 0.7 s  |
 | A deleted module that is still imported                 | rejected | 1.2 s  |
-| A type error                                            | rejected | 2.5 s  |
-| A lint error                                            | rejected | 2.8 s  |
-| A change that breaks a related test                     | rejected | 3.1 s  |
-| A source file and its test (ESLint and Prettier fix it) | passes   | 2.9 s  |
+| A type error                                            | rejected | 2.6 s  |
+| A lint error                                            | rejected | 2.7 s  |
+| A change that breaks a related test                     | rejected | 3.2 s  |
+| A source file and its test (ESLint and Prettier fix it) | passes   | 3.0 s  |
 | `git commit -a` with two changed files                  | passes   | 2.9 s  |
-| `package.json` staged, so every test runs               | passes   | 11.0 s |
+| `package.json` staged, so every test runs               | passes   | 12.9 s |
 
-The same run checked that a rejected commit keeps the staged file, its unstaged edit and an
-untracked file; that Ctrl+C during the type check restores everything and leaves no stash
-behind; that a merge-conflict resolution commit passes the hooks and stays a merge; that a new
-git worktree runs the hooks once `pnpm install` has run in it; and that `HUSKY=0` skips them.
+That run also checked that a rejected commit keeps the staged file, its unstaged edit and an
+untracked file; that a new git worktree runs the hooks once `pnpm install` has run in it; and
+that `HUSKY=0` skips them. Separate checks in a scratch clone showed that Ctrl+C during
+the type check restores everything and leaves no stash behind, and that a merge-conflict
+resolution commit passes the hooks and is still a merge commit with both parents.
 
 **Dependencies added**
 

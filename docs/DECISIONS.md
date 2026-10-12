@@ -312,7 +312,7 @@ Entry template:
   characters in the path escaped): package.json files, the pnpm lockfile and workspace file,
   tsconfig files, Vite and Vitest configs and setup files, `.husky/*`, and the commitlint and
   lint-staged configs. Tests for repository tooling live at the root in a `tooling` project.
-- Trade-offs: staging a trigger file runs every test (about 11 s today). Vitest follows imports
+- Trade-offs: staging a trigger file runs every test (about 13 s today). Vitest follows imports
   only, so a test that runs code in a child process is not selected when that code changes:
   `apps/api/src/server.test.ts` starts `src/server.ts` with `node`, so editing `server.ts` runs
   no tests in the hook. CI runs every test.

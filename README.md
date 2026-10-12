@@ -121,7 +121,7 @@ way that stops it from tidying up, `git stash list` shows a `lint-staged automat
 that holds your changes.
 
 Typical run times on an Apple M5: about 1 s for a documentation change, about 3 s for a source
-change with related tests, and about 11 s when every test runs.
+change with related tests, and about 13 s when every test runs.
 
 Hooks also run from scripts and IDEs. They need `node` and `pnpm` on `PATH`; if a GUI git client
 cannot find them, set `PATH` in `~/.config/husky/init.sh`, which husky reads before every hook.
