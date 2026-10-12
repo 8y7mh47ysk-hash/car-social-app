@@ -145,3 +145,15 @@ describe("docker:* scripts", { timeout: 20_000 }, () => {
     expect(run.dockerCalls).toEqual(checks);
   });
 });
+
+describe("db:* scripts", () => {
+  // Placeholders until instruction 26 adds migrations and seed data. They must fail, so that
+  // nobody (and no script) mistakes them for a database that was migrated or seeded.
+  it.each(["db:migrate", "db:seed"])("%s says it is not available yet and fails", (name) => {
+    const run = runScript(name, { docker: false });
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toMatch(new RegExp(`^${name}: not available yet\\..*instruction 26\\.\\n$`));
+    expect(run.stdout).toBe("");
+  });
+});
