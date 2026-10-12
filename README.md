@@ -120,6 +120,12 @@ left as they were: fix the problem, stage the fix and commit again. If the hook 
 way that stops it from tidying up, `git stash list` shows a `lint-staged automatic backup` entry
 that holds your changes.
 
+The pre-commit hook keeps that backup in the git stash while it runs, and all worktrees of a
+repository share one stash list. When several worktrees are in use, pop or apply your own entry
+by name (`git stash list`, then `git stash pop stash@{n}`) rather than the top one, which may be
+another worktree's backup. Two worktrees committing at the same moment can occasionally leave a
+stray `lint-staged automatic backup` entry behind; it is only a copy, and safe to drop.
+
 Typical run times on an Apple M5: about 1 s for a documentation change, about 3 s for a source
 change with related tests, and about 13 s when every test runs.
 

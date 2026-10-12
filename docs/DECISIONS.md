@@ -279,6 +279,12 @@ Entry template:
   commits slower and should be gitignored, and editors or dev servers see them vanish for a few
   seconds. Running tasks one at a time costs about a second per commit compared with running them
   in parallel. A failing commit takes as long as a passing one, because every task still runs.
+  lint-staged keeps its backup in the git stash, which all worktrees share: during a commit the
+  top stash entry may be another worktree's backup, and two worktrees committing at the same
+  moment occasionally leave a stray backup entry (3 in 30 simultaneous commits in testing, with
+  no failures or lost files). The only way to avoid the stash, `--no-stash`, would also give up
+  hiding unstaged changes and untracked files and the revert on failure, so we document it
+  instead (README, "Git hooks").
 
 ### Whole-repository type check in the pre-commit hook
 

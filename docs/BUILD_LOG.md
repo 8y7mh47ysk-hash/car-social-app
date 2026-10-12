@@ -194,6 +194,11 @@ None. If you commit from a GUI git client that cannot find `node` or `pnpm`, add
 - Changing `eslint.config.mjs` or the Prettier settings lints and formats only the staged files;
   run `pnpm lint` and `pnpm format:check` to check the whole repository.
 - Untracked files are stashed and restored on every commit; keep large scratch files gitignored.
+- The hook's backup lives in the git stash, which all worktrees of a repository share. Committing
+  in two worktrees at the same moment worked every time (30 commits in 15 simultaneous pairs, no
+  failures, nothing lost) but left a stray `lint-staged automatic backup` entry 3 times; such an
+  entry is a copy and safe to drop. With several worktrees, pop your own stash entry by name, not
+  the top one, which may be another worktree's backup during a commit.
 - When the type check fails in one package, `pnpm --recursive` stops the other packages' checks,
   so the output also shows `Command failed with signal SIGKILL` for them.
 - The commit message rules are stricter than `config-conventional`: names in a subject must be
