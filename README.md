@@ -99,6 +99,8 @@ trade-offs are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 - [docs/PLAYBOOK.md](docs/PLAYBOOK.md): the owner's build playbook. It is the source document;
   do not edit it.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the system fits together, with diagrams of
+  every component, the trust boundaries, the request flow and the deployment.
 - [docs/BUILD_LOG.md](docs/BUILD_LOG.md): what changed for each instruction and how to verify it.
 - [docs/DECISIONS.md](docs/DECISIONS.md): key decisions and their trade-offs.
 - [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md): why each dependency is here.
