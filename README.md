@@ -46,6 +46,7 @@ packages/
   shared/     @apex/shared  Zod schemas, types and helpers shared by the apps.
 infra/        Deployment and operations files (see infra/README.md).
 docs/         Playbook, build log, decisions, dependency register and review log.
+.husky/       Git hooks (see "Git hooks"); their tests are in git-hooks.test.ts.
 ```
 
 ## Prerequisites
@@ -60,7 +61,7 @@ docs/         Playbook, build log, decisions, dependency register and review log
 ## Quick start
 
 ```sh
-pnpm install
+pnpm install   # also installs the git hooks (see "Git hooks" below)
 pnpm dev
 ```
 
@@ -95,6 +96,67 @@ The production API (`pnpm start`) runs plain JavaScript: `pnpm build` compiles `
 first, and Node.js loads that output through the `@apex/dist` export condition. The reasons and
 trade-offs are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## Git hooks
+
+`pnpm install` installs two git hooks with [husky](https://typicode.github.io/husky) (the
+`prepare` script). Run it once in every clone and every git worktree: until then, commits there
+are not checked.
+
+- **pre-commit** ([`.husky/pre-commit`](.husky/pre-commit), tasks in
+  [`lint-staged.config.ts`](lint-staged.config.ts)) checks exactly what you are committing:
+  unstaged changes and untracked files are set aside while it runs and put back afterwards. In
+  order, it runs ESLint with `--fix` and then Prettier on the staged files (fixes are added to the
+  commit; any ESLint warning fails), `pnpm typecheck` for the whole repository when a staged file
+  is TypeScript, JSON or a pnpm workspace file, and `vitest related` for the unit tests that
+  import a staged file. Staging a `package.json`, a pnpm lockfile or workspace file, a tsconfig,
+  a Vitest config or setup file, or a git hook or its config runs every test instead. Deleted
+  files count as staged, so deleting a module that is still imported fails the type check. A
+  failing step does not stop the others, so one run shows every problem.
+- **commit-msg** ([`.husky/commit-msg`](.husky/commit-msg)) checks the message with commitlint
+  (see "Commit messages").
+
+If a hook fails, or you press Ctrl+C while it runs, the commit is not made and your files are
+left as they were: fix the problem, stage the fix and commit again. If the hook is killed in a
+way that stops it from tidying up, `git stash list` shows a `lint-staged automatic backup` entry
+that holds your changes.
+
+Typical run times on an Apple M5: about 1 s for a documentation change, about 3 s for a source
+change with related tests, and about 11 s when every test runs.
+
+Hooks also run from scripts and IDEs. They need `node` and `pnpm` on `PATH`; if a GUI git client
+cannot find them, set `PATH` in `~/.config/husky/init.sh`, which husky reads before every hook.
+
+In an emergency only, `HUSKY=0 git commit ...` (or `git commit --no-verify`) skips the hooks, and
+`HUSKY=0 pnpm install` skips installing them. CI runs the full checks either way.
+
+## Commit messages
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```text
+feat(api): add the garage list route
+
+Optional body, after a blank line, explaining what changed and why.
+
+Co-Authored-By: Name <email@example.com>
+```
+
+- `type` is one of `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`,
+  `style` or `test`. The `(scope)` is optional, for example `api`, `web`, `shared` or `infra`.
+  Add `!` after the type or scope for a breaking change.
+- The type, scope and subject are lowercase. Put names that need capitals in backticks or
+  quotes, which the case rule skips: `` fix(api): validate `API_PORT` ``.
+- The subject has at most 72 characters and does not end with a full stop; the first line has
+  at most 100.
+- Body and footer lines have at most 100 characters (a line that holds a URL may be longer).
+- A blank line comes before the body and before the footer. A line that starts with one word
+  followed by a colon and a space, such as `Co-Authored-By: ...` or `Refs: ...`, starts the
+  footer, so it too needs a blank line before it; reword such a line if it belongs to the body.
+- Messages that git writes itself are accepted as they are: merges, reverts, and `fixup!`,
+  `squash!` and `amend!` commits.
+
+To check a message without committing: `printf 'feat: add x\n' | pnpm exec commitlint`.
+
 ## Documentation
 
 - [docs/PLAYBOOK.md](docs/PLAYBOOK.md): the owner's build playbook. It is the source document;
@@ -106,7 +168,7 @@ trade-offs are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Conventions
 
-- Commit messages follow Conventional Commits: `type(scope): subject`.
+- Commit messages follow Conventional Commits: `type(scope): subject` (see "Commit messages").
 - Strict TypeScript, Zod validation at every input boundary, and tests for every feature.
 - Every new dependency gets a row in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
 - Next.js collects anonymous telemetry by default. To opt out on your machine, run
