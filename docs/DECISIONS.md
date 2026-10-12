@@ -275,3 +275,50 @@ Keep entries brief. Details belong in code comments and the build log.
 - Decision: support macOS, Linux and WSL.
 - Trade-offs: native Windows shells are not supported. The deployment target is a Linux home
   server, so this costs nothing today.
+
+### Architecture document: one zoned overview diagram with built and planned labels
+
+- Date: 2026-10-11 · Instruction: #6 · Author: Echo
+- Context: instruction 6 asks for a Mermaid diagram of every component. The playbook names about
+  25 components across its phases, almost all of them planned, and the owner needs to see what
+  exists, what is coming and where the trust boundaries are.
+- Decision: `docs/ARCHITECTURE.md` has one overview flowchart with every component, grouped into
+  network zones (internet, Cloudflare, the home server's edge and internal networks, a sandbox
+  with no network, third parties), plus smaller diagrams for the request flow, a Crew Chief chat,
+  uploads and the print service, and deployment today and on the home server. Every label says
+  "built #N" or "planned #N"; built components also have thick borders and planned ones dashed
+  borders, and no colour carries meaning. Tables repeat the components, zones, boundaries and data
+  stores with the same numbers. The labels describe the repository once all of Phase 0 is merged.
+- Trade-offs: the overview is large (about 30 nodes), but one picture shows the trust boundaries
+  best and the smaller diagrams carry the detail. Planned parts are the expected design, not
+  commitments: instructions such as 70, 73, 102, 103 and 166 settle them and must update the
+  document in the same change. Questions the playbook leaves to later instructions are listed in
+  the document, not decided here.
+
+### Check Mermaid diagrams with mermaid-cli outside the repository
+
+- Date: 2026-10-11 · Instruction: #6 · Author: Echo
+- Context: the diagrams must be shown to parse and render. mermaid-cli renders them in a headless
+  Chrome through Puppeteer: about 200 npm packages and a browser, for a check that matters only
+  when the document changes.
+- Decision: no repository dependency and no CI step. Every diagram was rendered with
+  `@mermaid-js/mermaid-cli` 12.0.0, installed with `npm ci` in a scratch directory (so npm checked
+  every package against the lockfile's hashes) and pointed at the machine's own Chrome. The
+  document gives the next editor the equivalent `npx` command; GitHub also renders the diagrams.
+- Trade-offs: a broken diagram is caught only if the editor runs the command or looks at GitHub.
+  Surprise: in a sequence diagram a bare `#` starts a comment that silently cuts the label while
+  mermaid-cli still succeeds, so those diagrams write `#35;` and only review can catch a slip. If
+  the diagrams start changing often, add the render check to CI as a job of its own.
+
+### Decisions log: append-only, with replaced entries marked "Superseded by"
+
+- Date: 2026-10-11 · Instruction: #6 · Author: Echo
+- Context: the team fixed the entry template, and entries are appended on parallel branches and
+  union-merged. Someone reading an old entry needs to know whether it still holds.
+- Decision: the log's header explains what belongs in it, each field of the template and the
+  rules: append only, no numeric IDs, check union merges, never edit a merged decision (facts,
+  typos and links may be corrected), and when a decision is replaced, the new entry names the old
+  one and the old entry gets one last line, `- Superseded by: <title>`. Every existing entry is
+  unchanged.
+- Trade-offs: the "Superseded by" line is the one edit an old entry can get; in return, a reader
+  sees at the entry itself that it no longer holds instead of searching the rest of the log.

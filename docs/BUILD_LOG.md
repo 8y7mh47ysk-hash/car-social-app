@@ -85,3 +85,65 @@ None for this instruction.
   loader and `.env.example` files are instruction 4.
 - There are no git hooks yet (instruction 2) and no CI yet (instruction 5).
 - Next.js collects anonymous telemetry by default; the README explains how to opt out.
+
+## #6 - Architecture and decision docs
+
+**What changed**
+
+- `docs/ARCHITECTURE.md` (new): an overview diagram of every component in the playbook, grouped
+  by network zone and labelled "built #N" or "planned #N" (built components also have thick
+  borders, planned ones dashed); diagrams of the request flow, a Crew Chief chat, the upload and
+  print path, and the deployment today and on the home server; tables of the components, network
+  zones, trust boundaries and data stores; sections on observability, the code layout, open
+  questions for later instructions, and how to keep the document current.
+- `docs/DECISIONS.md`: the header now says what belongs in the log, explains each field of the
+  entry template and sets the rules: append only, no numeric IDs, check union merges, never edit
+  a merged decision, and mark a replaced entry with a `- Superseded by:` line. Every earlier entry
+  is unchanged. New entries record the decisions behind instructions 6 and 8.
+- `README.md`: the documentation list links the architecture document.
+
+**How to verify**
+
+Render every diagram. This needs network access; the first run downloads mermaid-cli, and
+Puppeteer downloads a headless Chrome into `~/.cache/puppeteer`:
+
+```sh
+npx --yes @mermaid-js/mermaid-cli@12.0.0 -i docs/ARCHITECTURE.md -o /tmp/architecture.md
+ls /tmp/architecture-*.svg
+```
+
+The first command prints `Found 6 mermaid charts in Markdown input` and a ✅ line for each
+diagram, and exits with code 0; `ls` lists `/tmp/architecture-1.svg` to `/tmp/architecture-6.svg`.
+Open one in a browser to look at it. GitHub renders the diagrams too, once the repository is
+there.
+
+Check that the decisions log kept every earlier entry (472e750 is the last commit on main before
+the Phase 0 work started):
+
+```sh
+git diff 472e750 -- docs/DECISIONS.md | grep -v '^---' | grep '^-'
+```
+
+It prints only lines of the old header (its introduction, `Rules:` and `Entry template:`), never a
+line of an entry.
+
+```sh
+pnpm format:check   # "All matched files use Prettier code style!"
+```
+
+**Dependencies added**
+
+None. mermaid-cli was run from a scratch directory outside the repository.
+
+**Owner actions**
+
+None. The "Open questions" section of the architecture document lists choices that later
+instructions make; nothing needs deciding now.
+
+**Notes & limitations**
+
+- The status labels describe the repository once all of Phase 0 (instructions 1 to 8) is
+  merged. Planned parts are the expected design, not commitments: the instructions that build
+  them may refine them and must update the document in the same change.
+- Nothing in CI renders the diagrams; the check above is manual. In sequence diagrams a bare `#`
+  silently cuts a label while rendering still succeeds, so those diagrams write `#35;` instead.
