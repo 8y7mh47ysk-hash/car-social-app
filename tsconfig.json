@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
-  // Type-checks the TypeScript config files at the repository root. Each workspace package
-  // has its own tsconfig.json.
+  // Type-checks the TypeScript files at the repository root: tool configs and the tests for the
+  // git hooks. Each workspace package has its own tsconfig.json.
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "module": "nodenext",

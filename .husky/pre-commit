@@ -1,0 +1,9 @@
+# Runs the tasks in lint-staged.config.ts against exactly what is about to be committed.
+#   --hide-all            unstaged changes and untracked files are set aside while the tasks run
+#                         and restored afterwards, so the tasks see only the staged snapshot
+#   --diff-filter=ACMRD   added, copied, modified, renamed and deleted files; lint-staged's
+#                         default leaves out deletions, so a commit that only deletes would skip
+#                         every check
+#   --concurrent false    the tasks run one at a time, in the config's order: fixers before checks
+#   --continue-on-error   a failing task does not stop the others, so one run shows every problem
+lint-staged --hide-all --diff-filter=ACMRD --concurrent false --continue-on-error
