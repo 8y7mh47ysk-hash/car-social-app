@@ -94,8 +94,9 @@ None for this instruction.
   on `ubuntu-26.04` sets up pnpm (the `packageManager` version) and Node.js (`.nvmrc`), restores
   pnpm's package store from the cache, runs `pnpm install --frozen-lockfile`, then
   `pnpm peers check`, `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm test` and
-  `pnpm build`, fails on warnings in the build output and validates `docker-compose.yml` (with
-  every profile, failing on any warning). Every check runs even when an earlier one failed.
+  `pnpm build`, fails on warnings (and errors that did not stop the build) in the build output
+  and validates `docker-compose.yml` (with every profile, failing on any warning). Every check
+  runs even when an earlier one failed.
   Read-only token, no stored credentials, every action pinned to a commit SHA, 15-minute limit,
   superseded pull-request runs cancelled.
 - `scripts/check-build-warnings.ts`: reads the saved `pnpm build` output and fails if Next.js,
@@ -109,7 +110,7 @@ None for this instruction.
   uses real build output from this repository.
 - `.github/actionlint.yaml`: tells actionlint that `ubuntu-26.04` is a real runner label.
 - README section "Continuous integration"; DECISIONS entries on the CI design, on what "fail on
-  any warning" covers and on supply-chain safety.
+  any warning" covers, on supply-chain safety and on the Node.js version that `scripts/` needs.
 
 **How to verify**
 
@@ -261,4 +262,6 @@ the Compose plugin (Linux), as instruction 3 describes. Nothing else.
 - `db:migrate` and `db:seed` fail on purpose until instruction 26 replaces them.
 - The scripts need a POSIX shell, like the existing ones. The tests pass with `/bin/sh` as bash
   (macOS) and as dash (as on Ubuntu, checked with macOS's `/bin/dash`).
-- The Docker check adds about 0.1 to 0.3 seconds to each `docker:*` command.
+- The Docker check costs each `docker:*` command about 0.05 seconds for Node.js and the check
+  (measured with a stand-in `docker`), plus whatever its two `docker` commands take, which could
+  not be measured here.

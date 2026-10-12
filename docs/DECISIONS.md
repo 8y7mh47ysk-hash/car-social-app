@@ -380,9 +380,10 @@ Entry template:
   `docker:down` keeps the data volumes; `docker:logs` follows the logs, and pnpm passes extra
   arguments on (`pnpm docker:logs postgres`). A missing password is left to Compose, whose
   message from `docker-compose.yml` names the variable and the file.
-- Trade-offs: about 0.1 to 0.3 seconds of checks per command. The check is TypeScript run by
-  Node.js, not a shell wrapper, so it is type-checked, linted and unit-tested like the rest of
-  the code.
+- Trade-offs: each command waits for the check: about 0.05 seconds for Node.js and the check
+  itself (measured with a stand-in `docker`), plus its two `docker` commands. The check is
+  TypeScript run by Node.js, not a shell wrapper, so it is type-checked, linted and unit-tested
+  like the rest of the code.
 
 ### The scripts in scripts/ need Node.js 24.2 or later
 
