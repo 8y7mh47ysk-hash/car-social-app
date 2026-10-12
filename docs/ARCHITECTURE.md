@@ -403,6 +403,7 @@ logs (#201).
 | `infra/`             | Deployment and operations files                             | Built #1, #3 |
 | `docker-compose.yml` | Local PostgreSQL and Redis, placeholders for the apps       | Built #3     |
 | `.github/`           | CI workflow (GitHub Actions)                                | Built #5     |
+| `.husky/`            | Git hooks that check each commit                            | Built #2     |
 | `scripts/`           | Scripts that CI and the `docker:*` commands run             | Built #5, #7 |
 | `packages/ui`        | Design tokens and components                                | Planned #9   |
 | `apps/mobile`        | Mobile app (Expo)                                           | Planned #134 |
