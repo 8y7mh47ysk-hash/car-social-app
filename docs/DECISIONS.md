@@ -255,12 +255,17 @@ Entry template:
   to `main` and every pull request. `pnpm/action-setup` installs the pnpm version in
   `packageManager`; `actions/setup-node` installs the Node.js version in `.nvmrc` and caches
   pnpm's store (`cache: pnpm`, keyed on `pnpm-lock.yaml`; since setup-node 6 only npm is cached
-  automatically). Then `pnpm install --frozen-lockfile`, `pnpm peers check`, `pnpm format:check`,
-  `pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build`, the build-log warning check and
-  the Compose check. Every check runs once the install has worked, even after an earlier check
-  failed, so one run reports every problem. A new push to a pull request cancels the older run;
-  each commit on `main` gets its own concurrency group, so all of them are checked to the end.
-  CI sets `NEXT_TELEMETRY_DISABLED=1`.
+  automatically). pnpm/action-setup's own `cache` input stays off, so the store is cached once.
+  Then `pnpm install --frozen-lockfile`, `pnpm peers check`, `pnpm format:check`, `pnpm lint`,
+  `pnpm typecheck`, `pnpm test` and `pnpm build`, the build-log warning check and the Compose
+  check. Every check runs once the install has worked, even after an earlier check failed
+  (`!cancelled()`), so one run reports every problem. Every `run` step uses `shell: bash`, which
+  GitHub runs with `-o pipefail`, so `pnpm build | tee` fails when the build fails. A new push to
+  a pull request cancels the older run; each commit on `main` gets its own concurrency group, so
+  all of them are checked to the end. CI sets `NEXT_TELEMETRY_DISABLED=1`.
+  `scripts/ci-workflow.test.ts` runs the Build, warning-check and Compose scripts through that
+  same bash command, with stand-ins for pnpm and docker, because their failure behaviour is the
+  point of the workflow and could otherwise only be seen on GitHub.
 - Trade-offs: the checks run one after another instead of in parallel jobs, which would each
   repeat the setup and each bill at least a minute. Next.js's own build cache (`.next/cache`)
   is not cached: the build takes seconds today, so revisit when it slows down. Pinning
@@ -284,12 +289,15 @@ Entry template:
     `--frozen-lockfile` install skips resolution and never checks peers (tested).
   - A lockfile that does not match `package.json`, or a dependency install script that is not
     in `allowBuilds`: both fail `pnpm install --frozen-lockfile`.
-  - Warnings in the build output. Next.js prints them and still exits with status 0: an unknown
-    `next.config.ts` option produced three "⚠" lines and a successful build (tested). pnpm
-    merges every package's stdout and stderr into its own stdout, whatever reporter is chosen
-    (tested), so CI cannot just watch stderr. The Build step saves the output and
-    `scripts/check-build-warnings.ts` fails on lines with Next.js's "⚠", "Warning:" (older
-    Next.js messages, Turbopack's warnings and Node.js process warnings), Turbopack's "build
+  - Warnings in the build output, and errors that did not stop the build. Next.js prints both
+    and still exits with status 0: an unknown `next.config.ts` option produced three "⚠" lines,
+    and a page that logs an error, or leaves a promise rejection unhandled, while it is
+    prerendered produced an "Error: ..." line with a code frame, each in a successful build
+    (tested). pnpm's default reporter merges every package's stdout and stderr into its own
+    stdout (tested), so CI cannot just watch stderr. The Build step saves the output and
+    `scripts/check-build-warnings.ts` fails on lines with Next.js's "⚠" (warning) or "⨯"
+    (error) prefix, "Warning:" (older Next.js messages, Turbopack's warnings and Node.js process
+    warnings), "Error:" (any printed error, "TypeError:" included), Turbopack's "build
     encountered N warnings" header or pnpm's "WARN". It ignores Next.js's "No build cache found"
     notice, which is about the CI machine rather than the code (Next.js prints it to stdout so
     that CI checks on stderr skip it).
@@ -297,15 +305,25 @@ Entry template:
     Compose reports an unset variable as a warning and exits with status 0 (tested).
     `--profile '*'` also validates the services in the `app` profile: without it, a broken
     `depends_on` there passes (tested).
-- Not enforced: console output or Node.js warnings printed while tests, lint or the type check
+- Not enforced: a plain `console.warn` or `console.log` that runs while Next.js prerenders a page,
+  which Next.js prints as the bare message (tested), and the few Next.js warnings written the
+  same way (most are for features this app does not use, such as the Pages Router, i18n and the
+  edge runtime); console output or Node.js warnings printed while tests, lint or the type check
   pass (no signal that works across tools; tests should assert on the logs they expect); pnpm's
   deprecation notices, which appear only when the lockfile is resolved, never during CI's frozen
   install (the ESLint 9 one is expected, see the ESLint pin); and warnings that GitHub shows
   about the runner or the actions, which a step cannot read.
 - Trade-offs: the build-log check matches the formats of Next.js 16.4, Node.js 24 and pnpm 12; a
   warning worded differently would slip through, so re-check after major upgrades by provoking
-  one (docs/BUILD_LOG.md, instruction 5, shows how). A line that merely contains "Warning:"
-  fails the build, which errs on the safe side.
+  one (docs/BUILD_LOG.md, instruction 5, shows how). A line that merely contains "Warning:" or
+  "Error:" fails the build, which errs on the safe side; a clean build prints neither. A check
+  that fails on anything a package writes to stderr was considered. pnpm's ndjson reporter
+  reports each line as JSON with the stream it came from, the environment variable
+  `pnpm_config_reporter=ndjson` reaches the `pnpm --recursive build` inside `pnpm build` (tested
+  in a scratch workspace), and a clean build of this repository writes nothing to stderr (tested).
+  It would also catch the bare `console.warn` above, but the Build step's log would then be JSON
+  unless a script reformatted it, and the check would depend on pnpm's internal log format,
+  which pnpm does not document. Revisit it if such warnings start to matter.
 
 ### CI supply-chain and token safety
 
@@ -363,3 +381,26 @@ Entry template:
 - Trade-offs: about 0.1 to 0.3 seconds of checks per command. The check is TypeScript run by
   Node.js, not a shell wrapper, so it is type-checked, linted and unit-tested like the rest of
   the code.
+
+### The scripts in scripts/ need Node.js 24.2 or later
+
+- Date: 2026-10-11 · Instruction: #5 · Author: Delta
+- Context: `scripts/check-build-warnings.ts` and `scripts/check-docker.ts` are programs and also
+  modules that their tests import, so each runs its check only when started as a program:
+  `if (import.meta.main)`. Node.js added `import.meta.main` in 24.2.0 and still documents it as
+  "Stability: 1.0 - Early development"; it prints no warning. In older versions it is undefined,
+  so both scripts would do nothing and exit with status 0. Vitest sets it to `false` when a test
+  imports them (tested).
+- Decision: keep `import.meta.main`, Node.js's own way to tell a program from an import. CI
+  installs the latest Node.js 24 (`.nvmrc` says `24`; the runner image has 24.21.0), and so do
+  nvm and similar tools on developers' machines. A Node.js on which it does not work fails the
+  tests instead of passing quietly: they run both programs and expect their messages and exit
+  statuses (with the check disabled on purpose, 17 of them failed).
+- Trade-offs: `engines` in the root `package.json` (instruction 1) still accepts Node.js 24.0 and
+  24.1, which lack it; raising it to `>=24.2` would state the real minimum. That field belongs to
+  instruction 1, so the change is proposed in review instead of made here. Two alternatives were
+  rejected. A separate program file per check, as apps/api splits `server.ts` from `app.ts`,
+  would leave the program files imported by no test, so the pre-commit hook's `vitest related`
+  (instruction 2) would run none of their tests when only a program changed. Comparing
+  `process.argv[1]` with the module's own path works on older Node.js but has to resolve symbolic
+  links on both sides to be right.

@@ -106,14 +106,18 @@ with pnpm's package store cached between runs), runs `pnpm peers check`, `pnpm f
 `pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build`, and validates `docker-compose.yml`.
 Each check runs even when an earlier one fails, so one run lists every problem.
 
-CI fails on any warning: ESLint warnings, unmet peer dependencies, warnings in the build output
-(Next.js prints them but still finishes the build) and Docker Compose warnings.
-[docs/DECISIONS.md](docs/DECISIONS.md) lists exactly what is enforced and why. To run the same
-checks before pushing, and then read the `pnpm build` output for warnings:
+CI fails on any warning: ESLint warnings, unformatted files, unmet peer dependencies, warnings in
+the build output and errors that did not stop the build (Next.js prints both but still finishes
+the build), and Docker Compose warnings. [docs/DECISIONS.md](docs/DECISIONS.md) lists exactly
+what is enforced, what is not and why. To run the same checks before pushing:
 
 ```sh
-pnpm peers check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build
+pnpm peers check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test
+pnpm build > build.log 2>&1 && node scripts/check-build-warnings.ts build.log
 ```
+
+The second line saves the build's output in `build.log` (git ignores `*.log` files) and runs CI's
+check on it. If the build itself fails, the reason is in `build.log`.
 
 ## How the packages fit together
 
