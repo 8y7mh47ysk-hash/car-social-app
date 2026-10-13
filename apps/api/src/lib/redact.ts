@@ -7,21 +7,27 @@ export const REDACTED = "[Redacted]";
  * "setcookie". A key is sensitive if it:
  *
  * - contains password, passwd, passphrase, secret, credential, apikey, privatekey,
- *   encryptionkey, signingkey, masterkey or recoverycode (newPassword, client_secret,
- *   credentials, x-api-key, recoveryCodes);
- * - ends in token, tokens, jwt, authorization, cookie, cookies, sessionid, otp or signature
- *   (refreshToken, x-csrf-token, proxy-authorization, set-cookie, sessionId, totp,
- *   stripe-signature). "tokens" is included so that a list of tokens is hidden too, which means
- *   counts of AI tokens must be logged under names such as promptTokenCount;
- * - is exactly auth (HTTP clients keep "user:password" there) or rawpacket (Node.js attaches the
- *   raw bytes of a malformed request, cookies included, to the parser error that Fastify logs
- *   at trace level).
+ *   encryptionkey, signingkey, masterkey, recoverycode or codeverifier (newPassword,
+ *   client_secret, credentials, x-api-key, recoveryCodes, and code_verifier, the PKCE secret of
+ *   an OAuth sign-in);
+ * - ends in token, tokens, jwt, authorization, cookie, cookies, sessionid, otp, signature (with
+ *   or without digits after it), assertion or csrf (refreshToken, x-csrf-token,
+ *   proxy-authorization, set-cookie, sessionId, totp, stripe-signature, the x-hub-signature-256
+ *   header of Meta's webhooks, the cf-access-jwt-assertion header that Cloudflare Access adds to
+ *   every request it lets through, and _csrf). "tokens" is included so that a list of tokens is
+ *   hidden too, which means counts of AI tokens must be logged under names such as
+ *   promptTokenCount;
+ * - is exactly auth (HTTP clients keep "user:password" there), pass or pwd (short names for a
+ *   password), rawpacket (Node.js attaches the raw bytes of a malformed request, cookies
+ *   included, to the parser error that Fastify logs at trace level) or rawheaders (Node.js's
+ *   list of header names and values, where a value cannot be matched to its name).
  *
+ * Header names come from other parties, so the patterns cover the ones the plan will receive.
  * When you add a field that holds a secret, give it a name that matches, or add a pattern here
  * with a test.
  */
 const SENSITIVE_KEY =
-  /password|passwd|passphrase|secret|credential|apikey|privatekey|encryptionkey|signingkey|masterkey|recoverycode|(?:tokens?|jwt|authorization|cookies?|sessionid|otp|signature)$|^(?:auth|rawpacket)$/;
+  /password|passwd|passphrase|secret|credential|apikey|privatekey|encryptionkey|signingkey|masterkey|recoverycode|codeverifier|(?:tokens?|jwt|authorization|cookies?|sessionid|otp|signature\d*|assertion|csrf)$|^(?:auth|pass|pwd|rawpacket|rawheaders)$/;
 
 export function isSensitiveKey(key: string): boolean {
   return SENSITIVE_KEY.test(key.toLowerCase().replaceAll(/[^a-z\d]/g, ""));

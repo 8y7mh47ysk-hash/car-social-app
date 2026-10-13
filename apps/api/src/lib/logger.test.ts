@@ -151,9 +151,13 @@ describe("loggingServerOptions without pino-pretty installed", () => {
   });
 
   it("explains what to do when pretty output is asked for", async () => {
-    const { loggingServerOptions } = await loadWithoutPinoPretty();
+    const { loggingServerOptions, LogFormatUnavailableError } = await loadWithoutPinoPretty();
 
-    await expect(loggingServerOptions({ level: "info", format: "pretty" })).rejects.toThrow(
+    const options = loggingServerOptions({ level: "info", format: "pretty" });
+
+    // The entrypoint recognises this error by its class and prints only its message.
+    await expect(options).rejects.toBeInstanceOf(LogFormatUnavailableError);
+    await expect(options).rejects.toThrow(
       "LOG_FORMAT=pretty needs pino-pretty, a development dependency that production installs " +
         "leave out. Use LOG_FORMAT=json.",
     );

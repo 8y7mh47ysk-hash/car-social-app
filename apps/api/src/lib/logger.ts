@@ -20,6 +20,15 @@ import { REQUEST_ID_HEADER, requestIdFor } from "./request-id.ts";
 export const LOG_FORMATS = ["json", "pretty"] as const;
 export type LogFormat = (typeof LOG_FORMATS)[number];
 
+/**
+ * Thrown when LOG_FORMAT=pretty is asked for but pino-pretty is not installed, as in production
+ * installs, which leave development dependencies out. Its message says what to do, so the
+ * entrypoint prints only the message, as it does for invalid environment variables.
+ */
+export class LogFormatUnavailableError extends Error {
+  override readonly name = "LogFormatUnavailableError";
+}
+
 /** Somewhere log lines can go, one line per call. Tests pass an in-memory sink. */
 export interface LogDestination {
   write(line: string): void;
@@ -96,6 +105,8 @@ function droppedLine(): string {
  *
  * Apart from URL parts, a secret inside a string cannot be recognised, so never put one in a log
  * message. A line that is not a JSON object (pino never writes one) is replaced by an error line.
+ * Parsing turns numbers into JavaScript numbers, so an integer beyond 2^53 (a BigInt, which pino
+ * writes exactly) comes out rounded: log such values as strings.
  */
 export function finishLogLine(line: string): string {
   let entry: unknown;
@@ -118,7 +129,8 @@ export function finishLogLine(line: string): string {
  * Replaces Fastify's default `req` serializer, which logs the full URL (query string included),
  * the client-supplied Host and Accept-Version headers and the client's port. Headers and bodies
  * are never logged. `remoteAddress` is the direct peer; behind a proxy it is the proxy until
- * trusted proxies are configured.
+ * trusted proxies are configured. pino applies it to every value logged under the key `req`, and
+ * a value without a `url` makes the log call throw, so log only Fastify requests under that key.
  */
 function serializeRequest(request: FastifyRequest) {
   return { method: request.method, url: loggableUrl(request.url), remoteAddress: request.ip };
@@ -143,6 +155,10 @@ class ApiLogController extends LogController {
  * hook runs, so enterRequestContext never sees those requests. Fastify hands them here with a
  * request ID from genReqId, having logged "incoming request" under it; this sends the ID back and
  * replies with the error as usual, which Fastify's error handler logs under the same ID.
+ *
+ * That error handler is always Fastify's default: these requests belong to a router context that
+ * Fastify creates with the app, before `setErrorHandler` can run. The global error handler of
+ * instruction 27 must therefore give these responses its error format here as well.
  */
 function sendFrameworkError(
   error: FastifyError,
@@ -161,7 +177,7 @@ function sendFrameworkError(
  */
 async function prettyDestination(destination: LogDestination | undefined): Promise<LogDestination> {
   const pinoPretty = await import("pino-pretty").catch((error: unknown) => {
-    throw new Error(
+    throw new LogFormatUnavailableError(
       "LOG_FORMAT=pretty needs pino-pretty, a development dependency that production installs " +
         "leave out. Use LOG_FORMAT=json.",
       { cause: error },

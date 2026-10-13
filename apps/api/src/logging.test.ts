@@ -398,8 +398,11 @@ describe("secrets in the logs", () => {
   it("keeps credentials, cookies, tokens and query strings out of every line", async () => {
     const { app, output, lines } = await buildLoggedApp();
     app.post("/login", (request, reply) => {
-      // Careless logging on purpose: whole headers and bodies.
-      request.log.info({ headers: request.headers, body: request.body }, "login attempt");
+      // Careless logging on purpose: whole headers, in both of Node.js's forms, and bodies.
+      request.log.info(
+        { headers: request.headers, rawHeaders: request.raw.rawHeaders, body: request.body },
+        "login attempt",
+      );
       app.log.info("connecting to postgres://apex:db-secret@db:5432/apex");
       void reply.header("set-cookie", "session=reply-cookie-secret; HttpOnly");
       request.log.info({ headers: reply.getHeaders() }, "reply headers");
@@ -413,6 +416,9 @@ describe("secrets in the logs", () => {
         authorization: "Bearer header-secret",
         cookie: "session=cookie-secret",
         "x-api-key": "key-secret",
+        // Sent by Cloudflare Access (the admin console, #190) and Meta's webhooks (#150).
+        "cf-access-jwt-assertion": "access-jwt-secret",
+        "x-hub-signature-256": "sha256=webhook-signature-secret",
       },
       payload: { email: "driver@example.com", password: "body-secret" },
     });
@@ -423,6 +429,8 @@ describe("secrets in the logs", () => {
       "header-secret",
       "cookie-secret",
       "key-secret",
+      "access-jwt-secret",
+      "webhook-signature-secret",
       "body-secret",
       "db-secret",
       "reply-cookie-secret",
@@ -434,7 +442,14 @@ describe("secrets in the logs", () => {
       req: { method: "POST", url: `/login?${REDACTED}` },
     });
     expect(line("login attempt")).toMatchObject({
-      headers: { authorization: REDACTED, cookie: REDACTED, "x-api-key": REDACTED },
+      headers: {
+        authorization: REDACTED,
+        cookie: REDACTED,
+        "x-api-key": REDACTED,
+        "cf-access-jwt-assertion": REDACTED,
+        "x-hub-signature-256": REDACTED,
+      },
+      rawHeaders: REDACTED,
       body: { email: "driver@example.com", password: REDACTED },
     });
     expect(line(`connecting to postgres://${REDACTED}@db:5432/apex`)).toBeDefined();

@@ -22,6 +22,12 @@ export function getRequestContext(): RequestContext | undefined {
 /**
  * Runs `fn` inside `context`: `getRequestContext()` returns it in `fn` and in everything `fn`
  * starts, including awaited promises, timers and event callbacks registered there.
+ *
+ * That includes things that outlive the request. A timer, socket or connection created while a
+ * request is handled keeps that request's context for good, so its callbacks log the request's
+ * ID long after the response: for example the error handler of a database connection that a pool
+ * opened lazily for the request's first query. Create long-lived clients, pools and intervals at
+ * startup, outside any request, and connect them there when the library allows it.
  */
 export function runWithRequestContext<T>(context: RequestContext, fn: () => T): T {
   return storage.run(context, fn);

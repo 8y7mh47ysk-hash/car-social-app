@@ -792,6 +792,7 @@ Keep entries brief. Details belong in code comments and the build log.
   Surprise: in a sequence diagram a bare `#` starts a comment that silently cuts the label while
   mermaid-cli still succeeds, so those diagrams write `#35;` and only review can catch a slip. If
   the diagrams start changing often, add the render check to CI as a job of its own.
+- Superseded by: Render-check the Mermaid diagrams with pnpm dlx, not npx
 
 ### Decisions log: append-only, with replaced entries marked "Superseded by"
 
@@ -842,9 +843,10 @@ Keep entries brief. Details belong in code comments and the build log.
   top-level `requestIdLogLabel` option is deprecated in Fastify 5.12.
 - Trade-offs: a client can send any well-formed ID, even one another request used, so an ID is a
   label for finding log lines, never a basis for authorisation, rate limits or idempotency (#36
-  needs its own keys). Two responses still go out without the header, both sent before any hook
-  can run: Node.js's bare 400 for bytes that are not HTTP, and Fastify's 503 for a request that
-  arrives on an open connection during shutdown (its log line has the ID).
+  needs its own keys). Some responses still go out without the header, all sent by Fastify before
+  any hook can run: the 400, 431 and 408 it writes straight to the connection for a request it
+  could not read (bytes that are not HTTP, headers over 16 KB, headers too slow), and the 503 for a
+  request that arrives on an open connection during shutdown (its log line has the ID).
 
 ### Request context: a small AsyncLocalStorage module, not @fastify/request-context
 
@@ -1083,3 +1085,58 @@ Keep entries brief. Details belong in code comments and the build log.
   separate rules for pushes to `main` and for squash-merge titles, and a root script for
   commitlint. Every commit the team makes goes through the hook, so this waits until unchecked
   messages start to appear.
+
+### Render-check the Mermaid diagrams with pnpm dlx, not npx
+
+- Date: 2026-10-11 · Instruction: #6 · Author: Delta (wave w0 review)
+- Context: "Check Mermaid diagrams with mermaid-cli outside the repository" gave the next editor
+  an `npx --yes` command. npx installs the newest version that each range in the tool's tree
+  allows, however new, and runs every install script. When the review ran it, it installed 204
+  packages, five of them published less than a day before (mermaid 12.2.0 and two `@tanstack`
+  packages only hours before, dompurify and zod): exactly what the repository's one-day
+  `minimumReleaseAge` keeps out (see "Latest stable versions, held back one day by pnpm").
+- Decision: ARCHITECTURE.md and the build log give
+  `pnpm dlx --allow-build=puppeteer @mermaid-js/mermaid-cli@12.0.0 -i docs/ARCHITECTURE.md -o ...`.
+  pnpm applies its one-day hold to the temporary install (it took mermaid 12.1.0 and the previous
+  release of each of the other four) and runs no install script except Puppeteer's, which
+  downloads the headless Chrome. The rest of the earlier decision stands: no repository
+  dependency and no CI job.
+- Trade-offs: the check needs pnpm, which the repository needs anyway. Only mermaid-cli's own
+  version is pinned, so a release more than a day old can still change the tree; pinning all of
+  it would need a lockfile in the repository for one manual check.
+
+### The API entrypoint logs crashes through the logger, then exits
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Delta (wave w0 review)
+- Context: Node.js prints an uncaught exception, or a promise rejection that nothing handles, as
+  plain text on stderr and exits with code 1. That report is not JSON, has no request ID and
+  skips the redaction of "Redact every log line after serialisation, in pino's streamWrite hook":
+  a connection URL's password appears in full.
+- Decision: `apps/api/src/server.ts` handles `uncaughtException`, which Node.js also emits for an
+  unhandled rejection (its default `--unhandled-rejections=throw`). The handler logs
+  `{ err, origin }` at fatal level through `app.log`, then calls `process.exit(1)`. It runs in
+  the failing code's async context, so the line carries the ID of the request whose code failed;
+  the entrypoint tests check this with a timer, left behind by a route, that throws or leaves a
+  rejection unhandled. It is installed once the app is built; earlier failures, such as invalid
+  settings, keep their own messages.
+- Trade-offs: `uncaughtExceptionMonitor` would log without taking over, but Node.js would still
+  print its unredacted report. Exiting at once, without closing the server, follows Node.js's
+  advice that the process is in an unknown state; requests in flight are cut off, as they were
+  before. With `LOG_LEVEL=silent` a crash writes nothing. Errors inside requests stay with
+  Fastify and instruction 27's error handler; this covers what escapes them.
+
+### Redaction also matches the credential headers the plan will receive
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Delta (wave w0 review)
+- Context: "Redact every log line after serialisation, in pino's streamWrite hook" decides by key
+  name. Header names come from other parties, and several that the plan will receive were not
+  matched: Cloudflare Access's `cf-access-jwt-assertion` (#190), Meta's `x-hub-signature-256`
+  (#150; `stripe-signature` was matched) and Node.js's `rawHeaders` list, which holds names and
+  values side by side, so no value can be matched to its name. Nor were `pass`, `pwd`, the PKCE
+  `code_verifier` of OAuth sign-in (#43) or a `_csrf` field.
+- Decision: a key is also sensitive when, lowercased and without separators, it contains
+  `codeverifier`, ends in `signature` followed by digits, `assertion` or `csrf`, or is exactly
+  `pass`, `pwd` or `rawheaders`. Tests cover each pattern and names that must stay visible.
+- Trade-offs: a harmless field whose name ends like this is hidden too (`testAssertion`). `pass`
+  and `pwd` match only as whole names, so `passenger` (journeys, #135) and `cacheBypass` stay
+  visible, but so does a name such as `smtpPass`: call such fields `smtpPassword`.

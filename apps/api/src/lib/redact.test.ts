@@ -41,8 +41,20 @@ describe("isSensitiveKey", () => {
     "otp",
     "totp",
     "stripe-signature",
+    "x-hub-signature",
+    "x-hub-signature-256",
+    "cf-access-jwt-assertion",
+    "Cf-Access-Jwt-Assertion",
+    "client_assertion",
+    "code_verifier",
+    "codeVerifier",
+    "csrf",
+    "_csrf",
     "auth",
+    "pass",
+    "pwd",
     "rawPacket",
+    "rawHeaders",
   ])("treats %j as sensitive", (key) => {
     expect(isSensitiveKey(key)).toBe(true);
   });
@@ -71,6 +83,13 @@ describe("isSensitiveKey", () => {
     "signatureAlgorithm",
     "cacheKey",
     "idempotencyKey",
+    "passenger",
+    "passengerCount",
+    "cacheBypass",
+    "csrfEnabled",
+    "assertionCount",
+    "verifierId",
+    "headers",
   ])("leaves %j visible", (key) => {
     expect(isSensitiveKey(key)).toBe(false);
   });

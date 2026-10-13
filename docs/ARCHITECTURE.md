@@ -7,10 +7,10 @@ it (see [Keeping this document current](#keeping-this-document-current)).
 
 **Status labels.** "Built #N" means the component exists in the repository and names the
 instruction that added it; "planned #N" names the instruction that will add it. The labels
-describe the repository once all of Phase 0 (instructions 1 to 8) is merged. In the diagrams,
-built components have thick solid borders and planned ones dashed borders, and the label of
-every component says "built", "planned" or (for one optional service) "possible later" as well,
-so line style is never the only signal.
+describe the repository as of Phase 0 (instructions 1 to 8). In the flowcharts, built components
+have thick solid borders and planned ones dashed borders (sequence diagrams cannot style their
+participants). In every diagram the label of each component says "built", "planned" or (for one
+optional service) "possible later" as well, so line style is never the only signal.
 
 ## Principles
 
@@ -28,8 +28,10 @@ so line style is never the only signal.
   Context). Uploaded files are scanned, and 3D models are processed in a sandbox with no network
   (#53, #166). Prices and limits are computed on the server, never trusted from a client (#84,
   #164).
-- **Every log line is structured.** The API writes JSON lines that carry the request's ID, with
-  secrets redacted (built #8, see [Observability](#observability)).
+- **The API's log lines are structured.** The API writes one JSON object per line; a line logged
+  while a request is handled carries its ID, and secrets are redacted by key name and URL part
+  (built #8, see [Observability](#observability)). The web app's server output is still Next.js's
+  own plain text.
 
 ## System overview
 
@@ -43,7 +45,7 @@ flowchart TB
   classDef planned stroke-dasharray:6 4
 
   subgraph Z1["Internet: untrusted"]
-    users["Users' browsers<br/>(web app, installable PWA)"]
+    users["Users' browsers"]
     mobile["Mobile app: Expo<br/>planned #134"]:::planned
     owner["Owner's phone and laptop"]
   end
@@ -58,7 +60,7 @@ flowchart TB
   subgraph Z3["Home server: Docker Compose"]
     subgraph Z3a["Edge network: entry from the tunnel or Tailscale"]
       tunnel["cloudflared<br/>tunnel connector<br/>planned #99"]:::planned
-      web["Web app: Next.js<br/>built #1"]:::built
+      web["Web app: Next.js<br/>built #1, PWA planned #64"]:::built
       api["API: Fastify<br/>built #1, logging built #8"]:::built
       admin["Admin console<br/>planned #189"]:::planned
     end
@@ -123,7 +125,7 @@ flowchart TB
 
 | Component                       | What it does                                                                                                                                               | Status                                                      |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Web app (`apps/web`)            | Next.js App Router app, installable as a PWA, with offline support from #64. A placeholder page today; Phase 1 adds the design system and shell.           | Built #1                                                    |
+| Web app (`apps/web`)            | Next.js App Router app. A placeholder page today; Phase 1 adds the design system and shell. It is to become an installable PWA with offline support (#64). | Built #1                                                    |
 | API (`apps/api`)                | Fastify HTTP API: `/health` today; routes, validation and OpenAPI from Phase 2. Logs JSON lines with request IDs.                                          | Built #1, #8                                                |
 | Shared code (`packages/shared`) | Zod schemas, types and helpers used by the apps; the typed API client later (#29).                                                                         | Built #1                                                    |
 | Design system (`packages/ui`)   | Tokens and components shared by the web app, the admin console and the mobile app.                                                                         | Planned #9                                                  |
@@ -163,17 +165,17 @@ flowchart TB
 The network names are the expected layout; instructions 102 and 103 settle the details. The
 boundaries between zones, and what guards each one:
 
-| Boundary                       | Controls                                                                                                                                                                            | Status                                                                      |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Internet to Cloudflare         | TLS, WAF rules, bot protection, rate limiting and "under attack" mode.                                                                                                              | Planned #100                                                                |
-| Cloudflare to the home server  | The tunnel is opened from inside, so no inbound port is open. Only cloudflared reaches the apps.                                                                                    | Planned #99                                                                 |
-| Clients to the API             | Zod validation of every input, request IDs and redacted logs, central authorization, rate limits and lockout, CSRF protection and security headers.                                 | Validation built #1, logging built #8; the rest planned #44, #45, #48, #101 |
-| Apps to data and AI services   | An internal Docker network with no published ports; only the API and its workers connect, each service with its own credentials. In development the ports listen on 127.0.0.1 only. | Loopback-only ports built #3; internal network planned #103, #104           |
-| Uploaded files                 | Type and size checks, ClamAV, EXIF and GPS stripping; 3D models are processed in a sandbox with no network, no root and strict CPU, memory and time limits.                         | Planned #53, #129, #166                                                     |
-| The owner to the admin console | A separate hostname behind Cloudflare Access and/or Tailscale, passkeys, re-authentication for dangerous actions, and an append-only audit log.                                     | Planned #189-#193                                                           |
-| The server to third parties    | Outbound HTTPS with secrets from the secret store; Stripe webhooks are accepted only with a valid signature.                                                                        | Planned #91, #104                                                           |
-| The server to off-site storage | Backups are encrypted before they leave the server, with the key stored separately.                                                                                                 | Planned #108                                                                |
-| Containers to the host         | Non-root containers with read-only filesystems, dropped capabilities and resource limits; host firewall that denies by default; SSH over Tailscale only.                            | Planned #102, #105                                                          |
+| Boundary                       | Controls                                                                                                                                                                            | Status                                                                                                     |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Internet to Cloudflare         | TLS, WAF rules, bot protection, rate limiting and "under attack" mode.                                                                                                              | Planned #100                                                                                               |
+| Cloudflare to the home server  | The tunnel is opened from inside, so no inbound port is open. Only cloudflared reaches the apps.                                                                                    | Planned #99                                                                                                |
+| Clients to the API             | Zod validation of every input, request IDs and redacted logs, central authorization, rate limits and lockout, CSRF protection and security headers.                                 | Request IDs and redacted logs built #8; route validation planned #28; the rest planned #44, #45, #48, #101 |
+| Apps to data and AI services   | An internal Docker network with no published ports; only the API and its workers connect, each service with its own credentials. In development the ports listen on 127.0.0.1 only. | Loopback-only ports built #3; internal network planned #103, #104                                          |
+| Uploaded files                 | Type and size checks, ClamAV, EXIF and GPS stripping; 3D models are processed in a sandbox with no network, no root and strict CPU, memory and time limits.                         | Planned #53, #129, #166                                                                                    |
+| The owner to the admin console | A separate hostname behind Cloudflare Access and/or Tailscale, passkeys, re-authentication for dangerous actions, and an append-only audit log.                                     | Planned #189-#193                                                                                          |
+| The server to third parties    | Outbound HTTPS with secrets from the secret store; Stripe webhooks are accepted only with a valid signature.                                                                        | Planned #91, #104                                                                                          |
+| The server to off-site storage | Backups are encrypted before they leave the server, with the key stored separately.                                                                                                 | Planned #108                                                                                               |
+| Containers to the host         | Non-root containers with read-only filesystems, dropped capabilities and resource limits; host firewall that denies by default; SSH over Tailscale only.                            | Planned #102, #105                                                                                         |
 
 ## Request flow
 
@@ -252,20 +254,20 @@ flowchart LR
   scan -->|photos| exif["Strip EXIF and GPS,<br/>make image variants<br/>planned #53, #54"]:::planned
   scan -->|"3D models"| sandbox["Sandbox with no network:<br/>check, repair, slice<br/>planned #166, #167, #169"]:::planned
   sandbox -->|"filament weight<br/>and print time"| quote["Pricing engine and quote<br/>planned #164, #174"]:::planned
-  quote -->|"owner review,<br/>then payment"| stripe["Stripe one-off payment<br/>planned #172, #178"]:::planned
+  quote -->|"owner review (#172),<br/>then payment"| stripe["Stripe one-off payment<br/>planned #178"]:::planned
   exif --> store
 ```
 
 ## Data stores
 
-| Store                    | Holds                                                                                                                                                                                                                            | Status                                                                         | Used by                             |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------- |
-| PostgreSQL with pgvector | Accounts, cars, build entries, parts, maintenance, reminders, photo records, conversations and subscriptions (#25); embeddings (#77); journeys (#137); print orders (#161); config, feature flags and the audit log (#193-#195). | Container built #3; schema planned #25, migrations #26                         | The API and its workers             |
-| Redis                    | Job queues (#37), rate limits (#44), sessions (#40), caches with explicit invalidation (#35) and leaderboards (#147).                                                                                                            | Container built #3                                                             | The API and its workers             |
-| Object storage (MinIO)   | Photos, files, 3D models and exports, with per-user quotas (#122) and per-user encryption of file contents (#127).                                                                                                               | Planned #121                                                                   | The API only                        |
-| Docker volumes           | The data of the stores above, on the server's disks.                                                                                                                                                                             | Named volumes built #3; full-disk encryption of the storage drive planned #127 | Docker                              |
-| Logs                     | JSON lines from the API on standard output, with request IDs and no secrets.                                                                                                                                                     | Built #8; alerts and the admin console's log view planned #109, #201           | `docker compose logs`, monitoring   |
-| Backups                  | Encrypted database dumps and storage copies, kept locally and off-site.                                                                                                                                                          | Planned #38, #108, #128                                                        | Backup jobs; the owner for restores |
+| Store                    | Holds                                                                                                                                                                                                                            | Status                                                                         | Used by                                                    |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| PostgreSQL with pgvector | Accounts, cars, build entries, parts, maintenance, reminders, photo records, conversations and subscriptions (#25); embeddings (#77); journeys (#137); print orders (#161); config, feature flags and the audit log (#193-#195). | Container built #3; schema planned #25, migrations #26                         | The API and its workers                                    |
+| Redis                    | Job queues (#37), rate limits (#44), sessions (#40), caches with explicit invalidation (#35) and leaderboards (#147).                                                                                                            | Container built #3                                                             | The API and its workers                                    |
+| Object storage (MinIO)   | Photos, files, 3D models and exports, with per-user quotas (#122) and per-user encryption of file contents (#127).                                                                                                               | Planned #121                                                                   | The API only                                               |
+| Docker volumes           | The data of the stores above, on the server's disks.                                                                                                                                                                             | Named volumes built #3; full-disk encryption of the storage drive planned #127 | Docker                                                     |
+| Logs                     | JSON lines from the API on standard output, with request IDs, and secrets redacted by key name and URL part.                                                                                                                     | Built #8; alerts and the admin console's log view planned #109, #201           | A terminal; `docker compose logs` and monitoring from #102 |
+| Backups                  | Encrypted database dumps and storage copies, kept locally and off-site.                                                                                                                                                          | Planned #38, #108, #128                                                        | Backup jobs; the owner for restores                        |
 
 Nothing outside the internal network reads a data store directly: the web app, the admin console
 and the mobile app all go through the API.
@@ -312,7 +314,7 @@ through Cloudflare Tunnel, with the owner's own access over Tailscale.
 flowchart TB
   classDef planned stroke-dasharray:6 4
 
-  cloudflare["Cloudflare"] -->|"tunnel, opened from inside"| tunnel
+  cloudflare["Cloudflare<br/>planned #99, #100"]:::planned -->|"tunnel, opened from inside"| tunnel
   subgraph server["Home server, planned #99-#112"]
     subgraph edgenet["Edge network"]
       tunnel["cloudflared<br/>planned #99"]:::planned
@@ -346,8 +348,8 @@ flowchart TB
   [DECISIONS.md](DECISIONS.md)).
 - CI runs on GitHub Actions for every push to main and every pull request (built #5): a
   frozen-lockfile install, then peer dependency, formatting, lint, type and test checks, the build
-  (which fails on any warning it prints) and a check of `docker-compose.yml`. Dependency and
-  container scanning follow in #106.
+  and a check that fails on any warning it printed, and a check of `docker-compose.yml`.
+  Dependency and container scanning follow in #106.
 
 ## Observability
 
@@ -363,14 +365,23 @@ flowchart TB
   the request is handled carries it as `reqId`, including lines from code that is never handed
   the request (an AsyncLocalStorage context, in `apps/api/src/lib/request-context.ts`). Clients
   choose their own IDs, so an ID is only a label for finding log lines, never something to trust.
-  Two responses carry no ID: the bare 400 that Node.js sends for bytes it cannot parse as HTTP
-  (Fastify logs it at trace level), and the 503 that Fastify sends, before any hook runs, to a
-  request arriving on an open connection while the server shuts down (its log line has the ID).
+  Responses that Fastify sends before any hook runs carry no ID: those it writes straight to the
+  connection for a request it could not read (400 for bytes that are not valid HTTP, 431 for
+  headers over Node.js's 16 KB limit, 408 for headers that arrive too slowly), which it logs at
+  trace level without an ID, and the 503 for a request that arrives on an open connection while
+  the server shuts down (its log line has the ID).
+  A route that writes its response to `reply.raw` itself, as a Server-Sent Events stream might
+  (#72), sends only the headers it writes there, so it must include `reply.getHeaders()`.
 - **Redaction.** Before a line is written, the values of sensitive keys (passwords, tokens,
   cookies, authorization headers, API keys and similar) are replaced with `[Redacted]` at any
   depth; URL credentials, query strings and fragments are hidden in every string; strings are cut
   to 8192 characters and request URLs to 256. Never put a secret in a log message: inside free
-  text only URL parts can be recognised.
+  text only URL parts can be recognised. For the same reason, log parsed objects rather than raw
+  bodies as strings (a raw webhook body, #91, is free text to the logger), and never put a secret
+  in a URL path, which is logged as it is: tokens in links (#39, #41) go in the query string.
+- **Crashes.** An uncaught exception, or a promise rejection that nothing handles, is logged at
+  fatal level, redacted and with the ID of the request whose code failed, before the process
+  exits with code 1 (`apps/api/src/server.ts`). Node.js's own report would be unredacted text.
 - **Personal data.** Request lines record the client's IP address, which is personal data under
   UK GDPR, so the privacy policy and its retention periods must cover logs (#114). Behind the
   tunnel the address is cloudflared's until the API is told to trust the address the tunnel
@@ -382,11 +393,15 @@ flowchart TB
   dependencies only (#102), can log JSON only.
 - **Writing log lines.** Route handlers and hooks log with `request.log`. Code that has no request
   (services, jobs) gets `app.log`, or a child of it, when it is created; the request's ID is
-  still added to its lines. ESLint rejects `console` calls in API code.
+  still added to its lines. ESLint rejects `console` calls in API code. A timer, socket or
+  connection created while a request is handled keeps that request's context for good, so its
+  later lines carry that request's ID: create long-lived clients, pools and intervals at startup.
 - **Next steps for request IDs.** When the web app calls the API from the server it should pass
   its own request's ID along; queued jobs should carry the ID of the request that created them
-  (#37); error responses should include it (#27); and if the browser ever reads the header across
-  origins, CORS must expose `x-request-id`.
+  (#37); error responses should include it (#27), and #27's error format must also reach the
+  router's 400 and 414 responses, which never go through `setErrorHandler` (see
+  `sendFrameworkError` in `apps/api/src/lib/logger.ts`); and if the browser ever reads the header
+  across origins, CORS must expose `x-request-id`.
 
 **Metrics, uptime and alerts (planned).** Prometheus collects metrics, including GPU load and
 temperature (#86); Grafana shows dashboards; Uptime Kuma checks the health and readiness endpoints
@@ -434,15 +449,21 @@ These are decided by later instructions, not here:
   the diagrams and tables in the same change, and move its status from "planned" to "built".
 - Record why in [DECISIONS.md](DECISIONS.md); this document says what the system is, not why.
 - Check that every diagram still renders. GitHub renders the `mermaid` code blocks. To check them
-  locally without adding a dependency to the repository, run mermaid-cli from npm. It drives a
-  headless Chrome, which Puppeteer downloads to `~/.cache/puppeteer` the first time:
+  locally without adding a dependency to the repository, run mermaid-cli with `pnpm dlx` from
+  the repository root:
 
   ```sh
-  npx --yes @mermaid-js/mermaid-cli@12.0.0 -i docs/ARCHITECTURE.md -o /tmp/architecture.md
+  pnpm dlx --allow-build=puppeteer @mermaid-js/mermaid-cli@12.0.0 \
+    -i docs/ARCHITECTURE.md -o /tmp/architecture.md
   ```
 
-  It writes one SVG file per diagram next to the output file (`/tmp/architecture-1.svg` and so
-  on) and exits with an error on any syntax error. Instruction 6 checked every diagram this way.
+  pnpm installs it in a temporary folder with its usual safeguards, which the repository's own
+  installs rely on too: no version published less than a day ago, and no install script except
+  the one allowed here, Puppeteer's, which downloads a headless Chrome to `~/.cache/puppeteer`
+  the first time. (`npx` would take the newest version that each of the tool's roughly 200
+  packages allows, however new, and run every install script.) The command writes one SVG file
+  per diagram next to the output file (`/tmp/architecture-1.svg` and so on) and exits with an
+  error on any syntax error.
 
 - In sequence diagrams, write `#35;` for `#`. A bare `#` there starts a comment that silently cuts
   the rest of the label, and the check above still passes. Flowcharts are not affected.
