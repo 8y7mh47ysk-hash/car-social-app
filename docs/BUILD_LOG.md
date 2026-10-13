@@ -371,11 +371,12 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
   changes.
 - Web: `apps/web/src/env/` separates server-only variables (`server.ts`, which imports
   `server-only`, so a Client Component that imports it fails the build) from browser-visible
-  `NEXT_PUBLIC_` variables (`public.ts`). `schema.ts` declares both groups; both are empty because
-  the web app reads no variables yet. `next.config.ts` now exports a function that checks them
+  `NEXT_PUBLIC_` variables (`public.ts`). `server-schema.ts` and `public-schema.ts` declare the two
+  groups (a single `schema.ts` until the wave w0 review); both are empty because the web app reads
+  no variables yet. `next.config.ts` now exports a function that checks them (`validate.ts`)
   whenever Next.js loads its config: public variables in `next dev` and `next build`, server
   variables in `next dev` and `next start`.
-- Templates: `apps/api/.env.example` (the three API variables and their defaults) and
+- Templates: `apps/api/.env.example` (the API variables and their defaults) and
   `apps/web/.env.example` (no variables yet: the rules for adding one, and why `WEB_HOST` and
   `WEB_PORT` work only from the shell). The root `.env.example`, for Docker Compose, belongs to
   instruction 3.
@@ -443,9 +444,9 @@ Ctrl+C and delete the file: `rm apps/api/.env`.
 
 The web app's guard and phase checks:
 `pnpm exec vitest run --project web --reporter=verbose` lists
-`serverEnv > refuses to load outside React Server Components` (importing `src/env/server.ts`
-anywhere but on the server throws) and a `validateWebEnv` test for each Next.js phase, and ends
-with `Tests  27 passed (27)`.
+`server env module > refuses to load outside React Server Components` (importing
+`src/env/server.ts` anywhere but on the server throws) and a `validateWebEnv` test for each
+Next.js phase, and ends with `Tests  35 passed (35)`.
 
 **Dependencies added**
 
@@ -467,7 +468,9 @@ None for this instruction.
   server's secret and the value was copied into the browser JavaScript; `next start` without the
   secret exited with code 1 naming only it; a Server Component could import `serverEnv` and the
   secret reached no browser file; a Client Component importing `serverEnv` failed the build with
-  an import trace.
+  an import trace. The review found that the build without the secret succeeded only while no
+  route imported `serverEnv`, and that `publicEnv` brought the server schema into browser code
+  (see "Review fixes (wave w0, round 1)").
 - `WEB_HOST` and `WEB_PORT` work only from the shell, for example `WEB_PORT=3010 pnpm dev`:
   Next.js opens the port before it reads `.env` files or its config. Next.js's CLI rejects a
   non-numeric port ("'abc' is not a non-negative number"); an out-of-range one fails with Node's
@@ -491,6 +494,71 @@ None for this instruction.
   them.
 - If instruction 102 switches the web app to Next.js's standalone output, its `server.js` does
   not load `next.config.ts`, so the server-variable check must move to `instrumentation.ts`.
+
+**Review fixes (wave w0, round 1)**
+
+Bravo reviewed this instruction with a security focus, took it over and re-checked it by running
+it: every "How to verify" step above (on ports 3020 and 4020), `pnpm build`, hostile values
+(values that make a schema's own code throw, and 1 MB values, which the port and host checks
+reject in under 3 ms), and real `next build`, `next start` and `next dev` runs with temporary
+variables, removed afterwards. Each fix has a test that fails without it:
+
+- `parseEnv` passed on any error thrown inside a check or a transform, and the API's entrypoint
+  rethrew it. `JSON.parse` and `BigInt` quote the value in their messages, and Node.js prints a
+  URL error's `input` property, so a schema that parsed JSON or a URL could have printed a
+  secret. Such errors are now dropped: the variable is reported as "its check threw an error,
+  which is not shown because it may contain the value", next to every other problem.
+- Browser code received the server schema. `public.ts` imported `schema.ts`, which also built
+  the server schema: with a temporary `INTERNAL_API_URL` (default
+  `http://internal-only-host.example:9999`) and `SESSION_SECRET`, and a Client Component using
+  `publicEnv`, `.next/static` held both names, their rules and the URL. The schemas now live in
+  `public-schema.ts` and `server-schema.ts`, and `validateWebEnv` in `validate.ts`;
+  `public.test.ts` fails if browser code loads the server schema. The same build now has none of
+  them in `.next/static`.
+- `serverEnv` was parsed when its module loaded, and `next build` loads every route's modules
+  while it collects page data, so a build without the server's secret failed ("Failed to collect
+  configuration for /probe-dynamic", a route rendered only on request). `server.ts` now exports
+  `getServerEnv()`, which reads the variables when it is called. The same build succeeds without
+  the secret; `next start` and `next dev` without it still exit with code 1 naming only
+  `SESSION_SECRET`; with it in `apps/web/.env`, `next start` serves the route.
+- `validateWebEnv` merged the two schemas' shapes, which drops a rule on a whole schema (such as
+  "SMTP_PASSWORD is required when SMTP_USER is set"), so `next start` could start with values
+  that the app rejects at the first request that reads them. Each group is now checked with its
+  own schema.
+- No test covered `next.config.ts` running the check: deleting the call left every test passing.
+  `src/env/next-config.test.ts` fails if the call is removed, its error is swallowed or the live
+  environment is not passed.
+- The lint rule that keeps `process.env` in the env modules missed
+  `import { env } from "node:process"`, namespace and renamed default imports of `process`,
+  `globalThis.process` and `global.process`. ESLint now rejects them too; `env-access.test.ts`
+  runs the configured rules on each route, and `eslint.config.mjs` is now a pre-commit rerun
+  trigger.
+- `.gitignore` did not ignore `*.env` files (Docker's `--env-file`, Compose's `env_file:`) or
+  direnv's `.envrc`. It does now; `env-files.test.ts` checks 22 names instead of 17.
+- Nothing compared the templates with the schemas: deleting `LOG_FORMAT` from
+  `apps/api/.env.example` left every test passing. `config.test.ts` now checks that the API
+  template lists exactly the schema's variables, each commented-out value being the default;
+  `src/env/env-example.test.ts` checks the web template's names.
+- README: the "Configuration" table now lists the root `.env` that Docker Compose reads.
+
+How to verify the fixes:
+
+```sh
+pnpm exec vitest run packages/shared/src/env.test.ts       # "Tests  54 passed (54)"
+pnpm exec vitest run apps/web/src/env                      # "Tests  33 passed (33)"
+pnpm exec vitest run apps/api/src/config.test.ts apps/api/src/server.test.ts  # "Tests  40 passed (40)"
+pnpm exec vitest run env-access.test.ts env-files.test.ts  # "Tests  61 passed (61)"
+```
+
+To repeat the build check by hand: add `SESSION_SECRET: z.string().min(32)` to
+`apps/web/src/env/server-schema.ts`, and a page `apps/web/src/app/probe/page.tsx` that exports
+`dynamic = "force-dynamic"` and whose component calls `await connection()` (from `next/server`)
+and then `getServerEnv()`. Then `pnpm --filter @apex/web build` succeeds without
+`SESSION_SECRET`, and `pnpm --filter @apex/web start` exits with code 1 and names it. Remove both
+afterwards.
+
+Not changed: `WEB_HOST` and `WEB_PORT` stay shell variables that our loader does not validate
+(see "WEB_HOST and WEB_PORT stay shell variables" in DECISIONS).
 
 ## #5 - GitHub Actions CI
 
