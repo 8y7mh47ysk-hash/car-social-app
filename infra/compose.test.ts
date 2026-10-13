@@ -19,9 +19,11 @@ const envExampleText = readFileSync(join(repoRoot, ".env.example"), "utf8");
 const portSchema = z.union([z.string(), z.looseObject({ host_ip: z.string().optional() })]);
 const serviceSchema = z.looseObject({
   image: z.string(),
+  build: z.unknown().optional(),
   profiles: z.array(z.string()).optional(),
   restart: z.string().optional(),
   command: z.array(z.string()).optional(),
+  shm_size: z.string().optional(),
   environment: z.record(z.string(), z.string()).optional(),
   ports: z.array(portSchema).optional(),
   volumes: z.array(z.string()).optional(),
@@ -165,22 +167,58 @@ describe("docker-compose.yml", () => {
     expect(service("redis").command?.[0]).toBe("redis-server");
   });
 
+  it("turns on Redis's append-only file", () => {
+    // Without it, Redis keeps only its default snapshots and a crash can lose an hour of writes.
+    const command = service("redis").command ?? [];
+    expect(command[command.indexOf("--appendonly") + 1]).toBe("yes");
+  });
+
+  it("runs PostgreSQL from the pgvector image, with exact releases of both", () => {
+    // Instruction 77 needs pgvector, which the official postgres image does not include. The tag
+    // names the pgvector release, the PostgreSQL major version and the Debian release.
+    expect(service("postgres").image).toMatch(
+      /^pgvector\/pgvector:\d+\.\d+\.\d+-pg\d+-[a-z]+@sha256:[0-9a-f]{64}$/,
+    );
+    // Docker's default 64 MB /dev/shm is too small for parallel pgvector index builds.
+    expect(service("postgres").shm_size).toBe("256mb");
+  });
+
+  it("pins Redis to an exact release", () => {
+    expect(service("redis").image).toMatch(/^redis:\d+\.\d+\.\d+-[\w.]+@sha256:[0-9a-f]{64}$/);
+  });
+
   it("health-checks postgres over TCP and fails the Redis check on error replies", () => {
     const postgresCheck = service("postgres").healthcheck?.test.join(" ");
     expect(postgresCheck).toContain("pg_isready");
     // A Unix-socket check would pass against the temporary server that runs during first-time
     // initialisation; TCP waits for the real server.
     expect(postgresCheck).toContain("--host=127.0.0.1");
+    // The configured names ("$$" is Compose's escape, so the container's shell expands them). With
+    // any other names, such as the default "root", PostgreSQL logs a FATAL line for every check.
+    expect(postgresCheck).toContain('--username="$${POSTGRES_USER}"');
+    expect(postgresCheck).toContain('--dbname="$${POSTGRES_DB}"');
 
     // Without -e, redis-cli exits 0 even on NOAUTH (wrong password) or LOADING replies.
     expect(service("redis").healthcheck?.test).toEqual(["CMD", "redis-cli", "-e", "ping"]);
   });
 
-  it("starts the API placeholder only after postgres and redis are healthy", () => {
+  it("starts api after postgres and redis are healthy, and web after api has started", () => {
     const dependsOn = service("api").depends_on ?? {};
     expect(Object.keys(dependsOn).sort()).toEqual(["postgres", "redis"]);
     expect(dependsOn["postgres"]?.condition).toBe("service_healthy");
     expect(dependsOn["redis"]?.condition).toBe("service_healthy");
+    // The API placeholder exits at once and has no health check to wait for.
+    expect(service("web").depends_on).toEqual({ api: { condition: "service_started" } });
+  });
+
+  it("keeps the app placeholders honest: nothing to build, and each exits with an error", () => {
+    for (const name of ["api", "web"]) {
+      const placeholder = service(name);
+      // No Dockerfile exists yet (instruction 102 adds the images), and a placeholder that
+      // exited with status 0 would look as if the app had run.
+      expect(placeholder.build, name).toBeUndefined();
+      expect(placeholder.command?.at(-1), name).toMatch(/; exit 1$/);
+    }
   });
 
   it("keeps data in named volumes at the paths the images use", () => {

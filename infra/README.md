@@ -121,7 +121,9 @@ and once the API image has a health check, `web` should wait for `service_health
   `POSTGRES_PASSWORD=ci REDIS_PASSWORD=ci docker compose config --quiet`.
 - `pnpm test` includes `infra/compose.test.ts`, static checks that need no Docker: only
   `postgres` and `redis` start by default, ports stay on `127.0.0.1`, passwords have no default,
-  images are pinned, and `.env.example` documents every variable with the right defaults.
+  PostgreSQL comes from the pgvector image, Redis keeps its append-only file, the health checks
+  and dependencies are the ones described here, the placeholders build nothing and exit with an
+  error, images are pinned, and `.env.example` documents every variable with the right defaults.
 
 ## What comes next
 
