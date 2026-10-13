@@ -101,7 +101,11 @@ const checks = ["compose version", "version --format {{.Server.Version}}"];
 describe("docker:* scripts", { timeout: 20_000 }, () => {
   it.each([
     ["docker:up", "compose up --detach --wait"],
-    ["docker:down", "compose down"],
+    // Every profile: a plain `docker compose down` handles only the services outside a profile,
+    // so it would leave the "app" placeholders behind and delete the network they are attached
+    // to, and the next `docker compose --profile app up` would fail with "network ... not found".
+    // The asterisk must reach Compose as it is, not as the file names the shell would expand.
+    ["docker:down", "compose --profile * down"],
     ["docker:logs", "compose logs --follow"],
   ])("%s checks Docker, then runs `docker %s`", (name, compose) => {
     const run = runScript(name, { docker: true });

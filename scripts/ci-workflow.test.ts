@@ -19,7 +19,8 @@ import { z } from "zod";
 
 // Checks for the GitHub Actions workflows (instruction 5). GitHub runs them, not this machine, so
 // these tests hold every workflow to the security rules in docs/DECISIONS.md, check that CI calls
-// scripts that really exist, and run ci.yml's own shell scripts the way GitHub runs them.
+// scripts that really exist and that no step is skipped by a condition that can never be true,
+// and run ci.yml's own shell scripts the way GitHub runs them.
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const workflowsDir = join(repoRoot, ".github", "workflows");
@@ -34,6 +35,7 @@ const envSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolea
 const workflowSchema = z.object({
   on: z.unknown(),
   permissions: z.unknown().optional(),
+  concurrency: z.unknown().optional(),
   defaults: defaultsSchema.optional(),
   jobs: z.record(
     z.string(),
@@ -44,6 +46,7 @@ const workflowSchema = z.object({
       env: envSchema.optional(),
       steps: z.array(
         z.object({
+          id: z.string().optional(),
           name: z.string().optional(),
           if: z.string().optional(),
           uses: z.string().optional(),
@@ -64,9 +67,10 @@ const workflows = readdirSync(workflowsDir)
     return { file, text, workflow: workflowSchema.parse(parse(text)) };
   });
 
-const rootScripts = z
-  .object({ scripts: z.record(z.string(), z.string()) })
-  .parse(JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"))).scripts;
+const rootPackage = z
+  .object({ packageManager: z.string(), scripts: z.record(z.string(), z.string()) })
+  .parse(JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")));
+const rootScripts = rootPackage.scripts;
 
 /** pnpm's own commands that CI runs; any other `pnpm <name>` must be a root package.json script. */
 const PNPM_COMMANDS = new Set(["install", "peers"]);
@@ -100,6 +104,23 @@ describe.each(workflows)("$file", ({ text, workflow }) => {
   it("does not leave the token in the checked-out repository", () => {
     for (const step of steps.filter((s) => s.uses?.startsWith("actions/checkout@") === true)) {
       expect(step.with?.["persist-credentials"]).toBe(false);
+    }
+  });
+
+  it("names in `if:` only steps that run earlier in the same job", () => {
+    // GitHub reads `steps.<id>` of a step that does not exist as an empty string, without an
+    // error: a renamed or misspelt id makes the condition false, and every step that depends on it
+    // is skipped while the job still passes.
+    for (const job of jobs) {
+      const earlier = new Set<string>();
+      for (const step of job.steps) {
+        for (const [, id = ""] of (step.if ?? "").matchAll(/\bsteps\.([\w-]+)/gu)) {
+          expect(earlier.has(id), `${step.name ?? "a step"} names steps.${id}`).toBe(true);
+        }
+        if (step.id !== undefined) {
+          earlier.add(step.id);
+        }
+      }
     }
   });
 
@@ -141,6 +162,37 @@ describe("ci.yml", () => {
     }
   });
 
+  it("cancels a pull request's superseded run, but finishes every run on main", () => {
+    // A pull request's runs share its ref, so a new push cancels the run for the older one. A push
+    // to main gets a group of its own (its commit SHA), so every commit on main is checked.
+    expect(ci.workflow.concurrency).toEqual({
+      group:
+        "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}",
+      "cancel-in-progress": true,
+    });
+  });
+
+  it("sets up pnpm from packageManager, then Node.js from .nvmrc with pnpm's store cached", () => {
+    // "Cache pnpm" (instruction 5). Without a `version` input, pnpm/action-setup installs the
+    // version in package.json's packageManager, an exact version that may carry Corepack's
+    // integrity hash (`+sha512.<hex>`), which the action strips. setup-node's pnpm cache asks pnpm
+    // where its store is, so pnpm must be set up first, and both before the install.
+    const position = (find: (step: (typeof steps)[number]) => boolean): number => {
+      const index = steps.findIndex(find);
+      expect(index).toBeGreaterThanOrEqual(0);
+      return index;
+    };
+    const pnpm = position((step) => step.uses?.startsWith("pnpm/action-setup@") === true);
+    const node = position((step) => step.uses?.startsWith("actions/setup-node@") === true);
+    const install = position((step) => step.run === "pnpm install --frozen-lockfile");
+
+    expect(pnpm).toBeLessThan(node);
+    expect(node).toBeLessThan(install);
+    expect(steps[pnpm]?.with?.["version"]).toBeUndefined();
+    expect(rootPackage.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+(?:\+sha\d+\.[\da-f]+)?$/u);
+    expect(steps[node]?.with).toMatchObject({ "node-version-file": ".nvmrc", cache: "pnpm" });
+  });
+
   it("installs exactly what the lockfile says, then lints, type-checks, tests and builds", () => {
     expect(runs[0]).toBe("pnpm install --frozen-lockfile");
     for (const check of ["pnpm lint", "pnpm typecheck", "pnpm test", "pnpm build"]) {
@@ -156,12 +208,16 @@ describe("ci.yml", () => {
 
   it("runs each step after the install even when an earlier check failed", () => {
     // Without a status function in `if`, GitHub adds `success()`, which skips every step after the
-    // first failure. `always()` would also keep going after the run was cancelled.
+    // first failure. `always()` would also keep going after the run was cancelled. The whole
+    // condition is checked: a misspelt outcome, such as 'sucess', would never be true, so the step
+    // would always be skipped without an error.
     const checks = steps.slice(steps.findIndex((step) => step.run?.startsWith("pnpm install")) + 1);
 
     expect(checks.length).toBeGreaterThan(0);
     for (const check of checks) {
-      expect(check.if, check.name).toMatch(/^\$\{\{ !cancelled\(\) && /u);
+      expect(check.if, check.name).toMatch(
+        /^\$\{\{ !cancelled\(\) && steps\.[\w-]+\.outcome == 'success' \}\}$/u,
+      );
     }
   });
 
@@ -170,6 +226,22 @@ describe("ci.yml", () => {
 
     expect(compose).toContain("cp .env.example .env");
     expect(compose).toContain("docker compose --profile '*' config --quiet");
+  });
+
+  it("gives the Compose check a value for every variable docker-compose.yml requires", () => {
+    // `${NAME:?message}` stops every Compose command while NAME is unset or empty, and CI's .env is
+    // a copy of the template, which leaves the passwords blank. Without a value here, a newly
+    // required variable would fail this step on GitHub only, as Compose does not run locally.
+    const composeFile = readFileSync(join(repoRoot, "docker-compose.yml"), "utf8");
+    const required = new Set(
+      Array.from(composeFile.matchAll(/(?<!\$)\$\{(\w+):?\?/gu), ([, name = ""]) => name),
+    );
+    const step = steps.find((candidate) => candidate.run?.includes("docker compose") === true);
+
+    expect(required.size).toBeGreaterThan(0);
+    for (const name of required) {
+      expect(String(step?.env?.[name] ?? ""), name).not.toBe("");
+    }
   });
 });
 
@@ -197,13 +269,14 @@ function shellCommand(
 
 /**
  * Stand-ins for the commands that ci.yml's scripts call: each one appends its command line to
- * $STUB_CALLS, prints $STUB_OUTPUT (docker to stderr, where Compose writes its warnings) and exits
- * with $STUB_STATUS.
+ * $STUB_CALLS, prints $STUB_OUTPUT (docker to stderr, where Compose writes its warnings; pnpm to
+ * stdout, then $STUB_ERRORS to stderr) and exits with $STUB_STATUS.
  */
 const STUBS = {
   pnpm: `#!/bin/sh
 printf 'pnpm %s\\n' "$*" >> "$STUB_CALLS"
 printf '%s' "$STUB_OUTPUT"
+printf '%s' "$STUB_ERRORS" >&2
 exit "$STUB_STATUS"
 `,
   docker: `#!/bin/sh
@@ -216,6 +289,8 @@ exit "$STUB_STATUS"
 interface StepOptions {
   /** What the pnpm and docker stand-ins print. */
   readonly output?: string;
+  /** What the pnpm stand-in prints to stderr after its output. */
+  readonly errors?: string;
   /** The exit status of the pnpm and docker stand-ins. */
   readonly status?: number;
   /** The runner's temporary directory, $RUNNER_TEMP: pass a previous step's to share its files. */
@@ -298,6 +373,7 @@ function runStep(name: string, options: StepOptions = {}): StepRun {
       RUNNER_TEMP: runnerTemp,
       STUB_CALLS: calls,
       STUB_OUTPUT: options.output ?? "",
+      STUB_ERRORS: options.errors ?? "",
       STUB_STATUS: String(options.status ?? 0),
     },
     encoding: "utf8",
@@ -347,6 +423,17 @@ describe("ci.yml steps, run as GitHub runs them", { timeout: 20_000 }, () => {
     expect(build.status, build.stderr).toBe(0);
     expect(check.status).toBe(1);
     expect(check.stderr).toContain("⚠ Invalid next.config.ts options detected:");
+  });
+
+  it("also saves and checks what the build writes to stderr", () => {
+    // pnpm passes the packages' output on through its stdout, but writes some lines of its own,
+    // such as `$ pnpm --recursive build` and its errors, to stderr; `2>&1` keeps them in the log.
+    const build = runStep("Build", { output: clean, errors: warning });
+    const check = runStep("Fail on build warnings", { runnerTemp: build.runnerTemp });
+
+    expect(build.status, build.stderr).toBe(0);
+    expect(readFileSync(join(build.runnerTemp, "build.log"), "utf8")).toBe(`${clean}${warning}`);
+    expect(check.status).toBe(1);
   });
 
   it("validates docker-compose.yml with a copy of the .env template", () => {

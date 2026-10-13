@@ -617,7 +617,9 @@ Keep entries brief. Details belong in code comments and the build log.
 - Trade-offs: the checks run one after another instead of in parallel jobs, which would each
   repeat the setup and each bill at least a minute. Next.js's own build cache (`.next/cache`)
   is not cached: the build takes seconds today, so revisit when it slows down. Pinning
-  `ubuntu-26.04` means the runner image changes only when we change the label. actionlint 1.7.12,
+  `ubuntu-26.04` fixes the Ubuntu release, not the software: GitHub updates the image weekly
+  (Node.js 24, Docker, Compose), so a Compose release that prints a new warning would fail the
+  Compose step until the file or the step is fixed. actionlint 1.7.12,
   the latest release, does not know that label yet, so `.github/actionlint.yaml` declares it.
   `pnpm/setup`, a newer action that installs pnpm and Node.js in one step, was considered; the
   established pair is used instead.
@@ -653,8 +655,9 @@ Keep entries brief. Details belong in code comments and the build log.
     Compose reports an unset variable as a warning and exits with status 0 (tested).
     `--profile '*'` also validates the services in the `app` profile: without it, a broken
     `depends_on` there passes (tested).
-- Not enforced: a plain `console.warn` or `console.log` that runs while Next.js prerenders a page,
-  which Next.js prints as the bare message (tested), and the few Next.js warnings written the
+- Not enforced: plain text that code logs while Next.js prerenders a page, with `console.warn`,
+  `console.log` or `console.error` (only a logged `Error` object prints "Error:"), which Next.js
+  prints as the bare message (tested), and the few Next.js warnings written the
   same way (most are for features this app does not use, such as the Pages Router, i18n and the
   edge runtime); console output or Node.js warnings printed while tests, lint or the type check
   pass (no signal that works across tools; tests should assert on the logs they expect); pnpm's
@@ -1047,3 +1050,36 @@ Keep entries brief. Details belong in code comments and the build log.
 - Trade-offs: code in those folders cannot import `process` for other uses either; the global
   works the same. Config files, scripts and root-level tests are still not covered, and
   `Reflect.get(process, "env")` still passes: the rule guards against mistakes, not intent.
+
+### docker:down removes the containers of every Compose profile
+
+- Date: 2026-10-11 · Instruction: #7 · Author: Charlie
+- Context: `docker:down` ran a plain `docker compose down`, which handles only the services outside
+  a profile. Compose 5.1.3's `down` removes the containers of the active services, does not count
+  the services of other profiles as orphans, and then removes the project's network; Docker's
+  profiles documentation says the same. After `docker compose --profile app up`, it left both
+  exited placeholders behind, attached to a network that no longer existed, and the next
+  `docker compose --profile app up` failed with "network ... not found" (seen in a Linux VM by the
+  wave w0 review of instruction 3).
+- Decision: `docker:down` runs `docker compose --profile '*' down`. With every profile active,
+  Compose removes every container of the project and then its network; the data volumes stay, as
+  before. `docker:up` and `docker:logs` keep no profile, so `docker:up` still starts only
+  PostgreSQL and Redis. The asterisk is quoted, so the shell passes it to Compose as it is.
+- Trade-offs: a service that a later instruction puts in a profile of its own is also removed by
+  `docker:down`, which is what "down" should mean for this project's local services. Compose has
+  understood `*` as "every profile" since version 2.0.
+
+### CI does not check commit messages
+
+- Date: 2026-10-11 · Instruction: #5 · Author: Charlie
+- Context: commitlint runs only in the commit-msg hook (instruction 2). Hooks can be skipped
+  (`--no-verify`, `HUSKY=0`), GitHub's web editor runs none, and a squash merge on GitHub uses
+  whatever message its merge dialog holds (by default, for two or more commits, the pull request's
+  title). The README still said that CI "runs the full checks either way".
+- Decision: CI keeps to the checks that instruction 5 lists and does not run commitlint. The
+  README now says that only the commit-msg hook checks commit messages.
+- Trade-offs: a message that skipped the hook reaches `main` unchecked. Checking messages in CI
+  would need the pull request's commits (the checkout fetches only the commit under test),
+  separate rules for pushes to `main` and for squash-merge titles, and a root script for
+  commitlint. Every commit the team makes goes through the hook, so this waits until unchecked
+  messages start to appear.

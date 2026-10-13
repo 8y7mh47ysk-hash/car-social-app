@@ -54,7 +54,10 @@ docs/         Playbook, build log, decisions, dependency register and review log
 ## Prerequisites
 
 - macOS, Linux or WSL: the package scripts use a POSIX shell.
-- Node.js 24. The version is in `.nvmrc` and `.node-version` (for example, run `nvm use`).
+- Node.js 24, at least 24.2: on 24.0 and 24.1 the Docker and build-log checks in `scripts/`
+  silently do nothing, and their tests fail (see `docs/DECISIONS.md`). `.nvmrc` and
+  `.node-version` hold the major version; `nvm install` gets the latest 24, while `nvm use` picks
+  the newest 24 already installed.
 - pnpm 12. The exact version is pinned in `package.json` (`packageManager`). Run
   `corepack enable` once (Corepack ships with Node.js 24), or install pnpm 12 any other way;
   either picks up the pinned version.
@@ -104,7 +107,7 @@ Run these from the repository root.
 | `pnpm format`                   | Formats all files with Prettier.                                        |
 | `pnpm format:check`             | Checks formatting without changing files.                               |
 | `pnpm docker:up`                | Starts PostgreSQL and Redis in Docker and waits until both are healthy. |
-| `pnpm docker:down`              | Stops and removes those containers; their data volumes are kept.        |
+| `pnpm docker:down`              | Removes the containers (app placeholders too); keeps the data volumes.  |
 | `pnpm docker:logs`              | Follows their logs (`pnpm docker:logs postgres` for one); Ctrl+C stops. |
 | `pnpm db:migrate`               | Not available yet (instruction 26): prints a notice and fails.          |
 | `pnpm db:seed`                  | Not available yet (instruction 26): prints a notice and fails.          |
@@ -150,7 +153,9 @@ pnpm build > build.log 2>&1 && node scripts/check-build-warnings.ts build.log
 ```
 
 The second line saves the build's output in `build.log` (git ignores `*.log` files) and runs CI's
-check on it. If the build itself fails, the reason is in `build.log`.
+check on it. If the build itself fails, the reason is in `build.log`. With Docker and the root
+`.env` (see [Local services](#local-services)), `docker compose --profile '*' config --quiet` runs
+CI's last check, on `docker-compose.yml`: it prints nothing when the file is valid.
 
 ## How the packages fit together
 
@@ -200,7 +205,8 @@ Hooks also run from scripts and IDEs. They need `node` and `pnpm` on `PATH`; if 
 cannot find them, set `PATH` in `~/.config/husky/init.sh`, which husky reads before every hook.
 
 In an emergency only, `HUSKY=0 git commit ...` (or `git commit --no-verify`) skips the hooks, and
-`HUSKY=0 pnpm install` skips installing them. CI runs the full checks either way.
+`HUSKY=0 pnpm install` skips installing them. CI still runs the lint, format, type and test
+checks either way, but it does not check commit messages: only the commit-msg hook does.
 
 ## Commit messages
 
