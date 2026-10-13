@@ -183,6 +183,50 @@ describe("parseEnv", () => {
     ].join("\n");
     expect(everything).not.toContain("s3cr3t");
   });
+
+  // JSON.parse and BigInt quote their input in their errors, and Node.js prints all of an
+  // uncaught error, so passing such an error on would print the value.
+  it("names a variable whose check throws, without passing on its error or value", () => {
+    const secret = "s3cr3t-Value_42";
+    const throwing = z.object({
+      SETTINGS: z.string().transform((text): unknown => JSON.parse(text)),
+      LIMIT: z.string().refine((text) => BigInt(text) > 0n),
+      NAME: z.string(),
+      MODE: z.enum(["a", "b"], { error: "must be a or b" }),
+    });
+
+    const error = parseError({ SETTINGS: secret, LIMIT: secret, MODE: "c" }, throwing);
+
+    const thrown = "its check threw an error, which is not shown because it may contain the value";
+    expect(error.issues).toEqual([
+      { variable: "SETTINGS", problem: thrown },
+      { variable: "LIMIT", problem: thrown },
+      // The other problems are still reported in the same run.
+      { variable: "NAME", problem: "is required but not set" },
+      { variable: "MODE", problem: "must be a or b" },
+    ]);
+    expect(error.cause).toBeUndefined();
+    expect([error.message, String(error.stack), JSON.stringify(error)].join("\n")).not.toContain(
+      "s3cr3t",
+    );
+  });
+
+  it("reports a rule about several variables that throws under (environment)", () => {
+    const ruleSchema = z
+      .object({ LOW: z.string(), HIGH: z.string() })
+      .refine((env) => BigInt(env.LOW) < BigInt(env.HIGH));
+
+    const error = parseError({ LOW: "s3cr3t", HIGH: "10" }, ruleSchema);
+
+    expect(error.issues).toEqual([
+      {
+        variable: "(environment)",
+        problem:
+          "a rule about several variables threw an error, which is not shown because it may contain a value",
+      },
+    ]);
+    expect(JSON.stringify(error)).not.toContain("s3cr3t");
+  });
 });
 
 describe("envPortSchema", () => {
