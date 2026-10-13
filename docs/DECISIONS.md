@@ -615,7 +615,9 @@ Keep entries brief. Details belong in code comments and the build log.
 - Trade-offs: the checks run one after another instead of in parallel jobs, which would each
   repeat the setup and each bill at least a minute. Next.js's own build cache (`.next/cache`)
   is not cached: the build takes seconds today, so revisit when it slows down. Pinning
-  `ubuntu-26.04` means the runner image changes only when we change the label. actionlint 1.7.12,
+  `ubuntu-26.04` fixes the Ubuntu release, not the software: GitHub updates the image weekly
+  (Node.js 24, Docker, Compose), so a Compose release that prints a new warning would fail the
+  Compose step until the file or the step is fixed. actionlint 1.7.12,
   the latest release, does not know that label yet, so `.github/actionlint.yaml` declares it.
   `pnpm/setup`, a newer action that installs pnpm and Node.js in one step, was considered; the
   established pair is used instead.
