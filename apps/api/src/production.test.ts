@@ -179,7 +179,10 @@ describe("the production build of the API", { timeout: 30_000 }, () => {
   }, 120_000);
 
   afterAll(async () => {
-    await rm(dir, { recursive: true, force: true });
+    // Empty if beforeAll failed before it made the folder; there is nothing to remove then.
+    if (dir !== "") {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("serves the health contract from compiled code, then shuts down cleanly", async () => {
