@@ -46,6 +46,7 @@ Run these from the repository root.
 | `docker compose logs -f postgres`                                                 | Follows one service's log (Ctrl+C to stop following)  |
 | `docker compose stop`                                                             | Stops the services; the data stays                    |
 | `docker compose down`                                                             | Removes the containers; the data volumes stay         |
+| `docker compose --profile app down`                                               | Also removes the placeholders, if you started them    |
 | `docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'` | Opens psql inside the container                       |
 | `docker compose exec redis redis-cli`                                             | Opens redis-cli, already authenticated                |
 | `docker compose down --volumes`                                                   | Deletes the containers **and all data** (no undo)     |
@@ -91,6 +92,12 @@ The `api` and `web` services are in the `app` profile, so a plain `docker compos
 Neither app has a container image yet: run both on the host with `pnpm dev`.
 `docker compose --profile app up` starts PostgreSQL and Redis, waits until they are healthy, and
 then each placeholder prints that reminder and exits with status 1. They are never restarted.
+
+Remove them with the profile as well: `docker compose --profile app down`. A plain
+`docker compose down` only handles the services outside a profile, so it leaves both exited
+placeholders behind while it deletes the network they were attached to; the next
+`docker compose --profile app up` then fails with "failed to set up container networking: network
+... not found". `docker compose --profile app down` clears that up too.
 
 When the apps get real images (at the latest with instruction 102, which hardens every service's
 container), the placeholders become builds from the repository root. Points to carry over: the

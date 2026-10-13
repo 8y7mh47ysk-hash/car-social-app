@@ -276,7 +276,9 @@ docker compose exec redis redis-cli DEL apex:check
 docker compose --profile app up api               # prints "Placeholder: the API has no image
                                                   # yet. Run it on the host: pnpm dev" and the
                                                   # container exits with code 1
-docker compose down                               # removes the containers, keeps the data
+docker compose --profile app down                 # removes every container, the placeholder
+                                                  # too, and keeps the data (a plain `down`
+                                                  # would leave the placeholder behind)
 ```
 
 To see that the passwords are required, run `POSTGRES_PASSWORD= docker compose config --quiet`
@@ -347,7 +349,7 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
   services (instruction 103 adds an internal network); digest pins need deliberate updates
   (instruction 106 automates them).
 - `docker compose --profile app up` ends with both placeholders exited with status 1, on purpose,
-  until the apps get real images.
+  until the apps get real images. Remove them with `docker compose --profile app down`.
 - The health checks' one-second polling while a service starts (`start_interval`) needs Docker
   Engine 25 or later and Compose 2.20.2 or later.
 

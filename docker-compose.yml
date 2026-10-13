@@ -86,7 +86,8 @@ services:
   # Placeholders for the apps, in the "app" profile so that a plain `docker compose up` skips them.
   # Neither app has a container image yet: run both on the host with `pnpm dev`. With the profile
   # (`docker compose --profile app up`), each placeholder prints that reminder and exits with
-  # status 1 once the services it depends on are up.
+  # status 1 once the services it depends on are up. Remove them with the profile too
+  # (`docker compose --profile app down`): a plain `docker compose down` leaves them behind.
   api:
     profiles: [app]
     image: alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
