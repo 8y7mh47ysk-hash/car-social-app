@@ -382,9 +382,8 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
 - ESLint: `no-restricted-properties` rejects `process.env` in `apps/*/src` and `packages/*/src`,
   except in the three modules that read it.
 - `env-files.test.ts`, in a new root `tooling` Vitest project, asks git
-  (`git check-ignore --no-index --verbose`) about 17 env-file names in several folders, which must
-  be ignored, and the three templates, which must not be, and fails if any `.env` file is
-  committed.
+  (`git check-ignore --no-index --verbose`) about 22 env-file names in several folders, which must
+  be ignored, and the three templates, which must not be, and fails if any env file is committed.
 - The API entrypoint test now gives the server process only the API's variables, so the
   developer's shell cannot change the result, and covers invalid variables (it checks the whole
   output, so a printed value or stack trace fails it) and `LOG_LEVEL`.
@@ -406,13 +405,16 @@ if `.gitignore` changes above the env rules):
 
 ```sh
 git check-ignore -v --no-index .env apps/api/.env apps/web/.env.local
-# .gitignore:20:.env	.env
-# .gitignore:20:.env	apps/api/.env
-# .gitignore:21:.env.*	apps/web/.env.local
+# .gitignore:24:.env	.env
+# .gitignore:24:.env	apps/api/.env
+# .gitignore:25:.env.*	apps/web/.env.local
 git check-ignore -v --no-index apps/api/.env.example apps/web/.env.example
-# .gitignore:22:!.env.example	apps/api/.env.example    (the "!" rule means: not ignored)
-# .gitignore:22:!.env.example	apps/web/.env.example
-pnpm exec vitest run env-files.test.ts   # "Tests  23 passed (23)"
+# .gitignore:26:!.env.example	apps/api/.env.example    (the "!" rule means: not ignored)
+# .gitignore:26:!.env.example	apps/web/.env.example
+git check-ignore -v --no-index infra/postgres.env .envrc
+# .gitignore:22:*.env	infra/postgres.env
+# .gitignore:23:.envrc	.envrc
+pnpm exec vitest run env-files.test.ts   # "Tests  28 passed (28)"
 ```
 
 The API refuses invalid settings, names each one and never prints a value (after `pnpm build`):

@@ -16,7 +16,11 @@ playwright-report/
 test-results/
 
 # Environment files hold settings and secrets: only the .env.example templates are committed.
-# env-files.test.ts checks these rules.
+# Next.js, Node.js and Docker Compose read .env and .env.*; files for Docker's --env-file and
+# Compose's env_file are usually named *.env, and direnv reads .envrc. env-files.test.ts checks
+# these rules.
+*.env
+.envrc
 .env
 .env.*
 !.env.example
