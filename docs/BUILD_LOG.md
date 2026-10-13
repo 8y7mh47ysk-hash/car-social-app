@@ -351,7 +351,8 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
 - `docker compose --profile app up` ends with both placeholders exited with status 1, on purpose,
   until the apps get real images. Remove them with `docker compose --profile app down`.
 - The health checks' one-second polling while a service starts (`start_interval`) needs Docker
-  Engine 25 or later and Compose 2.20.2 or later.
+  Engine 25 or later and Compose 2.20.2 or later. On Linux, ports published on 127.0.0.1 stay
+  out of other machines' reach only from Docker Engine 28.
 
 ## #4 - Typed environment loader
 

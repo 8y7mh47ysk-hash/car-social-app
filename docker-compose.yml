@@ -5,7 +5,8 @@
 #   docker compose up -d --wait   # starts postgres and redis only; waits until both are healthy
 #   docker compose ps             # both show "(healthy)"
 #
-# Ports are published on 127.0.0.1 only, so these services are not reachable from other machines.
+# Ports are published on 127.0.0.1 only, so other machines cannot reach these services. On Linux
+# that needs Docker Engine 28 or later: older engines let machines on the same network reach them.
 
 name: apex-garage
 

@@ -20,7 +20,10 @@ Docker.
 You need Docker with Compose: Docker Desktop or OrbStack on macOS, Docker Engine on Linux. The
 file uses the health-check setting `start_interval` (checks every second while a service
 starts), which needs Compose 2.20.2 or later and Docker Engine 25 or later; any current Docker
-Desktop or OrbStack is newer than both.
+Desktop or OrbStack is newer than both. On Linux, use Docker Engine 28 or later, from Docker's
+own packages: with older engines, machines on the same local network can reach ports published
+on `127.0.0.1` (Docker's port-publishing documentation says so), and a distribution's own package
+can be older (Debian 13's `docker.io` is version 26.1).
 
 ### First run
 
@@ -108,8 +111,10 @@ and once the API image has a health check, `web` should wait for `service_health
 
 ### Security notes
 
-- Ports are published on `127.0.0.1` only. Other containers on the Compose network can still
-  reach the services; instruction 103 moves them to an internal network with no published ports.
+- Ports are published on `127.0.0.1` only, which keeps other machines out on Docker Desktop,
+  OrbStack and Docker Engine 28 or later (see above for older Linux engines). Other containers on
+  the Compose network can still reach the services; instruction 103 moves them to an internal
+  network with no published ports.
 - Neither password has a default, and `.env` is gitignored. The official Redis image turns
   Redis's protected mode off, so the password is what keeps other clients out.
 - The passwords are visible to anyone who can run `docker inspect` on this machine (Docker access

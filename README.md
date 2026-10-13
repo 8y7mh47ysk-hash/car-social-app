@@ -58,8 +58,9 @@ docs/         Playbook, build log, decisions, dependency register and review log
 - pnpm 12. The exact version is pinned in `package.json` (`packageManager`). Run
   `corepack enable` once (Corepack ships with Node.js 24), or install pnpm 12 any other way;
   either picks up the pinned version.
-- Docker with Compose (Docker Desktop or OrbStack on macOS) to run PostgreSQL and Redis; see
-  [Local services](#local-services). The apps do not use them yet, so `pnpm dev` works without it.
+- Docker with Compose (Docker Desktop or OrbStack on macOS, Docker Engine 28 or later on Linux) to
+  run PostgreSQL and Redis; see [Local services](#local-services). The apps do not use them yet,
+  so `pnpm dev` works without it.
 
 ## Quick start
 
