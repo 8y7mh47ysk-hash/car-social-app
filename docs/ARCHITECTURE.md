@@ -28,8 +28,10 @@ optional service) "possible later" as well, so line style is never the only sign
   Context). Uploaded files are scanned, and 3D models are processed in a sandbox with no network
   (#53, #166). Prices and limits are computed on the server, never trusted from a client (#84,
   #164).
-- **Every log line is structured.** The API writes JSON lines that carry the request's ID, with
-  secrets redacted (built #8, see [Observability](#observability)).
+- **The API's log lines are structured.** The API writes one JSON object per line; a line logged
+  while a request is handled carries its ID, and secrets are redacted by key name and URL part
+  (built #8, see [Observability](#observability)). The web app's server output is still Next.js's
+  own plain text.
 
 ## System overview
 
@@ -43,7 +45,7 @@ flowchart TB
   classDef planned stroke-dasharray:6 4
 
   subgraph Z1["Internet: untrusted"]
-    users["Users' browsers<br/>(web app, installable PWA)"]
+    users["Users' browsers"]
     mobile["Mobile app: Expo<br/>planned #134"]:::planned
     owner["Owner's phone and laptop"]
   end
@@ -58,7 +60,7 @@ flowchart TB
   subgraph Z3["Home server: Docker Compose"]
     subgraph Z3a["Edge network: entry from the tunnel or Tailscale"]
       tunnel["cloudflared<br/>tunnel connector<br/>planned #99"]:::planned
-      web["Web app: Next.js<br/>built #1"]:::built
+      web["Web app: Next.js<br/>built #1, PWA planned #64"]:::built
       api["API: Fastify<br/>built #1, logging built #8"]:::built
       admin["Admin console<br/>planned #189"]:::planned
     end
