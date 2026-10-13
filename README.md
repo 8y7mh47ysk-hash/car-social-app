@@ -151,7 +151,9 @@ pnpm build > build.log 2>&1 && node scripts/check-build-warnings.ts build.log
 ```
 
 The second line saves the build's output in `build.log` (git ignores `*.log` files) and runs CI's
-check on it. If the build itself fails, the reason is in `build.log`.
+check on it. If the build itself fails, the reason is in `build.log`. With Docker and the root
+`.env` (see [Local services](#local-services)), `docker compose --profile '*' config --quiet` runs
+CI's last check, on `docker-compose.yml`: it prints nothing when the file is valid.
 
 ## How the packages fit together
 
