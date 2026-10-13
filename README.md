@@ -47,7 +47,7 @@ packages/
 infra/        Deployment and operations files (see infra/README.md).
 scripts/      Developer and CI scripts and their tests (not a workspace package).
 .github/      The CI workflow (see "Continuous integration").
-docs/         Playbook, build log, decisions, dependency register and review log.
+docs/         Playbook, architecture, build log, decisions, dependency register and review log.
 .husky/       Git hooks (see "Git hooks"); their tests are in git-hooks.test.ts.
 ```
 
@@ -128,6 +128,10 @@ in a gitignored `.env` file next to the app: copy the app's template to create o
 Variables set in the shell win over the files. `WEB_HOST` and `WEB_PORT` work only from the
 shell, because Next.js opens its port before it reads `.env` files. The templates explain each
 variable and the rules for adding one; the design is in [docs/DECISIONS.md](docs/DECISIONS.md).
+
+The API logs one JSON object per line. To read its log in a terminal while developing, add
+`LOG_FORMAT=pretty` to `apps/api/.env`; how logging works is in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#observability).
 
 ## Continuous integration
 
