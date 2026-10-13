@@ -951,3 +951,39 @@ Keep entries brief. Details belong in code comments and the build log.
 - Trade-offs: the check needs pnpm, which the repository needs anyway. Only mermaid-cli's own
   version is pinned, so a release more than a day old can still change the tree; pinning all of
   it would need a lockfile in the repository for one manual check.
+
+### The API entrypoint logs crashes through the logger, then exits
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Delta (wave w0 review)
+- Context: Node.js prints an uncaught exception, or a promise rejection that nothing handles, as
+  plain text on stderr and exits with code 1. That report is not JSON, has no request ID and
+  skips the redaction of "Redact every log line after serialisation, in pino's streamWrite hook":
+  a connection URL's password appears in full.
+- Decision: `apps/api/src/server.ts` handles `uncaughtException`, which Node.js also emits for an
+  unhandled rejection (its default `--unhandled-rejections=throw`). The handler logs
+  `{ err, origin }` at fatal level through `app.log`, then calls `process.exit(1)`. It runs in
+  the failing code's async context, so the line carries the ID of the request whose code failed
+  (checked with a timer that throws and a rejection left unhandled, both inside a route). It is
+  installed once the app is built; earlier failures, such as invalid settings, keep their own
+  messages.
+- Trade-offs: `uncaughtExceptionMonitor` would log without taking over, but Node.js would still
+  print its unredacted report. Exiting at once, without closing the server, follows Node.js's
+  advice that the process is in an unknown state; requests in flight are cut off, as they were
+  before. With `LOG_LEVEL=silent` a crash writes nothing. Errors inside requests stay with
+  Fastify and instruction 27's error handler; this covers what escapes them.
+
+### Redaction also matches the credential headers the plan will receive
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Delta (wave w0 review)
+- Context: "Redact every log line after serialisation, in pino's streamWrite hook" decides by key
+  name. Header names come from other parties, and several that the plan will receive were not
+  matched: Cloudflare Access's `cf-access-jwt-assertion` (#190), Meta's `x-hub-signature-256`
+  (#150; `stripe-signature` was matched) and Node.js's `rawHeaders` list, which holds names and
+  values side by side, so no value can be matched to its name. Nor were `pass`, `pwd`, the PKCE
+  `code_verifier` of OAuth sign-in (#43) or a `_csrf` field.
+- Decision: a key is also sensitive when, lowercased and without separators, it contains
+  `codeverifier`, ends in `signature` followed by digits, `assertion` or `csrf`, or is exactly
+  `pass`, `pwd` or `rawheaders`. Tests cover each pattern and names that must stay visible.
+- Trade-offs: a harmless field whose name ends like this is hidden too (`testAssertion`). `pass`
+  and `pwd` match only as whole names, so `passenger` (journeys, #135) and `cacheBypass` stay
+  visible, but so does a name such as `smtpPass`: call such fields `smtpPassword`.
