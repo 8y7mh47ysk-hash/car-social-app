@@ -843,9 +843,11 @@ None.
 - `LOG_LEVEL` (instruction 4's environment loader) sets the level; the default is `info`.
 - Clients choose their request IDs when well formed, so an ID is a label for finding log lines,
   never something to trust.
-- Two responses carry no `x-request-id`: the bare 400 that Node.js sends for bytes it cannot parse
-  as HTTP (Fastify logs it at trace level), and the 503 that Fastify sends to a request arriving
-  on an open connection during shutdown (its log line has the ID).
+- Responses that Fastify sends before any hook runs carry no `x-request-id`: the 400, 431 and 408
+  it writes straight to the connection for a request it could not read (bytes that are not valid
+  HTTP, headers over Node.js's 16 KB limit, headers that arrive too slowly), logged at trace level
+  without an ID, and the 503 for a request arriving on an open connection during shutdown (its
+  log line has the ID).
 - Redaction works on key names and URL parts. A secret written into a message's text cannot be
   recognised, so never put one there.
 - Request lines record the client's IP address, which is personal data under UK GDPR; the privacy

@@ -838,9 +838,10 @@ Keep entries brief. Details belong in code comments and the build log.
   top-level `requestIdLogLabel` option is deprecated in Fastify 5.12.
 - Trade-offs: a client can send any well-formed ID, even one another request used, so an ID is a
   label for finding log lines, never a basis for authorisation, rate limits or idempotency (#36
-  needs its own keys). Two responses still go out without the header, both sent before any hook
-  can run: Node.js's bare 400 for bytes that are not HTTP, and Fastify's 503 for a request that
-  arrives on an open connection during shutdown (its log line has the ID).
+  needs its own keys). Some responses still go out without the header, all sent by Fastify before
+  any hook can run: the 400, 431 and 408 it writes straight to the connection for a request it
+  could not read (bytes that are not HTTP, headers over 16 KB, headers too slow), and the 503 for a
+  request that arrives on an open connection during shutdown (its log line has the ID).
 
 ### Request context: a small AsyncLocalStorage module, not @fastify/request-context
 
