@@ -1,10 +1,10 @@
-import { parseEnv, type EnvSource } from "@apex/shared";
+import { EnvValidationError, parseEnv, type EnvIssue, type EnvSource } from "@apex/shared";
 import {
   PHASE_DEVELOPMENT_SERVER,
   PHASE_PRODUCTION_BUILD,
   PHASE_PRODUCTION_SERVER,
 } from "next/constants";
-import { z } from "zod";
+import type { z } from "zod";
 
 import { publicEnvSchema, webEnvMessages } from "./public-schema";
 import { serverEnvSchema } from "./server-schema";
@@ -40,10 +40,22 @@ export function validateWebEnv(
 ): void {
   const compiles = phase === PHASE_DEVELOPMENT_SERVER || phase === PHASE_PRODUCTION_BUILD;
   const serves = phase === PHASE_DEVELOPMENT_SERVER || phase === PHASE_PRODUCTION_SERVER;
-  // One schema, so a single error lists every problem.
-  const schema = z.object({
-    ...(compiles ? schemas.public.shape : {}),
-    ...(serves ? schemas.server.shape : {}),
+  const groups = [...(compiles ? [schemas.public] : []), ...(serves ? [schemas.server] : [])];
+  // Each group is checked with its own schema, as publicEnv and getServerEnv check it, so a rule
+  // about several of its variables (a refine on the whole object) is checked here too. The
+  // problems of both groups go into one error.
+  const issues = groups.flatMap((schema): readonly EnvIssue[] => {
+    try {
+      parseEnv(schema, source, webEnvMessages);
+      return [];
+    } catch (error) {
+      if (error instanceof EnvValidationError) {
+        return error.issues;
+      }
+      throw error;
+    }
   });
-  parseEnv(schema, source, webEnvMessages);
+  if (issues.length > 0) {
+    throw new EnvValidationError(webEnvMessages, issues);
+  }
 }

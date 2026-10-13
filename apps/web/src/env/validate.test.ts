@@ -11,7 +11,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { validateWebEnv } from "./validate";
+import { validateWebEnv, type WebEnvSchemas } from "./validate";
 
 // The app's own schemas stay empty until the web app reads its first variable, so these tests
 // give validateWebEnv one stand-in variable in each group.
@@ -36,9 +36,13 @@ const ALL_PHASES = [
 ];
 
 /** Runs validateWebEnv and returns the EnvValidationError it throws, if any. */
-function validationError(phase: string, source: EnvSource): EnvValidationError | undefined {
+function validationError(
+  phase: string,
+  source: EnvSource,
+  testSchemas: WebEnvSchemas = schemas,
+): EnvValidationError | undefined {
   try {
-    validateWebEnv(phase, source, schemas);
+    validateWebEnv(phase, source, testSchemas);
   } catch (error) {
     if (error instanceof EnvValidationError) {
       return error;
@@ -49,8 +53,12 @@ function validationError(phase: string, source: EnvSource): EnvValidationError |
 }
 
 /** The problems validateWebEnv reports in a phase, or none if it accepts the environment. */
-function problems(phase: string, source: EnvSource): readonly EnvIssue[] {
-  return validationError(phase, source)?.issues ?? [];
+function problems(
+  phase: string,
+  source: EnvSource,
+  testSchemas: WebEnvSchemas = schemas,
+): readonly EnvIssue[] {
+  return validationError(phase, source, testSchemas)?.issues ?? [];
 }
 
 describe("validateWebEnv", () => {
@@ -99,6 +107,27 @@ describe("validateWebEnv", () => {
       ].join("\n"),
     );
     expect(JSON.stringify(error?.issues)).not.toContain("s3cr3t");
+  });
+
+  // getServerEnv and publicEnv check such rules, so a check without them would let `next start`
+  // start, and the first request that reads the variables fail.
+  it("checks a rule about several variables in a group", () => {
+    const withRule = {
+      public: z.object({}),
+      server: z
+        .object({ SMTP_USER: z.string().optional(), SMTP_PASSWORD: z.string().optional() })
+        .refine((env) => env.SMTP_USER === undefined || env.SMTP_PASSWORD !== undefined, {
+          message: "is required when SMTP_USER is set",
+          path: ["SMTP_PASSWORD"],
+        }),
+    };
+
+    expect(problems(PHASE_PRODUCTION_SERVER, { SMTP_USER: "owner" }, withRule)).toEqual([
+      { variable: "SMTP_PASSWORD", problem: "is required when SMTP_USER is set" },
+    ]);
+    expect(
+      problems(PHASE_PRODUCTION_SERVER, { SMTP_USER: "owner", SMTP_PASSWORD: "x" }, withRule),
+    ).toEqual([]);
   });
 
   it.each(ALL_PHASES)(
