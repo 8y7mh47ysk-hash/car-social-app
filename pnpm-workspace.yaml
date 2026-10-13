@@ -13,6 +13,10 @@ catalog:
   vitest: ^4.1.11
   zod: ^4.6.5
 
+# Refuse to install on a Node.js version outside package.json "engines" (or one that a dependency
+# says it does not support), instead of failing later; without this, pnpm does not even warn.
+engineStrict: true
+
 # Install scripts pnpm may run (true) or must skip (false); pnpm fails on any unlisted script.
 allowBuilds:
   # Only downloads its native binding when the optional platform package is missing, which
