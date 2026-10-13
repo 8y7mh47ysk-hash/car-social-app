@@ -226,6 +226,22 @@ describe("ci.yml", () => {
     expect(compose).toContain("cp .env.example .env");
     expect(compose).toContain("docker compose --profile '*' config --quiet");
   });
+
+  it("gives the Compose check a value for every variable docker-compose.yml requires", () => {
+    // `${NAME:?message}` stops every Compose command while NAME is unset or empty, and CI's .env is
+    // a copy of the template, which leaves the passwords blank. Without a value here, a newly
+    // required variable would fail this step on GitHub only, as Compose does not run locally.
+    const composeFile = readFileSync(join(repoRoot, "docker-compose.yml"), "utf8");
+    const required = new Set(
+      Array.from(composeFile.matchAll(/(?<!\$)\$\{(\w+):?\?/gu), ([, name = ""]) => name),
+    );
+    const step = steps.find((candidate) => candidate.run?.includes("docker compose") === true);
+
+    expect(required.size).toBeGreaterThan(0);
+    for (const name of required) {
+      expect(String(step?.env?.[name] ?? ""), name).not.toBe("");
+    }
+  });
 });
 
 /**
