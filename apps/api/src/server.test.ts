@@ -84,17 +84,25 @@ const WITHOUT_PINO_PRETTY = preload(`
 `);
 
 /**
- * Makes the process fail on SIGUSR2, once it is running, with an error whose message holds a
- * connection URL's password: thrown ("throw") or as a promise rejection nothing handles
- * ("reject").
+ * Adds `GET /fail` to the entrypoint's app through the diagnostics channel on which Fastify
+ * publishes every new instance, before the entrypoint registers anything. The route answers at
+ * once and leaves a timer behind, as fire-and-forget code in a handler would; 10 ms later the
+ * timer fails with an error whose message holds a connection URL's password: thrown ("throw") or
+ * as a promise rejection that nothing handles ("reject").
  */
-function failOnSignal(kind: "throw" | "reject"): string[] {
+function failAfterRequest(kind: "throw" | "reject"): string[] {
   return preload(`
-    process.on("SIGUSR2", () => {
-      // Joined at run time: stack traces show this module's data: URL, which holds its source.
-      const password = ["crash", "secret"].join("-");
-      const error = new Error("lost postgres://apex:" + password + "@db:5432/apex");
-      ${kind === "throw" ? "throw error;" : "void Promise.reject(error);"}
+    import { subscribe } from "node:diagnostics_channel";
+    subscribe("fastify.initialization", ({ fastify }) => {
+      fastify.get("/fail", () => {
+        setTimeout(() => {
+          // Joined at run time: stack traces show this module's data: URL, which holds its source.
+          const password = ["crash", "secret"].join("-");
+          const error = new Error("lost postgres://apex:" + password + "@db:5432/apex");
+          ${kind === "throw" ? "throw error;" : "void Promise.reject(error);"}
+        }, 10);
+        return { failing: true };
+      });
     });
   `);
 }
@@ -272,15 +280,20 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
     ["an uncaught exception", "throw", "uncaughtException"],
     ["an unhandled promise rejection", "reject", "unhandledRejection"],
   ] as const)(
-    "logs %s as a redacted JSON line, then exits with code 1",
+    "logs %s as a redacted JSON line with the failing request's ID, then exits with code 1",
     async (_name, kind, origin) => {
-      const server = startServer({}, failOnSignal(kind));
-      await listeningUrl(server);
+      const server = startServer({}, failAfterRequest(kind));
+      const url = await listeningUrl(server);
 
-      server.child.kill("SIGUSR2");
+      const response = await fetch(new URL("/fail", url), {
+        headers: { "x-request-id": "entrypoint-crash-0001" },
+      });
+      expect(await response.json()).toEqual({ failing: true });
+      expect(response.headers.get("x-request-id")).toBe("entrypoint-crash-0001");
 
       expect(await server.exited).toEqual({ code: 1, signal: null });
-      // Every line is JSON (Node.js's own report would be plain text), the last one the crash.
+      // Every line is JSON (Node.js's own report would be plain text). The last one is the crash,
+      // under the ID of the request that started the timer, although its response had gone.
       const lines = server
         .output()
         .trimEnd()
@@ -290,6 +303,7 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
         level: 60,
         msg: "uncaught exception",
         origin,
+        reqId: "entrypoint-crash-0001",
         err: { message: `lost postgres://${REDACTED}@db:5432/apex` },
       });
       expect(server.output()).not.toContain("crash-secret");
