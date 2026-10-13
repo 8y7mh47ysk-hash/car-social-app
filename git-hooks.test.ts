@@ -453,12 +453,13 @@ describe("the pre-commit hook's test step in this repository", { timeout: 60_000
     ".husky/pre-commit",
     "commitlint.config.mjs",
     "lint-staged.config.ts",
-    // Files that the infra, env-file and CI workflow tests read instead of importing.
+    // Files that the infra, env-file, CI workflow and env-access tests read instead of importing.
     "docker-compose.yml",
     ".env.example",
     "apps/web/.env.example",
     ".gitignore",
     ".github/workflows/ci.yml",
+    "eslint.config.mjs",
   ])("runs every test when %s is staged", async (file) => {
     const result = await relatedTests(file);
 

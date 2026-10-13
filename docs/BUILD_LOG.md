@@ -113,12 +113,12 @@ None for this instruction.
   `forceRerunTriggers` so that staging dependency, tsconfig, Vitest, hook or hook-config files
   runs every test. Since Phase 0 was merged, so does staging a file that other instructions'
   tests read instead of importing: `docker-compose.yml`, an `.env.example` template, a
-  `.gitignore` or a CI workflow.
-- `git-hooks.test.ts` (54 tests): 28 commit messages through the real commit-msg hook and
+  `.gitignore`, a CI workflow or (since the wave w0 review) `eslint.config.mjs`.
+- `git-hooks.test.ts` (55 tests): 28 commit messages through the real commit-msg hook and
   commitlint config; 10 pre-commit scenarios that run the real lint-staged with this
   repository's config in scratch git repositories, with stand-ins for ESLint, Prettier, pnpm and
   Vitest that record their calls (order, files, hiding and restoring, deleted files, fixes being
-  staged, a failure in each tool); and 16 runs of the real `vitest related` in this checkout,
+  staged, a failure in each tool); and 17 runs of the real `vitest related` in this checkout,
   which check that staging a rerun-trigger file runs every test and an unrelated file runs none.
 - README: "Git hooks" and "Commit messages" sections and a `.husky/` line in the layout.
 
@@ -129,7 +129,7 @@ Run from the repository root:
 ```sh
 pnpm install --frozen-lockfile          # a fresh install prints ". prepare$ husky"
 git config --get core.hooksPath         # prints .husky/_
-pnpm exec vitest run git-hooks.test.ts  # "Tests  54 passed (54)"
+pnpm exec vitest run git-hooks.test.ts  # "Tests  55 passed (55)"
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
