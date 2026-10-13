@@ -54,7 +54,10 @@ docs/         Playbook, build log, decisions, dependency register and review log
 ## Prerequisites
 
 - macOS, Linux or WSL: the package scripts use a POSIX shell.
-- Node.js 24. The version is in `.nvmrc` and `.node-version` (for example, run `nvm use`).
+- Node.js 24, at least 24.2: on 24.0 and 24.1 the Docker and build-log checks in `scripts/`
+  silently do nothing, and their tests fail (see `docs/DECISIONS.md`). `.nvmrc` and
+  `.node-version` hold the major version; `nvm install` gets the latest 24, while `nvm use` picks
+  the newest 24 already installed.
 - pnpm 12. The exact version is pinned in `package.json` (`packageManager`). Run
   `corepack enable` once (Corepack ships with Node.js 24), or install pnpm 12 any other way;
   either picks up the pinned version.
