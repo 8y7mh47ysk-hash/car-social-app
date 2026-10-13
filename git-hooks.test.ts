@@ -177,6 +177,12 @@ describe("commit-msg hook", { timeout: 20_000 }, () => {
       "feat!: remove the v1 routes\n\nThe old routes are gone.\nBREAKING CHANGE: use /v2.\n",
       ["footer-leading-blank"],
     ],
+    [
+      "a body line that starts with a word and an issue-style #N, as a footer would",
+      "docs: order the build log\n\nThe merge appended the entries in merge order, so\n" +
+        "the #6 entry came after #7.\n",
+      ["footer-leading-blank"],
+    ],
   ] as const)("rejects %s", async ([, message, rules], { expect }) => {
     const result = await commitMsgHook(message);
 

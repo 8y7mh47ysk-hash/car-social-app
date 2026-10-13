@@ -220,6 +220,8 @@ Co-Authored-By: Name <email@example.com>
 - A blank line comes before the body and before the footer. A line that starts with one word
   followed by a colon and a space, such as `Co-Authored-By: ...` or `Refs: ...`, starts the
   footer, so it too needs a blank line before it; reword such a line if it belongs to the body.
+  So does a line that starts with one word, a space and `#`, such as `the #6 entry ...`: when a
+  body line wraps there, rewrap it or write "instruction 6" instead.
 - Messages that git writes itself are accepted as they are: merges, reverts, and `fixup!`,
   `squash!` and `amend!` commits.
 
