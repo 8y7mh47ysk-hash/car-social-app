@@ -35,6 +35,7 @@ const envSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolea
 const workflowSchema = z.object({
   on: z.unknown(),
   permissions: z.unknown().optional(),
+  concurrency: z.unknown().optional(),
   defaults: defaultsSchema.optional(),
   jobs: z.record(
     z.string(),
@@ -66,9 +67,10 @@ const workflows = readdirSync(workflowsDir)
     return { file, text, workflow: workflowSchema.parse(parse(text)) };
   });
 
-const rootScripts = z
-  .object({ scripts: z.record(z.string(), z.string()) })
-  .parse(JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"))).scripts;
+const rootPackage = z
+  .object({ packageManager: z.string(), scripts: z.record(z.string(), z.string()) })
+  .parse(JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")));
+const rootScripts = rootPackage.scripts;
 
 /** pnpm's own commands that CI runs; any other `pnpm <name>` must be a root package.json script. */
 const PNPM_COMMANDS = new Set(["install", "peers"]);
@@ -158,6 +160,37 @@ describe("ci.yml", () => {
     for (const job of Object.values(ci.workflow.jobs)) {
       expect(job.permissions).toBeUndefined();
     }
+  });
+
+  it("cancels a pull request's superseded run, but finishes every run on main", () => {
+    // A pull request's runs share its ref, so a new push cancels the run for the older one. A push
+    // to main gets a group of its own (its commit SHA), so every commit on main is checked.
+    expect(ci.workflow.concurrency).toEqual({
+      group:
+        "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}",
+      "cancel-in-progress": true,
+    });
+  });
+
+  it("sets up pnpm from packageManager, then Node.js from .nvmrc with pnpm's store cached", () => {
+    // "Cache pnpm" (instruction 5). Without a `version` input, pnpm/action-setup installs the
+    // version in package.json's packageManager. setup-node's pnpm cache asks pnpm where its store
+    // is, so pnpm must be set up first, and both before the install.
+    const position = (find: (step: (typeof steps)[number]) => boolean): number => {
+      const index = steps.findIndex(find);
+      expect(index).toBeGreaterThanOrEqual(0);
+      return index;
+    };
+    const pnpm = position((step) => step.uses?.startsWith("pnpm/action-setup@") === true);
+    const node = position((step) => step.uses?.startsWith("actions/setup-node@") === true);
+    const install = position((step) => step.run === "pnpm install --frozen-lockfile");
+
+    expect(pnpm).toBeLessThan(node);
+    expect(node).toBeLessThan(install);
+    expect(steps[pnpm]?.with?.["version"]).toBeUndefined();
+    expect(rootPackage.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/u);
+    expect(steps[node]?.with).toMatchObject({ "node-version-file": ".nvmrc", cache: "pnpm" });
+    expect(readFileSync(join(repoRoot, ".nvmrc"), "utf8")).toMatch(/^\d+(?:\.\d+){0,2}\n$/u);
   });
 
   it("installs exactly what the lockfile says, then lints, type-checks, tests and builds", () => {
