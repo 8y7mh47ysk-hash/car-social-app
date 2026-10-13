@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-/** The issues of the EnvValidationError that `read` throws; fails if it throws nothing else. */
+/** The issues of the EnvValidationError that `read` throws; fails if it throws anything else. */
 function issuesThrownBy(read: () => unknown): unknown {
   try {
     read();
