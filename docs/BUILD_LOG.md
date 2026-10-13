@@ -647,8 +647,9 @@ scripts, each failing a test. Fixes, each with a test where it changed code or a
   does not check commit messages ("CI does not check commit messages" in docs/DECISIONS.md); the
   README's prerequisites now name Node.js 24.2, which `scripts/` needs; docs/DECISIONS.md said
   that pinning `ubuntu-26.04` keeps the runner image fixed, but GitHub updates its software
-  weekly; and the decision on "fail on any warning" pointed here for provoking real build output,
-  which "How to verify" now shows.
+  weekly; the decision on "fail on any warning" pointed here for provoking real build output,
+  which "How to verify" now shows; and the README's pre-push commands now include the Compose
+  check.
 
 ## #6 - Architecture and decision docs
 
