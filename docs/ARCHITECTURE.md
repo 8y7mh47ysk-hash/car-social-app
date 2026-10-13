@@ -365,11 +365,18 @@ flowchart TB
   Two responses carry no ID: the bare 400 that Node.js sends for bytes it cannot parse as HTTP
   (Fastify logs it at trace level), and the 503 that Fastify sends, before any hook runs, to a
   request arriving on an open connection while the server shuts down (its log line has the ID).
+  A route that writes its response to `reply.raw` itself, as a Server-Sent Events stream might
+  (#72), sends only the headers it writes there, so it must include `reply.getHeaders()`.
 - **Redaction.** Before a line is written, the values of sensitive keys (passwords, tokens,
   cookies, authorization headers, API keys and similar) are replaced with `[Redacted]` at any
   depth; URL credentials, query strings and fragments are hidden in every string; strings are cut
   to 8192 characters and request URLs to 256. Never put a secret in a log message: inside free
-  text only URL parts can be recognised.
+  text only URL parts can be recognised. For the same reason, log parsed objects rather than raw
+  bodies as strings (a raw webhook body, #91, is free text to the logger), and never put a secret
+  in a URL path, which is logged as it is: tokens in links (#39, #41) go in the query string.
+- **Crashes.** An uncaught exception, or a promise rejection that nothing handles, is logged at
+  fatal level, redacted and with the ID of the request whose code failed, before the process
+  exits with code 1 (`apps/api/src/server.ts`). Node.js's own report would be unredacted text.
 - **Personal data.** Request lines record the client's IP address, which is personal data under
   UK GDPR, so the privacy policy and its retention periods must cover logs (#114). Behind the
   tunnel the address is cloudflared's until the API is told to trust the address the tunnel
@@ -381,11 +388,15 @@ flowchart TB
   dependencies only (#102), can log JSON only.
 - **Writing log lines.** Route handlers and hooks log with `request.log`. Code that has no request
   (services, jobs) gets `app.log`, or a child of it, when it is created; the request's ID is
-  still added to its lines. ESLint rejects `console` calls in API code.
+  still added to its lines. ESLint rejects `console` calls in API code. A timer, socket or
+  connection created while a request is handled keeps that request's context for good, so its
+  later lines carry that request's ID: create long-lived clients, pools and intervals at startup.
 - **Next steps for request IDs.** When the web app calls the API from the server it should pass
   its own request's ID along; queued jobs should carry the ID of the request that created them
-  (#37); error responses should include it (#27); and if the browser ever reads the header across
-  origins, CORS must expose `x-request-id`.
+  (#37); error responses should include it (#27), and #27's error format must also reach the
+  router's 400 and 414 responses, which never go through `setErrorHandler` (see
+  `sendFrameworkError` in `apps/api/src/lib/logger.ts`); and if the browser ever reads the header
+  across origins, CORS must expose `x-request-id`.
 
 **Metrics, uptime and alerts (planned).** Prometheus collects metrics, including GPU load and
 temperature (#86); Grafana shows dashboards; Uptime Kuma checks the health and readiness endpoints
