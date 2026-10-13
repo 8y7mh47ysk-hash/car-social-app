@@ -550,6 +550,8 @@ describe("the pre-commit hook's test step in this repository", { timeout: 60_000
     "apps/web/tsconfig.json",
     "apps/web/vitest.config.ts",
     "apps/web/vitest.setup.ts",
+    // Started as a separate process by its tests, so no test imports it.
+    "apps/api/src/server.ts",
     ".husky/pre-commit",
     "commitlint.config.mjs",
     "lint-staged.config.ts",

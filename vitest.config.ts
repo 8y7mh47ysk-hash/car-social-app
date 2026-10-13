@@ -31,6 +31,8 @@ export default defineConfig({
       `${root}**/tsconfig*.json`,
       `${root}**/{vite,vitest}.config.*`,
       `${root}**/vitest.setup.*`,
+      // The API's entrypoint: apps/api/src/server.test.ts starts it as a separate process.
+      `${root}apps/api/src/server.ts`,
       `${root}.husky/*`,
       `${root}{commitlint,lint-staged}.config.*`,
       // Read from disk or through git by infra/compose.test.ts (the compose file and the root
