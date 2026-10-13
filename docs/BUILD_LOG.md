@@ -532,6 +532,17 @@ node scripts/check-build-warnings.ts build.log    # lists the line and exits wit
 rm build.log
 ```
 
+To see the check catch real Next.js output (worth repeating after upgrading Next.js, Node.js or
+pnpm), add a page that logs an error while it is prerendered:
+
+```sh
+mkdir apps/web/src/app/probe
+printf 'export default function Page() {\n  console.error(new Error("probe"));\n  return null;\n}\n' > apps/web/src/app/probe/page.tsx
+pnpm build 2>&1 | tee build.log                   # still ends with "Done": the build succeeds
+node scripts/check-build-warnings.ts build.log    # lists "apps/web build: Error: probe", status 1
+rm -r apps/web/src/app/probe build.log
+```
+
 With [actionlint](https://github.com/rhysd/actionlint) installed, `actionlint` in the repository
 root prints nothing and exits with status 0. With [zizmor](https://docs.zizmor.sh) installed,
 `zizmor --offline .github/workflows/ci.yml` ends with "No findings to report. Good job!". Neither
