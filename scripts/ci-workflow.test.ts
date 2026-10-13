@@ -253,13 +253,14 @@ function shellCommand(
 
 /**
  * Stand-ins for the commands that ci.yml's scripts call: each one appends its command line to
- * $STUB_CALLS, prints $STUB_OUTPUT (docker to stderr, where Compose writes its warnings) and exits
- * with $STUB_STATUS.
+ * $STUB_CALLS, prints $STUB_OUTPUT (docker to stderr, where Compose writes its warnings; pnpm to
+ * stdout, then $STUB_ERRORS to stderr) and exits with $STUB_STATUS.
  */
 const STUBS = {
   pnpm: `#!/bin/sh
 printf 'pnpm %s\\n' "$*" >> "$STUB_CALLS"
 printf '%s' "$STUB_OUTPUT"
+printf '%s' "$STUB_ERRORS" >&2
 exit "$STUB_STATUS"
 `,
   docker: `#!/bin/sh
@@ -272,6 +273,8 @@ exit "$STUB_STATUS"
 interface StepOptions {
   /** What the pnpm and docker stand-ins print. */
   readonly output?: string;
+  /** What the pnpm stand-in prints to stderr after its output. */
+  readonly errors?: string;
   /** The exit status of the pnpm and docker stand-ins. */
   readonly status?: number;
   /** The runner's temporary directory, $RUNNER_TEMP: pass a previous step's to share its files. */
@@ -354,6 +357,7 @@ function runStep(name: string, options: StepOptions = {}): StepRun {
       RUNNER_TEMP: runnerTemp,
       STUB_CALLS: calls,
       STUB_OUTPUT: options.output ?? "",
+      STUB_ERRORS: options.errors ?? "",
       STUB_STATUS: String(options.status ?? 0),
     },
     encoding: "utf8",
@@ -403,6 +407,17 @@ describe("ci.yml steps, run as GitHub runs them", { timeout: 20_000 }, () => {
     expect(build.status, build.stderr).toBe(0);
     expect(check.status).toBe(1);
     expect(check.stderr).toContain("⚠ Invalid next.config.ts options detected:");
+  });
+
+  it("also saves and checks what the build writes to stderr", () => {
+    // pnpm passes the packages' output on through its stdout, but writes some lines of its own,
+    // such as `$ pnpm --recursive build` and its errors, to stderr; `2>&1` keeps them in the log.
+    const build = runStep("Build", { output: clean, errors: warning });
+    const check = runStep("Fail on build warnings", { runnerTemp: build.runnerTemp });
+
+    expect(build.status, build.stderr).toBe(0);
+    expect(readFileSync(join(build.runnerTemp, "build.log"), "utf8")).toBe(`${clean}${warning}`);
+    expect(check.status).toBe(1);
   });
 
   it("validates docker-compose.yml with a copy of the .env template", () => {
