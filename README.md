@@ -54,7 +54,9 @@ docs/         Playbook, build log, decisions, dependency register and review log
 ## Prerequisites
 
 - macOS, Linux or WSL: the package scripts use a POSIX shell.
-- Node.js 24. The version is in `.nvmrc` and `.node-version` (for example, run `nvm use`).
+- Node.js 24, release 24.15 or later. `.nvmrc` and `.node-version` say `24`, so `nvm use` and
+  similar tools pick the latest 24 release. `pnpm install` refuses an older Node.js: some
+  dependencies need 24.15 (jsdom 30, which the web app's tests use).
 - pnpm 12. The exact version is pinned in `package.json` (`packageManager`). Run
   `corepack enable` once (Corepack ships with Node.js 24), or install pnpm 12 any other way;
   either picks up the pinned version.
@@ -155,12 +157,13 @@ check on it. If the build itself fails, the reason is in `build.log`.
 The apps import `@apex/shared` as TypeScript source: Next.js, Vitest and Node.js (in
 `pnpm dev`) compile or strip its types directly, so there is no build step during development.
 The production API (`pnpm start`) runs plain JavaScript: `pnpm build` compiles `packages/shared`
-first, and Node.js loads that output through the `@apex/dist` export condition. The reasons and
-trade-offs are in [docs/DECISIONS.md](docs/DECISIONS.md).
+first, and Node.js loads that output through the `@apex/dist` export condition. The start script
+also turns Node.js's TypeScript support off, so it fails rather than fall back to the TypeScript
+source. The reasons and trade-offs are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Git hooks
 
-`pnpm install` installs two git hooks with [husky](https://typicode.github.io/husky) (the
+`pnpm install` installs three git hooks with [husky](https://typicode.github.io/husky) (the
 `prepare` script). Run it once in every clone and every git worktree: until then, commits there
 are not checked.
 
@@ -171,34 +174,55 @@ are not checked.
   commit; any ESLint warning fails), `pnpm typecheck` for the whole repository when a staged file
   is TypeScript, JSON or a pnpm workspace file, and `vitest related` for the unit tests that
   import a staged file. Staging a `package.json`, a pnpm lockfile or workspace file, a tsconfig,
-  a Vitest config or setup file, a git hook or its config, or a file that tests read instead of
-  importing (`docker-compose.yml`, an `.env.example` template, a `.gitignore` or a CI workflow)
-  runs every test instead. Deleted files count as staged, so deleting a module that is still
-  imported fails the type check. A failing step does not stop the others, so one run shows every
-  problem.
+  a Vitest config or setup file, a git hook or its config, the API's entrypoint
+  (`apps/api/src/server.ts`, which its tests start as a separate process) or a file that tests
+  read instead of importing (`docker-compose.yml`, an `.env.example` template, a `.gitignore` or
+  a CI workflow) runs every test instead. Deleted files count as staged, so deleting a module that
+  is still imported fails the type check. A failing step does not stop the others, so one run
+  shows every problem.
+- **pre-merge-commit** ([`.husky/pre-merge-commit`](.husky/pre-merge-commit)) runs the same
+  checks on what a merge brings in when `git merge` (or a `git pull` that merges) commits without
+  conflicts; git runs pre-commit only for commits you make with `git commit`.
 - **commit-msg** ([`.husky/commit-msg`](.husky/commit-msg)) checks the message with commitlint
   (see "Commit messages").
 
 If a hook fails, or you press Ctrl+C while it runs, the commit is not made and your files are
-left as they were: fix the problem, stage the fix and commit again. If the hook is killed in a
-way that stops it from tidying up, `git stash list` shows a `lint-staged automatic backup` entry
-that holds your changes.
+left as they were: fix the problem, stage the fix and commit again. A merge whose checks fail is
+left in progress with its changes staged: fix the problem and run `git commit`, or give up with
+`git merge --abort`.
 
-The pre-commit hook keeps that backup in the git stash while it runs, and all worktrees of a
-repository share one stash list. When several worktrees are in use, pop or apply your own entry
-by name (`git stash list`, then `git stash pop stash@{n}`) rather than the top one, which may be
-another worktree's backup. Two worktrees committing at the same moment can occasionally leave a
-stray `lint-staged automatic backup` entry behind; it is only a copy, and safe to drop.
+While the pre-commit hook runs, it keeps a backup of your changes in the git stash, in an entry
+named `lint-staged automatic backup`. Only Ctrl+C (SIGINT) lets it tidy up. If it is stopped in
+any other way (a closed terminal, an editor or tool that cancels the commit or gives up waiting,
+`kill`), your unstaged changes and untracked files stay in that entry and the working tree holds
+only what was staged. To get everything back exactly as it was, staged and unstaged:
 
-Typical run times on an Apple M5, measured with all of Phase 0 merged: about 1 s for a
-documentation change, about 4 s for a source change with related tests, and about 12 s when every
-test runs.
+```sh
+git stash list                      # find the "lint-staged automatic backup" entry: stash@{n}
+git reset --hard                    # the backup also holds what was staged
+git stash apply --index stash@{n}   # restores the staged, unstaged and untracked files
+git stash drop stash@{n}
+```
+
+These are the steps the hook itself takes after a failed check. Run them before you edit again,
+because `git reset --hard` discards changes made since the hook stopped. A plain `git stash pop`
+is not enough: it stops with a merge conflict on any file that was partly staged.
+
+All worktrees of a repository share one stash list, so the top entry may be another worktree's
+backup: pick the entry that names your branch. Two worktrees committing at the same moment can
+occasionally leave a stray `lint-staged automatic backup` entry behind; it is only a copy, and
+safe to drop.
+
+Typical run times on an Apple M5, measured after the wave w0 review (450 tests) while other work
+used the machine: about 1 s for a documentation change, about 4 s for a source change with related
+tests, and about 16 s when every test runs.
 
 Hooks also run from scripts and IDEs. They need `node` and `pnpm` on `PATH`; if a GUI git client
 cannot find them, set `PATH` in `~/.config/husky/init.sh`, which husky reads before every hook.
 
-In an emergency only, `HUSKY=0 git commit ...` (or `git commit --no-verify`) skips the hooks, and
-`HUSKY=0 pnpm install` skips installing them. CI runs the full checks either way.
+In an emergency only, `HUSKY=0 git commit ...` (or `git commit --no-verify`, or
+`git merge --no-verify`) skips the hooks, and `HUSKY=0 pnpm install` skips installing them. CI
+runs the full checks either way.
 
 ## Commit messages
 
