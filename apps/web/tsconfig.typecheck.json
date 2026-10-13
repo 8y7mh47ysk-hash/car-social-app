@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // The `typecheck` script checks with this file: everything in tsconfig.json except .next/dev,
+  // where `next dev` keeps its own copy of the route types. That copy goes stale when a route is
+  // deleted or renamed after the dev server stops, and then fails the check ("Cannot find module
+  // '../../../src/app/<route>/page.js'"). `next typegen`, which runs just before tsc, rewrites
+  // .next/types from the current routes; `next build` also leaves .next/dev out of its type check.
+  // Editors keep using tsconfig.json, so they still see the route types of a running dev server.
+  // Listing "exclude" replaces TypeScript's default, so node_modules is listed again.
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", ".next/dev"]
+}
