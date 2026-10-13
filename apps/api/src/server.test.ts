@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { z } from "zod";
 
+import { REDACTED } from "./lib/redact.ts";
+
 const apiRoot = fileURLToPath(new URL("..", import.meta.url));
 
 /** The fields the logging tests read from a JSON log line. */
@@ -80,6 +82,22 @@ const WITHOUT_PINO_PRETTY = preload(`
     },
   });
 `);
+
+/**
+ * Makes the process fail on SIGUSR2, once it is running, with an error whose message holds a
+ * connection URL's password: thrown ("throw") or as a promise rejection nothing handles
+ * ("reject").
+ */
+function failOnSignal(kind: "throw" | "reject"): string[] {
+  return preload(`
+    process.on("SIGUSR2", () => {
+      // Joined at run time: stack traces show this module's data: URL, which holds its source.
+      const password = ["crash", "secret"].join("-");
+      const error = new Error("lost postgres://apex:" + password + "@db:5432/apex");
+      ${kind === "throw" ? "throw error;" : "void Promise.reject(error);"}
+    });
+  `);
+}
 
 /** Resolves with the address from Fastify's "Server listening at ..." log line. */
 function listeningUrl(server: ServerProcess): Promise<URL> {
@@ -249,6 +267,34 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
         "leave out. Use LOG_FORMAT=json.\n",
     );
   });
+
+  it.each([
+    ["an uncaught exception", "throw", "uncaughtException"],
+    ["an unhandled promise rejection", "reject", "unhandledRejection"],
+  ] as const)(
+    "logs %s as a redacted JSON line, then exits with code 1",
+    async (_name, kind, origin) => {
+      const server = startServer({}, failOnSignal(kind));
+      await listeningUrl(server);
+
+      server.child.kill("SIGUSR2");
+
+      expect(await server.exited).toEqual({ code: 1, signal: null });
+      // Every line is JSON (Node.js's own report would be plain text), the last one the crash.
+      const lines = server
+        .output()
+        .trimEnd()
+        .split("\n")
+        .map((line) => logLineSchema.parse(JSON.parse(line)));
+      expect(lines.at(-1)).toMatchObject({
+        level: 60,
+        msg: "uncaught exception",
+        origin,
+        err: { message: `lost postgres://${REDACTED}@db:5432/apex` },
+      });
+      expect(server.output()).not.toContain("crash-secret");
+    },
+  );
 
   it("does not need pino-pretty to log JSON", async () => {
     const server = startServer({ LOG_FORMAT: "json" }, WITHOUT_PINO_PRETTY);
