@@ -15,8 +15,8 @@ export default defineConfig({
       "packages/*/vitest.config.ts",
       "infra/vitest.config.ts",
       "scripts/vitest.config.ts",
-      // Tests for the repository's own tooling and rules (the git hooks, the .gitignore rules
-      // for env files), next to the files they test.
+      // Tests at the repository root, for tooling and rules that span the repository, such as
+      // the git hooks (git-hooks.test.ts) and the type check (typecheck.test.ts).
       { test: { name: "tooling", include: ["*.test.ts"] } },
     ],
     // When a changed file matches one of these, `vitest related` (run by the pre-commit hook) and
