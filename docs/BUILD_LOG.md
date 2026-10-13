@@ -624,17 +624,18 @@ in `docs/DEPENDENCIES.md`.
 **How to verify**
 
 Render every diagram. This needs network access; the first run downloads mermaid-cli, and
-Puppeteer downloads a headless Chrome into `~/.cache/puppeteer`:
+Puppeteer downloads a headless Chrome into `~/.cache/puppeteer`. From the repository root:
 
 ```sh
-npx --yes @mermaid-js/mermaid-cli@12.0.0 -i docs/ARCHITECTURE.md -o /tmp/architecture.md
+pnpm dlx --allow-build=puppeteer @mermaid-js/mermaid-cli@12.0.0 \
+  -i docs/ARCHITECTURE.md -o /tmp/architecture.md
 ls /tmp/architecture-*.svg
 ```
 
-The first command prints `Found 6 mermaid charts in Markdown input` and a ✅ line for each
-diagram, and exits with code 0; `ls` lists `/tmp/architecture-1.svg` to `/tmp/architecture-6.svg`.
-Open one in a browser to look at it. GitHub renders the diagrams too, once the repository is
-there.
+After pnpm's install output, the first command prints `Found 6 mermaid charts in Markdown input`,
+a ✅ line for each diagram and one for `/tmp/architecture.md`, and exits with code 0; `ls` lists
+`/tmp/architecture-1.svg` to `/tmp/architecture-6.svg`. Open one in a browser to look at it.
+GitHub renders the diagrams too, once the repository is there.
 
 Check that the decisions log kept every earlier entry (472e750 is the last commit on main before
 the Phase 0 work started):

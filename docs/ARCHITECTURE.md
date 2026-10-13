@@ -433,15 +433,21 @@ These are decided by later instructions, not here:
   the diagrams and tables in the same change, and move its status from "planned" to "built".
 - Record why in [DECISIONS.md](DECISIONS.md); this document says what the system is, not why.
 - Check that every diagram still renders. GitHub renders the `mermaid` code blocks. To check them
-  locally without adding a dependency to the repository, run mermaid-cli from npm. It drives a
-  headless Chrome, which Puppeteer downloads to `~/.cache/puppeteer` the first time:
+  locally without adding a dependency to the repository, run mermaid-cli with `pnpm dlx` from
+  the repository root:
 
   ```sh
-  npx --yes @mermaid-js/mermaid-cli@12.0.0 -i docs/ARCHITECTURE.md -o /tmp/architecture.md
+  pnpm dlx --allow-build=puppeteer @mermaid-js/mermaid-cli@12.0.0 \
+    -i docs/ARCHITECTURE.md -o /tmp/architecture.md
   ```
 
-  It writes one SVG file per diagram next to the output file (`/tmp/architecture-1.svg` and so
-  on) and exits with an error on any syntax error. Instruction 6 checked every diagram this way.
+  pnpm installs it in a temporary folder with its usual safeguards, which the repository's own
+  installs rely on too: no version published less than a day ago, and no install script except
+  the one allowed here, Puppeteer's, which downloads a headless Chrome to `~/.cache/puppeteer`
+  the first time. (`npx` would take the newest version that each of the tool's roughly 200
+  packages allows, however new, and run every install script.) The command writes one SVG file
+  per diagram next to the output file (`/tmp/architecture-1.svg` and so on) and exits with an
+  error on any syntax error.
 
 - In sequence diagrams, write `#35;` for `#`. A bare `#` there starts a comment that silently cuts
   the rest of the label, and the check above still passes. Flowcharts are not affected.

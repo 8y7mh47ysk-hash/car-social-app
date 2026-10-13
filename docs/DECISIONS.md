@@ -787,6 +787,7 @@ Keep entries brief. Details belong in code comments and the build log.
   Surprise: in a sequence diagram a bare `#` starts a comment that silently cuts the label while
   mermaid-cli still succeeds, so those diagrams write `#35;` and only review can catch a slip. If
   the diagrams start changing often, add the render check to CI as a job of its own.
+- Superseded by: Render-check the Mermaid diagrams with pnpm dlx, not npx
 
 ### Decisions log: append-only, with replaced entries marked "Superseded by"
 
@@ -931,3 +932,22 @@ Keep entries brief. Details belong in code comments and the build log.
   would be a second list to keep in step with the tests; these files change rarely. Tests that
   start code in a child process are still not picked by that code (`server.test.ts` and
   `src/server.ts`); CI runs every test.
+
+### Render-check the Mermaid diagrams with pnpm dlx, not npx
+
+- Date: 2026-10-11 · Instruction: #6 · Author: Delta (wave w0 review)
+- Context: "Check Mermaid diagrams with mermaid-cli outside the repository" gave the next editor
+  an `npx --yes` command. npx installs the newest version that each range in the tool's tree
+  allows, however new, and runs every install script. When the review ran it, it installed 204
+  packages, four of them published less than a day before (mermaid 12.2.0 and two `@tanstack`
+  packages only hours before): exactly what the repository's one-day `minimumReleaseAge` keeps
+  out (see "Latest stable versions, held back one day by pnpm").
+- Decision: ARCHITECTURE.md and the build log give
+  `pnpm dlx --allow-build=puppeteer @mermaid-js/mermaid-cli@12.0.0 -i docs/ARCHITECTURE.md -o ...`.
+  pnpm applies its one-day hold to the temporary install (it took mermaid 12.1.0 and the previous
+  release of each of the other three) and runs no install script except Puppeteer's, which
+  downloads the headless Chrome. The rest of the earlier decision stands: no repository
+  dependency and no CI job.
+- Trade-offs: the check needs pnpm, which the repository needs anyway. Only mermaid-cli's own
+  version is pinned, so a release more than a day old can still change the tree; pinning all of
+  it would need a lockfile in the repository for one manual check.
