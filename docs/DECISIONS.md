@@ -939,13 +939,13 @@ Keep entries brief. Details belong in code comments and the build log.
 - Context: "Check Mermaid diagrams with mermaid-cli outside the repository" gave the next editor
   an `npx --yes` command. npx installs the newest version that each range in the tool's tree
   allows, however new, and runs every install script. When the review ran it, it installed 204
-  packages, four of them published less than a day before (mermaid 12.2.0 and two `@tanstack`
-  packages only hours before): exactly what the repository's one-day `minimumReleaseAge` keeps
-  out (see "Latest stable versions, held back one day by pnpm").
+  packages, five of them published less than a day before (mermaid 12.2.0 and two `@tanstack`
+  packages only hours before, dompurify and zod): exactly what the repository's one-day
+  `minimumReleaseAge` keeps out (see "Latest stable versions, held back one day by pnpm").
 - Decision: ARCHITECTURE.md and the build log give
   `pnpm dlx --allow-build=puppeteer @mermaid-js/mermaid-cli@12.0.0 -i docs/ARCHITECTURE.md -o ...`.
   pnpm applies its one-day hold to the temporary install (it took mermaid 12.1.0 and the previous
-  release of each of the other three) and runs no install script except Puppeteer's, which
+  release of each of the other four) and runs no install script except Puppeteer's, which
   downloads the headless Chrome. The rest of the earlier decision stands: no repository
   dependency and no CI job.
 - Trade-offs: the check needs pnpm, which the repository needs anyway. Only mermaid-cli's own

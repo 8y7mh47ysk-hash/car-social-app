@@ -674,7 +674,7 @@ Delta reviewed this instruction and changed:
 
 - The render check: it used `npx --yes`, which installs the newest version of every package in
   the tool's tree and runs every install script. Run in the review, it installed 204 packages,
-  four of them published less than a day before, which the repository's one-day release-age hold
+  five of them published less than a day before, which the repository's one-day release-age hold
   exists to keep out. `pnpm dlx` (above) applies that hold and runs only Puppeteer's install
   script; it rendered all six diagrams. The decisions log records the change.
 - `docs/ARCHITECTURE.md`: no longer claims built route validation (#28 adds it), styled borders
