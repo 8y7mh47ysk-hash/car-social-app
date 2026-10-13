@@ -950,3 +950,18 @@ Keep entries brief. Details belong in code comments and the build log.
   rejected: a newer engine fixes the cause, and instruction 103 removes the published ports on
   the server anyway. Nothing checks the version yet; `scripts/check-docker.ts` (instruction 7)
   could refuse an older engine on Linux.
+
+### A fixed Compose project name: apex-garage
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Alpha
+- Context: Compose names containers, networks and volumes after the project, which defaults to
+  the name of the folder. Instruction 3 set `name: apex-garage` in `docker-compose.yml` without
+  recording why. In the review, a second checkout on the same machine that changed only the
+  ports took over the first checkout's containers and volumes.
+- Decision: keep the fixed name, so the data volumes keep their names whatever the folder is
+  called (a renamed or re-cloned folder would otherwise start with empty volumes, while the old
+  data sat under the old names). A second copy on one machine sets its own `COMPOSE_PROJECT_NAME`
+  and ports in its `.env`; `.env.example`, `infra/README.md` and `docs/ARCHITECTURE.md` say so.
+- Trade-offs: copies on one machine share one set of containers unless each sets the variable,
+  which is easy to miss. The folder-name default would separate them automatically but would
+  tie the data to the folder's name, which is the worse surprise on the home server.

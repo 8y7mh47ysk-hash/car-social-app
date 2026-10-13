@@ -69,6 +69,14 @@ escaping):
 Use `127.0.0.1` rather than `localhost`: the ports are published on the IPv4 loopback address
 only. If you changed `POSTGRES_USER`, `POSTGRES_DB` or a port in `.env`, use your values.
 
+### A second copy on the same machine
+
+The project name is fixed (`name: apex-garage` in the compose file), so the containers and
+volumes have the same names whatever the folder is called. Every checkout on a machine therefore
+shares one set: `docker compose up -d` in a second checkout takes over the first one's containers
+and data, even with other ports. To run a separate copy, give that checkout's `.env` another
+`COMPOSE_PROJECT_NAME` as well as other ports (see `.env.example`).
+
 ### Changing a password
 
 - **Redis:** change `REDIS_PASSWORD` in `.env` and run `docker compose up -d`, which recreates

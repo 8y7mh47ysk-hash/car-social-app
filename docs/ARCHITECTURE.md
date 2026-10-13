@@ -299,8 +299,9 @@ volumes and health checks, their ports published on 127.0.0.1 only; `pnpm docker
 them and waits until both are healthy. The apps do not use them until Phase 2, so `pnpm dev`
 works without Docker for now. The `api` and `web` services in the `app` profile are placeholders
 until the apps get container images. Every port can be changed (`WEB_PORT`, `API_PORT`,
-`POSTGRES_PORT`, `REDIS_PORT`), so several checkouts can run side by side. See
-[infra/README.md](../infra/README.md).
+`POSTGRES_PORT`, `REDIS_PORT`) and so can the Compose project name (`COMPOSE_PROJECT_NAME`), so
+several checkouts can run side by side; a checkout that changes only the ports takes over the
+other's containers. See [infra/README.md](../infra/README.md).
 
 ### Target: the home server
 
