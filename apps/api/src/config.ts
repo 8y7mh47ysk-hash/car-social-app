@@ -18,9 +18,9 @@ const LOG_LEVELS = [
 /**
  * Every environment variable the API reads. Each one has a safe default today; the first
  * variable without one (for example the database URL in Phase 2) makes startup fail until it
- * is set. Document every variable in apps/api/.env.example.
+ * is set. Document every variable in apps/api/.env.example (config.test.ts checks that).
  */
-const apiEnvSchema = z.object({
+export const apiEnvSchema = z.object({
   API_HOST: envHostSchema.default("127.0.0.1"),
   API_PORT: envPortSchema.default(4000),
   LOG_LEVEL: z
