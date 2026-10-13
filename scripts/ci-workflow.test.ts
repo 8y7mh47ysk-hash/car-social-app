@@ -174,8 +174,9 @@ describe("ci.yml", () => {
 
   it("sets up pnpm from packageManager, then Node.js from .nvmrc with pnpm's store cached", () => {
     // "Cache pnpm" (instruction 5). Without a `version` input, pnpm/action-setup installs the
-    // version in package.json's packageManager. setup-node's pnpm cache asks pnpm where its store
-    // is, so pnpm must be set up first, and both before the install.
+    // version in package.json's packageManager, an exact version that may carry Corepack's
+    // integrity hash (`+sha512.<hex>`), which the action strips. setup-node's pnpm cache asks pnpm
+    // where its store is, so pnpm must be set up first, and both before the install.
     const position = (find: (step: (typeof steps)[number]) => boolean): number => {
       const index = steps.findIndex(find);
       expect(index).toBeGreaterThanOrEqual(0);
@@ -188,7 +189,7 @@ describe("ci.yml", () => {
     expect(pnpm).toBeLessThan(node);
     expect(node).toBeLessThan(install);
     expect(steps[pnpm]?.with?.["version"]).toBeUndefined();
-    expect(rootPackage.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/u);
+    expect(rootPackage.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+(?:\+sha\d+\.[\da-f]+)?$/u);
     expect(steps[node]?.with).toMatchObject({ "node-version-file": ".nvmrc", cache: "pnpm" });
   });
 
