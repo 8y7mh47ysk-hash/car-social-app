@@ -5,6 +5,11 @@ changed and how I verify it works". Each entry has the heading `## #N - <title>`
 **What changed**, **How to verify** (exact commands and what you should see), **Dependencies
 added**, **Owner actions** and **Notes & limitations**.
 
+Test counts in an entry are those the repository had when that instruction was finished. Later
+instructions add tests, so commands that run several instructions' tests (`pnpm test`, one
+package's tests or a whole Vitest project) report more; a command that names a single test file
+keeps its count unless the entry is updated.
+
 ## #1 - Monorepo foundation
 
 **What changed**
@@ -407,7 +412,7 @@ git check-ignore -v --no-index .env apps/api/.env apps/web/.env.local
 git check-ignore -v --no-index apps/api/.env.example apps/web/.env.example
 # .gitignore:22:!.env.example	apps/api/.env.example    (the "!" rule means: not ignored)
 # .gitignore:22:!.env.example	apps/web/.env.example
-pnpm exec vitest run --project tooling   # "Tests  23 passed (23)"
+pnpm exec vitest run env-files.test.ts   # "Tests  23 passed (23)"
 ```
 
 The API refuses invalid settings, names each one and never prints a value (after `pnpm build`):
@@ -478,9 +483,10 @@ None for this instruction.
   as an `issues` list; the API prints only the message. `next dev` and `next start` print "Ready"
   just before that, because Next.js opens the port before it loads its config, then exit with
   code 1.
-- `server.ts` passes `LOG_LEVEL` to Fastify's logger through `buildApp`'s existing `logger`
-  option. Instruction 8 (structured logging) replaces that option; the level must then go to its
-  replacement.
+- `server.ts` passed `LOG_LEVEL` to Fastify's logger through `buildApp`'s `logger` option.
+  Instruction 8 (structured logging) replaced that option with `logLevel` and `logFormat`; since
+  Phase 0 was merged, `server.ts` passes `LOG_LEVEL` and instruction 8's `LOG_FORMAT` through
+  them.
 - If instruction 102 switches the web app to Next.js's standalone output, its `server.js` does
   not load `next.config.ts`, so the server-variable check must move to `instrumentation.ts`.
 
@@ -746,8 +752,8 @@ the Compose plugin (Linux), as instruction 3 describes. Nothing else.
   only the method, the shortened URL and the client's address.
 - `buildApp` (`apps/api/src/app.ts`) takes `logLevel` (default `silent`, so tests stay quiet),
   `logFormat` (default `json`) and `logDestination` (for tests) instead of Fastify's `logger`
-  option. `apps/api/src/config.ts` reads `LOG_FORMAT` (`json` or `pretty`, default `json`). The
-  entrypoint logs at `info` until instruction 4's `LOG_LEVEL` is merged.
+  option. `apps/api/src/config.ts` reads `LOG_FORMAT` (`json` or `pretty`, default `json`). Since
+  Phase 0 was merged, the entrypoint passes instruction 4's `LOG_LEVEL` as `logLevel`.
 - `eslint.config.mjs`: `console` is an error in `apps/api/src` except `server.ts`, so every line
   goes through the logger.
 - Tests: unit tests for each module; `apps/api/src/logging.test.ts` for the whole app (every line
@@ -761,7 +767,7 @@ the Compose plugin (Linux), as instruction 3 describes. Nothing else.
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm --filter @apex/api test   # all pass: "Tests  185 passed (185)" on this branch alone
+pnpm --filter @apex/api test   # all pass: "Tests  202 passed (202)" with all of Phase 0 merged
 pnpm lint                      # exits with code 0
 pnpm typecheck                 # shared, api and web each report "Done"
 ```
@@ -818,8 +824,7 @@ None.
 - Pretty output is opt-in: set `LOG_FORMAT=pretty` in the shell or in `apps/api/.env`. It needs
   the development dependencies, so an install without them can only log JSON; asked for `pretty`
   there, the API refuses to start and says to use `json`.
-- Until instruction 4's environment loader is merged, the API always logs at `info`; with it,
-  `LOG_LEVEL` sets the level.
+- `LOG_LEVEL` (instruction 4's environment loader) sets the level; the default is `info`.
 - Clients choose their request IDs when well formed, so an ID is a label for finding log lines,
   never something to trust.
 - Two responses carry no `x-request-id`: the bare 400 that Node.js sends for bytes it cannot parse
