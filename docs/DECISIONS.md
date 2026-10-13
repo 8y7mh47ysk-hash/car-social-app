@@ -125,8 +125,11 @@ Keep entries brief. Details belong in code comments and the build log.
   production loads only compiled JavaScript. `pnpm build` builds packages/shared first because
   pnpm runs recursive scripts in dependency order.
 - Trade-offs: the production API needs packages/shared built and the `--conditions` flag (future
-  Dockerfiles must pass it). Without the flag, `node dist/server.js` fails at startup with
-  `ERR_MODULE_NOT_FOUND`. We avoided adding a bundler (tsup or tsdown) to inline packages/shared
+  Dockerfiles must pass it). Without packages/shared built, the start fails with
+  `ERR_MODULE_NOT_FOUND`. Without the flag, Node.js falls back to the TypeScript source, strips
+  its types and starts anyway, so a forgotten flag goes unnoticed (corrected in the wave w0
+  review, which also made the start refuse that: see "The production API start refuses
+  TypeScript source"). We avoided adding a bundler (tsup or tsdown) to inline packages/shared
   into the API, and stack traces point at real files. TypeScript falls back to the source when
   `dist/` is missing, so the API's own `tsc` build never depends on build order; only the
   runtime does.
@@ -238,7 +241,9 @@ Keep entries brief. Details belong in code comments and the build log.
   plugins in `src/routes/`. `src/server.ts` reads the listen address, builds the app, installs
   SIGINT and SIGTERM handlers, then listens. On a signal it closes the app (Fastify answers new
   requests with 503 while closing) and Node exits with code 0 once nothing is left running. If
-  closing takes more than 10 seconds it exits with code 1, and a second Ctrl+C exits immediately.
+  closing takes more than 10 seconds it exits with code 1, and a second Ctrl+C exits immediately
+  (since the wave w0 review, only one that comes more than a second after the first: see "A stop
+  signal repeated within a second counts as one").
   A failed `listen` (for example, port in use) logs a fatal error and exits with code 1.
   `src/config.ts` validates only `API_HOST` and `API_PORT` with Zod; instruction 4 replaces it
   with the full environment loader.
@@ -353,7 +358,8 @@ Keep entries brief. Details belong in code comments and the build log.
 - Trade-offs: staging a trigger file runs every test (about 13 s today). Vitest follows imports
   only, so a test that runs code in a child process is not selected when that code changes:
   `apps/api/src/server.test.ts` starts `src/server.ts` with `node`, so editing `server.ts` runs
-  no tests in the hook. CI runs every test.
+  no tests in the hook (until the wave w0 review: see "The API entrypoint makes the pre-commit
+  hook run every test"). CI runs every test.
 
 ### Commit message rules
 
@@ -753,6 +759,8 @@ Keep entries brief. Details belong in code comments and the build log.
   (instruction 2) would run none of their tests when only a program changed. Comparing
   `process.argv[1]` with the module's own path works on older Node.js but has to resolve symbolic
   links on both sides to be right.
+  (The wave w0 review raised `engines` to `>=24.15`, which a dependency needs: see "Node.js 24.15
+  or later, enforced by pnpm at install".)
 
 ### Architecture document: one zoned overview diagram with built and planned labels
 
@@ -930,4 +938,153 @@ Keep entries brief. Details belong in code comments and the build log.
   Vitest has no setting that maps a file to particular tests, and a lint-staged task per file
   would be a second list to keep in step with the tests; these files change rarely. Tests that
   start code in a child process are still not picked by that code (`server.test.ts` and
-  `src/server.ts`); CI runs every test.
+  `src/server.ts`, until the wave w0 review made `src/server.ts` a trigger); CI runs every test.
+
+### The web type check leaves out next dev's copy of the route types
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Echo
+- Context: found in the wave w0 review. Since Next.js 16, `next dev` writes its own copy of the
+  route types to `.next/dev/types`, and Next.js wants tsconfig.json to include both that and
+  `.next/types`. `next typegen`, which `pnpm typecheck` runs before `tsc`, rewrites only
+  `.next/types`. Once a route was deleted or renamed after the dev server had stopped, the dev copy
+  still imported the old page, so `pnpm typecheck`, and with it the pre-commit hook, failed on
+  every commit that staged TypeScript or JSON ("Cannot find module
+  '../../../src/app/<route>/page.js'") until someone deleted `.next` or ran `next dev` again.
+  `next build` filters `.next/dev/types` out of its own type check for this reason (a comment in
+  next/dist/lib/typescript/runTypeCheck.js says so).
+- Decision: the web app's `typecheck` script runs `tsc --noEmit --project tsconfig.typecheck.json`.
+  That file extends tsconfig.json and excludes `node_modules` and `.next/dev`. tsconfig.json is
+  unchanged, so editors still see the route types of a running dev server: after the hook has run
+  `next typegen`, `next-env.d.ts` points at `.next/types` until the dev server restarts, and only
+  the include of `.next/dev/types` keeps a route added meanwhile visible. `typecheck.test.ts` runs
+  the script on a copy of the web app with a stale dev validator.
+- Trade-offs: a second tsconfig in apps/web. Removing the dev types from tsconfig.json instead
+  would have been one line, but it hides new routes from editors as described; Next.js does not
+  rewrite tsconfig.json here either way, because it leaves alone a tsconfig that extends another.
+
+### The production API start refuses TypeScript source
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Echo
+- Context: found in the wave w0 review. "Workspace packages are consumed as TypeScript source; the
+  production API runs compiled code" said that `node dist/server.js` without
+  `--conditions=@apex/dist` fails with `ERR_MODULE_NOT_FOUND`. It does not: Node.js resolves the
+  default export of `@apex/shared`, `src/index.ts`, strips its types and the API starts (tested in
+  this checkout; inside `node_modules`, as in a `pnpm deploy` bundle, Node.js refuses to strip
+  types and fails with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`). A start command that
+  forgets the condition, in a future Dockerfile for example, would quietly run uncompiled shared
+  code. Nothing tested the production start at all: CI builds the API but never starts it.
+- Decision: the API's `start` script adds `--no-strip-types`, which turns type stripping off (the
+  name since Node.js 24.12; the older `--no-experimental-strip-types` still works), so a missing or
+  broken condition fails at once with `ERR_UNKNOWN_FILE_EXTENSION`.
+  `apps/api/src/production.test.ts` copies packages/shared and the API to a temporary folder (the
+  files the build reads, with this checkout's installed dependencies), runs their build scripts
+  and then the start script: GET /health answers with the shared contract, SIGTERM stops the
+  server with code 0, and without the condition the start fails.
+- Trade-offs: the copy costs about a second in `pnpm test`. Building in place, as `pnpm build`
+  does, would have been simpler, but the test would then delete and rewrite the checkout's
+  `dist/` folders while a `pnpm build` or `pnpm start` might be using them. The test is picked by
+  `vitest related` only when a rerun trigger or a packages/shared file is staged (it does not
+  import the API's source); CI runs it every time. The web app's production start
+  (`next start`) is still checked only by hand.
+
+### Node.js 24.15 or later, enforced by pnpm at install
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Echo
+- Context: "The scripts in scripts/ need Node.js 24.2 or later" proposed raising `engines` in the
+  root package.json from `>=24` to `>=24.2`, because on 24.0 and 24.1 the Docker and build-log
+  checks silently do nothing. The wave w0 review found two more problems: pnpm 12 ignores
+  `engines` unless `engineStrict` is set (an install with `"node": ">=99"` printed no warning at
+  all), and the dependencies already need more than 24.2: jsdom 30 (the web tests' DOM) and three
+  of its dependencies declare `^22.22.2 || ^24.15.0 || >=26.0.0`.
+- Decision: `"engines": { "node": ">=24.15" }` and `engineStrict: true` in pnpm-workspace.yaml, so
+  `pnpm install` on an older Node.js stops with `ERR_PNPM_UNSUPPORTED_ENGINE`. `workspace.test.ts`
+  runs pnpm on a copy of the workspace twice: with a range the running Node.js cannot meet, which
+  must fail, and as the oldest Node.js that `engines` allows (pnpm's `node-version` setting),
+  which must install every locked dependency. A dependency that needs a newer Node.js than
+  `engines` says fails that test, so the minimum is raised on purpose, not discovered by someone
+  whose install fails.
+- Trade-offs: `engineStrict` also refuses any dependency whose `engines` excludes the running
+  Node.js; today only `@img/sharp-win32-ia32` does (it names Node.js 20 and is never installed on
+  macOS or Linux). When a dependency is refused, decide case by case (another version, another
+  package, a higher minimum, or `packageExtensions` to correct a wrong range) and record it here.
+  `pnpm run` does not check `engines`, so a Node.js changed after the install is not caught. The
+  test's installs use `--offline` and `--frozen-store`, so they download nothing and write nothing
+  to pnpm's store (an ordinary install records its folder there). An earlier commit of this review
+  set `>=24.2`, which failed on jsdom with `engineStrict`; the second test exists because of it.
+
+### The API entrypoint makes the pre-commit hook run every test
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Echo
+- Context: "Related unit tests in the pre-commit hook, with absolute rerun triggers" and "Files
+  that tests read from disk also make the pre-commit hook run every test" left one known gap:
+  `apps/api/src/server.test.ts` starts `apps/api/src/server.ts` as a separate process instead of
+  importing it, so a commit that changed only the entrypoint ran no tests in the hook, although
+  the triggers exist for files that tests "run as commands".
+- Decision: `apps/api/src/server.ts` is a rerun trigger in the root `vitest.config.ts`;
+  `git-hooks.test.ts` checks it.
+- Trade-offs: a commit that touches the entrypoint runs every test (about 16 s today). The
+  production test, which builds and starts a copy of the API, still runs in the hook only when a
+  rerun trigger or a packages/shared file is staged; CI runs it every time.
+
+### A stopped pre-commit hook is recovered by hand, with tested steps
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Echo
+- Context: found in the wave w0 review. lint-staged puts unstaged changes and untracked files back
+  only when it gets SIGINT (Ctrl+C); its code listens for no other signal. A closed terminal
+  (SIGHUP), an editor or tool that cancels the commit (SIGTERM) or SIGKILL stops it at once, and
+  the working tree is left with only the staged changes while the rest waits in a "lint-staged
+  automatic backup" stash entry. The README advised `git stash pop stash@{n}`, which fails with a
+  merge conflict on any partly staged file.
+- Decision: the README section "Git hooks" says which interruptions leave files in the backup and
+  gives the steps lint-staged takes itself when it restores after a failed check:
+  `git reset --hard`, `git stash apply --index stash@{n}`, `git stash drop stash@{n}`.
+  `git-hooks.test.ts` starts the real hook in a process group of its own, as a terminal runs
+  `git commit`, signals the group while the type check runs, and checks both outcomes: after
+  SIGINT every file is back; after SIGTERM, SIGHUP and SIGKILL the documented steps restore the
+  index, the edit and the new file exactly.
+- Trade-offs: recovery stays manual. A wrapper that turned SIGTERM and SIGHUP into SIGINT for
+  lint-staged would need lint-staged in a process group of its own, and after SIGHUP it would
+  write to a terminal that no longer exists; `--no-stash` would also give up hiding unstaged
+  changes and untracked files. If lint-staged starts handling more signals, the tests fail and
+  this advice should be updated.
+
+### A stop signal repeated within a second counts as one
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Echo
+- Context: found in the wave w0 review. "API structure: app factory, plugin routes and a small
+  entrypoint" registered the SIGINT and SIGTERM handlers with `once`, so that a second Ctrl+C
+  falls through to Node.js and stops the process at once. In `pnpm dev`, the terminal's Ctrl+C
+  reaches both `node --watch` and the API, and `node --watch` then sends the API the signal it
+  received (lib/internal/main/watch_mode.js in Node.js). By then the `once` handler was gone, so
+  that second SIGINT ended the API at once: a request still open got no response.
+- Decision: `apps/api/src/server.ts` handles every SIGINT and SIGTERM. The first starts the
+  graceful shutdown as before; another within a second (`REPEATED_SIGNAL_WINDOW_MS`) is the same
+  request and is ignored; a later one logs "second signal; exiting without waiting for open
+  requests" and exits with code 1, as a timed-out shutdown does. `server.test.ts` sends the second
+  SIGINT right after "shutting down" is logged (the open request still gets its response and the
+  exit code is 0) and 1.25 seconds later (exit code 1).
+- Trade-offs: a person's second Ctrl+C within a second is ignored; pressing again later, or the
+  10-second shutdown limit, ends the process. A forced stop now exits with code 1 instead of
+  being killed by the signal. Telling the copy from `node --watch` apart from a second Ctrl+C in
+  any other way would depend on how Node.js runs the watch child (its environment or IPC
+  channel), which can change between versions.
+
+### Merge commits that git makes run the pre-commit checks
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Echo
+- Context: found in the wave w0 review. git runs the pre-commit hook only for `git commit`. When
+  `git merge` (or a `git pull` that merges) commits without conflicts, it runs pre-merge-commit
+  instead, and there was none, so those merge commits got no lint, type check or tests. Two
+  branches that each pass can merge into code that does not compile (tried in a scratch clone: one
+  branch renamed a constant, the other started using the old name), and every wave merges five
+  parallel branches.
+- Decision: `.husky/pre-merge-commit` runs `.husky/pre-commit`, so a merge commit gets the same
+  lint-staged run on what the merge brings in. When a check fails, git stops with "Not committing
+  merge" and leaves the merge in progress with its changes staged: fix it and `git commit`, or
+  `git merge --abort`. Unrelated unstaged changes and untracked files are set aside and restored as
+  for any commit (checked by hand). `git-hooks.test.ts` installs the hooks with the real husky in
+  a scratch repository and runs `git merge` with a passing and a failing check.
+- Trade-offs: merges that git commits itself now take as long as other commits; a merge that
+  brings in a lockfile change runs every test (about 16 seconds). Fast-forward merges and rebases
+  make no merge commit and run no hook; their commits were checked when they were made, unless
+  someone skipped the hooks. `git merge --no-verify` skips the hook, like `git commit --no-verify`.
