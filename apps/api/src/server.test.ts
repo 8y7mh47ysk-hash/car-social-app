@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 import type { Readable } from "node:stream";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, onTestFinished } from "vitest";
@@ -54,19 +55,19 @@ function startServer(env: Readonly<Record<string, string>> = {}): ServerProcess 
   return { child, exited, output: () => output };
 }
 
-/** Resolves with the address from Fastify's "Server listening at ..." log line. */
-function listeningUrl(server: ServerProcess): Promise<URL> {
+/** Resolves with the first match of `pattern` in the server's output, waiting for it if needed. */
+function outputMatching(server: ServerProcess, pattern: RegExp): Promise<RegExpExecArray> {
   return new Promise((resolve, reject) => {
     const check = (): void => {
-      const match = /Server listening at (http:\/\/[\d.:]+)/.exec(server.output());
-      if (match?.[1] !== undefined) {
+      const match = pattern.exec(server.output());
+      if (match !== null) {
         stop();
-        resolve(new URL(match[1]));
+        resolve(match);
       }
     };
     const onClose = (): void => {
       stop();
-      reject(new Error(`server exited before listening:\n${server.output()}`));
+      reject(new Error(`server exited before printing ${String(pattern)}:\n${server.output()}`));
     };
     const stop = (): void => {
       server.child.stdout.off("data", check);
@@ -76,6 +77,49 @@ function listeningUrl(server: ServerProcess): Promise<URL> {
     server.child.once("close", onClose);
     check();
   });
+}
+
+/** Resolves with the address from Fastify's "Server listening at ..." log line. */
+async function listeningUrl(server: ServerProcess): Promise<URL> {
+  const [, address = ""] = await outputMatching(server, /Server listening at (http:\/\/[\d.:]+)/);
+  return new URL(address);
+}
+
+/**
+ * Starts a request and leaves it unfinished: a POST whose headers have arrived (the server has
+ * logged "incoming request") and whose body has not. `finish` sends the rest of the body and
+ * resolves with everything the server sends back before it closes the connection.
+ */
+async function openRequest(
+  server: ServerProcess,
+  url: URL,
+): Promise<{ finish: () => Promise<string> }> {
+  const socket = connect(Number(url.port), url.hostname);
+  onTestFinished(() => {
+    socket.destroy();
+  });
+  let reply = "";
+  socket.setEncoding("utf8").on("data", (chunk: string) => {
+    reply += chunk;
+  });
+  // A dying server resets the connection; the close event follows and the test checks the reply.
+  socket.on("error", () => undefined);
+  const closed = new Promise<string>((resolve) => {
+    socket.once("close", () => {
+      resolve(reply);
+    });
+  });
+  socket.write(
+    "POST /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n" +
+      "Content-Type: application/json\r\nContent-Length: 2\r\n\r\n{",
+  );
+  await outputMatching(server, /"msg":"incoming request"/);
+  return {
+    finish: () => {
+      socket.write("}");
+      return closed;
+    },
+  };
 }
 
 /** Listens on a free loopback port until the test ends and returns that port. */
@@ -110,6 +154,38 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
       expect(server.output()).toContain("shutting down");
     },
   );
+
+  // In `pnpm dev`, Ctrl+C reaches both `node --watch` and the server, and `node --watch` then
+  // sends the server the same signal again, once the server has started shutting down.
+  it("lets an open request finish when the stop signal arrives a second time at once", async () => {
+    const server = startServer();
+    const url = await listeningUrl(server);
+    const request = await openRequest(server, url);
+
+    server.child.kill("SIGINT");
+    await outputMatching(server, /"msg":"shutting down"/);
+    server.child.kill("SIGINT");
+
+    expect(await request.finish()).toMatch(/^HTTP\/1\.1 404 /);
+    expect(await server.exited).toEqual({ code: 0, signal: null });
+  });
+
+  it("stops without waiting for open requests on a second signal a second later", async () => {
+    const server = startServer();
+    const url = await listeningUrl(server);
+    await openRequest(server, url);
+
+    server.child.kill("SIGINT");
+    await outputMatching(server, /"msg":"shutting down"/);
+    // Signals within a second of the first count as the same one (REPEATED_SIGNAL_WINDOW_MS).
+    await sleep(1250);
+    server.child.kill("SIGINT");
+
+    expect(await server.exited).toEqual({ code: 1, signal: null });
+    expect(server.output()).toContain(
+      '"msg":"second signal; exiting without waiting for open requests"',
+    );
+  });
 
   it("exits with code 1 when the port is already in use", async () => {
     const server = startServer({ API_PORT: String(await occupyPort()) });
