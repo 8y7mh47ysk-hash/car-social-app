@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import {
   chmod,
   copyFile,
@@ -11,9 +11,10 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
+import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
-import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 
 // These tests run the real hook scripts in .husky/ the way husky runs them, `sh -e .husky/<hook>`
 // with node_modules/.bin on PATH: commit-msg against this repository's commitlint config, and
@@ -30,9 +31,10 @@ interface Result {
 
 /**
  * The environment for a hook run: git variables from an outer git process are dropped (when these
- * tests run inside the pre-commit hook, GIT_INDEX_FILE points at this repository's index), the
- * machine's global and system git config are ignored, colours are off, and `bins` come first on
- * PATH, followed by the directory of the running Node.js.
+ * tests run inside the pre-commit hook, GIT_INDEX_FILE points at this repository's index), and so
+ * is HUSKY (HUSKY=0 in the shell would skip the hooks that git runs), the machine's global and
+ * system git config are ignored, colours are off, and `bins` come first on PATH, followed by the
+ * directory of the running Node.js.
  */
 function hookEnv(
   bins: readonly string[],
@@ -40,7 +42,7 @@ function hookEnv(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(process.env)) {
-    if (!name.startsWith("GIT_") && name !== "FORCE_COLOR") {
+    if (!name.startsWith("GIT_") && name !== "HUSKY" && name !== "FORCE_COLOR") {
       env[name] = value;
     }
   }
@@ -54,15 +56,9 @@ function hookEnv(
   };
 }
 
-/** Runs a command to completion and returns its exit code and its combined output. */
-function run(
-  command: string,
-  args: readonly string[],
-  cwd: string,
-  env: NodeJS.ProcessEnv,
-): Promise<Result> {
+/** Resolves with a started command's exit code and combined output once it has exited. */
+function finished(child: ChildProcessByStdio<null, Readable, Readable>): Promise<Result> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     const collect = (chunk: string): void => {
       output += chunk;
@@ -74,6 +70,16 @@ function run(
       resolve({ code, output });
     });
   });
+}
+
+/** Runs a command to completion and returns its exit code and its combined output. */
+function run(
+  command: string,
+  args: readonly string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<Result> {
+  return finished(spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] }));
 }
 
 describe("commit-msg hook", { timeout: 20_000 }, () => {
@@ -206,9 +212,9 @@ describe("pre-commit hook", { timeout: 30_000 }, () => {
 
   /**
    * The stand-in for each tool: appends its name and arguments to $STUB_LOG, appends a line to
-   * each file it is given if $STUB_FIX names it (as a fixer would), and fails if $STUB_FAIL names
-   * it. The vitest stand-in, which runs last, also logs `git status`: what the working tree held
-   * while the tasks ran.
+   * each file it is given if $STUB_FIX names it (as a fixer would), fails if $STUB_FAIL names it,
+   * and runs until it is killed if $STUB_BLOCK names it. The vitest stand-in, which runs last,
+   * also logs `git status`: what the working tree held while the tasks ran.
    */
   const stub = `#!/bin/sh
 name=\${0##*/}
@@ -218,6 +224,7 @@ if [ "$name" = "\${STUB_FIX-}" ]; then
   for arg; do case $arg in /*) printf 'fixed\\n' >> "$arg" ;; esac; done
 fi
 if [ "$name" = "\${STUB_FAIL-}" ]; then echo "$name failed"; exit 1; fi
+if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
 `;
 
   interface Repo {
@@ -229,6 +236,22 @@ if [ "$name" = "\${STUB_FAIL-}" ]; then echo "$name failed"; exit 1; fi
     readonly write: (path: string, content: string) => Promise<void>;
     /** Runs .husky/pre-commit. The options name a stand-in that fixes files or fails. */
     readonly preCommit: (options?: { fix?: string; fail?: string }) => Promise<Result>;
+    /**
+     * Starts .husky/pre-commit in a process group of its own, as a terminal runs `git commit`,
+     * with the stand-in for `block` running until it is killed. Returns the ID of that group and
+     * the hook's result.
+     */
+    readonly startPreCommit: (block: string) => { group: number; result: Promise<Result> };
+    /**
+     * Commits copies of this repository's pre-commit and pre-merge-commit hooks and installs them
+     * with the real husky, as `pnpm install` does, so that git itself runs them from then on.
+     */
+    readonly installHooks: () => Promise<void>;
+    /**
+     * Runs `git merge --no-ff --no-edit <branch>` and returns its result. The options name a
+     * stand-in that fails.
+     */
+    readonly merge: (branch: string, options?: { fail?: string }) => Promise<Result>;
     /** The stand-ins' log lines, with paths relative to the repository. */
     readonly calls: () => Promise<string[]>;
     /** `git status --porcelain` as lines. */
@@ -264,6 +287,7 @@ if [ "$name" = "\${STUB_FAIL-}" ]; then echo "$name failed"; exit 1; fi
       await mkdir(dirname(join(root, path)), { recursive: true });
       await writeFile(join(root, path), content);
     };
+    const hook = join(repoRoot, ".husky", "pre-commit");
 
     await mkdir(stubBin, { recursive: true });
     for (const tool of tools) {
@@ -286,11 +310,44 @@ if [ "$name" = "\${STUB_FAIL-}" ]; then echo "$name failed"; exit 1; fi
       git,
       write,
       preCommit: ({ fix = "", fail = "" } = {}) =>
-        run("sh", ["-e", join(repoRoot, ".husky", "pre-commit")], root, {
-          ...env,
-          STUB_FIX: fix,
-          STUB_FAIL: fail,
-        }),
+        run("sh", ["-e", hook], root, { ...env, STUB_FIX: fix, STUB_FAIL: fail }),
+      startPreCommit: (block) => {
+        const child = spawn("sh", ["-e", hook], {
+          cwd: root,
+          env: { ...env, STUB_BLOCK: block },
+          detached: true,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        const group = child.pid;
+        if (group === undefined) {
+          throw new Error("could not start the pre-commit hook");
+        }
+        // If the test fails before it stops the hook, the blocked stand-in must not outlive it.
+        onTestFinished(() => {
+          try {
+            process.kill(-group, "SIGKILL");
+          } catch {
+            // The group has already exited.
+          }
+        });
+        return { group, result: finished(child) };
+      },
+      installHooks: async () => {
+        for (const hookName of ["pre-commit", "pre-merge-commit"]) {
+          await write(
+            `.husky/${hookName}`,
+            await readFile(join(repoRoot, ".husky", hookName), "utf8"),
+          );
+        }
+        await git("add", ".husky");
+        await git("commit", "--quiet", "--message", "chore: add the git hooks");
+        const installed = await run(join(rootBin, "husky"), [], root, env);
+        if (installed.code !== 0) {
+          throw new Error(`husky failed:\n${installed.output}`);
+        }
+      },
+      merge: (branch, { fail = "" } = {}) =>
+        run("git", ["merge", "--no-ff", "--no-edit", branch], root, { ...env, STUB_FAIL: fail }),
       calls: async () =>
         (await readFile(log, "utf8").catch(() => ""))
           .replaceAll(`${root}/`, "")
@@ -425,6 +482,127 @@ if [ "$name" = "\${STUB_FAIL-}" ]; then echo "$name failed"; exit 1; fi
       expect(await repo.git("stash", "list")).toBe("");
     },
   );
+
+  // `git merge` runs pre-merge-commit, not pre-commit, when it commits without conflicts.
+  describe("for a merge that git commits itself", () => {
+    /**
+     * Prepares a merge without conflicts: a branch "feature" that changes src/util.ts while main
+     * gets another commit. Then installs the hooks, so git runs them for the merge.
+     */
+    async function prepareMerge(): Promise<Repo> {
+      const repo = await createRepo();
+      await repo.git("switch", "--quiet", "--create", "feature");
+      await repo.write("src/util.ts", "export const util = 2;\n");
+      await repo.git("commit", "--quiet", "--all", "--message", "feat: change util");
+      await repo.git("switch", "--quiet", "main");
+      await repo.write("README.md", "# Test\n\nMore.\n");
+      await repo.git("commit", "--quiet", "--all", "--message", "docs: say more");
+      await repo.installHooks();
+      return repo;
+    }
+
+    it("runs the same checks on what the merge brings in", async () => {
+      const repo = await prepareMerge();
+
+      const result = await repo.merge("feature");
+
+      expect(result.code, result.output).toBe(0);
+      expect(await repo.calls()).toEqual([
+        `${eslint} src/util.ts`,
+        `${prettier} src/util.ts`,
+        typecheck,
+        `${relatedTests} src/util.ts`,
+        "M  src/util.ts",
+      ]);
+      // A merge commit, with both branches as parents.
+      expect((await repo.git("log", "-1", "--format=%p")).trim().split(" ")).toHaveLength(2);
+    });
+
+    it("stops the merge when a check fails, leaving it to be finished or aborted", async () => {
+      const repo = await prepareMerge();
+      const before = await repo.git("rev-parse", "HEAD");
+
+      const result = await repo.merge("feature", { fail: "pnpm" });
+
+      expect(result.code).not.toBe(0);
+      expect(result.output).toContain("pnpm failed");
+      expect(result.output).toContain("Not committing merge");
+      expect(await repo.git("rev-parse", "HEAD")).toBe(before);
+      expect(await repo.status()).toEqual(["M  src/util.ts"]);
+      await repo.git("merge", "--abort");
+      expect(await repo.status()).toEqual([]);
+    });
+  });
+
+  describe("when the commit is stopped while a check runs", () => {
+    /** The working tree before each commit: a partly staged file, an edit and a new file. */
+    const before = ["MM src/app.ts", " M src/util.ts", "?? notes.txt"];
+
+    /**
+     * Prepares that working tree, starts the hook and sends `signal` to its process group, as
+     * Ctrl+C in a terminal does for SIGINT, while the type check runs: lint-staged has set aside
+     * the edit and the new file by then.
+     */
+    async function stopCommit(signal: NodeJS.Signals): Promise<{ repo: Repo; result: Result }> {
+      const repo = await createRepo();
+      await repo.write("src/app.ts", "export const app = 2;\n");
+      await repo.git("add", "src/app.ts");
+      await repo.write("src/app.ts", "export const app = 3;\n");
+      await repo.write("src/util.ts", "export const util = 2;\n");
+      await repo.write("notes.txt", "draft\n");
+      expect(await repo.status()).toEqual(before);
+
+      const hook = repo.startPreCommit("pnpm");
+      await vi.waitFor(
+        async () => {
+          expect(await repo.calls()).toContain(typecheck);
+        },
+        { timeout: 20_000, interval: 20 },
+      );
+      process.kill(-hook.group, signal);
+      return { repo, result: await hook.result };
+    }
+
+    /** Checks that the files, the index and the stash are exactly as before the commit. */
+    async function expectAsBefore(repo: Repo): Promise<void> {
+      expect(await repo.status()).toEqual(before);
+      expect(await repo.git("show", ":src/app.ts")).toBe("export const app = 2;\n");
+      expect(await readFile(join(repo.root, "src/app.ts"), "utf8")).toBe("export const app = 3;\n");
+      expect(await readFile(join(repo.root, "src/util.ts"), "utf8")).toBe(
+        "export const util = 2;\n",
+      );
+      expect(await readFile(join(repo.root, "notes.txt"), "utf8")).toBe("draft\n");
+      expect(await repo.git("stash", "list")).toBe("");
+    }
+
+    it("puts every file back after Ctrl+C (SIGINT)", async () => {
+      const { repo, result } = await stopCommit("SIGINT");
+
+      expect(result.code, result.output).not.toBe(0);
+      await expectAsBefore(repo);
+    });
+
+    // lint-staged handles only SIGINT. A closed terminal (SIGHUP), a tool or editor that cancels
+    // the commit (SIGTERM) or SIGKILL stops it at once, and the README section "Git hooks" says
+    // how to get everything back.
+    it.for(["SIGTERM", "SIGHUP", "SIGKILL"] as const)(
+      "leaves the edit and the new file in a stash entry after %s; the README's steps restore them",
+      async (signal) => {
+        const { repo } = await stopCommit(signal);
+
+        expect(await repo.status()).toEqual(["M  src/app.ts"]);
+        expect(await repo.git("stash", "list")).toMatch(
+          /^stash@\{0\}: On main: lint-staged automatic backup \(\w+\)\n$/,
+        );
+
+        await repo.git("reset", "--hard");
+        await repo.git("stash", "apply", "--index", "stash@{0}");
+        await repo.git("stash", "drop", "stash@{0}");
+
+        await expectAsBefore(repo);
+      },
+    );
+  });
 });
 
 describe("the pre-commit hook's test step in this repository", { timeout: 60_000 }, () => {
@@ -450,6 +628,8 @@ describe("the pre-commit hook's test step in this repository", { timeout: 60_000
     "apps/web/tsconfig.json",
     "apps/web/vitest.config.ts",
     "apps/web/vitest.setup.ts",
+    // Started as a separate process by its tests, so no test imports it.
+    "apps/api/src/server.ts",
     ".husky/pre-commit",
     "commitlint.config.mjs",
     "lint-staged.config.ts",

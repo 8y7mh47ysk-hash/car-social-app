@@ -79,10 +79,13 @@ None for this instruction.
 
 - Scripts need a POSIX shell (macOS, Linux or WSL).
 - `pnpm start` needs `pnpm build` first: the production API loads packages/shared from `dist/`
-  through `node --conditions=@apex/dist`. Running `node dist/server.js` without that flag fails
-  with `ERR_MODULE_NOT_FOUND`.
+  through `node --conditions=@apex/dist`, and fails with `ERR_MODULE_NOT_FOUND` when it has not
+  been built. (This note said that `node dist/server.js` without the flag fails the same way; it
+  started instead, see "Review fixes (wave w0, round 1)".)
 - Pressing Ctrl+C on `pnpm start` makes pnpm print `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`, because
-  `next start` exits with code 130 when interrupted. Both servers do stop.
+  `next start` exits with code 130 when interrupted. Both servers do stop, but pnpm then stops the
+  API at once instead of letting it finish open requests (corrected in the wave w0 review; see
+  "Review fixes (wave w0, round 1)").
 - `GET /health` is only a smoke check; real health and readiness checks are instruction 33.
 - API logging is Fastify's default pino output, which logs each request's full URL. Structured
   logging with request IDs, and bounding what gets logged, is instruction 8.
@@ -90,6 +93,92 @@ None for this instruction.
   loader and `.env.example` files are instruction 4.
 - There are no git hooks yet (instruction 2) and no CI yet (instruction 5).
 - Next.js collects anonymous telemetry by default; the README explains how to opt out.
+
+**Review fixes (wave w0, round 1)**
+
+Echo reviewed instructions 1 and 2 and took them over from Alpha. Checked by running them, in this
+checkout and in scratch clones, with ports 3050 and 4050: the "How to verify" steps of both
+instructions in a fresh clone; `pnpm dev` and `pnpm start`, for each app alone and both together,
+stopped with Ctrl+C (SIGINT to the process group), the API also with a request still open, and
+started with the web or the API port already taken (no process was left behind in any case); the
+API signalled while it starts; `pnpm typecheck` while `next dev` runs, and `next dev` started
+again after being killed with SIGKILL; offline (`--offline`) and production (`--prod`) installs,
+and an install without `.git`; and Corepack fetching pnpm 12.11.2. Fixes, each with a test that
+fails without it:
+
+- `pnpm typecheck` failed after a route was deleted or renamed once `next dev` had run. Next.js
+  keeps a copy of the route types in `apps/web/.next/dev/types`, which `next typegen` does not
+  rewrite, and the stale copy still imported the deleted page (error TS2307, "Cannot find module
+  '../../../src/app/probe/page.js'"). Until `.next` was deleted, the pre-commit hook rejected
+  every commit that staged TypeScript or JSON. The web app's `typecheck` script now uses
+  `apps/web/tsconfig.typecheck.json`, which leaves `.next/dev` out, as `next build` does; editors
+  keep using tsconfig.json. Test: `typecheck.test.ts`, on a copy of the app.
+- Nothing tested the production start. `apps/api/src/production.test.ts` copies packages/shared
+  and the API to a temporary folder, runs their build scripts and then the API's start script:
+  GET /health and a clean SIGTERM. It never touches this checkout's `dist/` folders, so it cannot
+  race a `pnpm build` or `pnpm start` running at the same time.
+- The note above claimed that the API without `--conditions=@apex/dist` fails with
+  `ERR_MODULE_NOT_FOUND`. It started and ran packages/shared's TypeScript source, so a start
+  command without the flag would have gone unnoticed. The start script now passes
+  `--no-strip-types`, which turns Node.js's TypeScript support off, and fails instead
+  (`ERR_UNKNOWN_FILE_EXTENSION`); tested.
+- `engines.node` said `>=24`, and pnpm ignored the field altogether (no warning even with
+  `>=99`). The real minimum is 24.15: jsdom 30 and three of its dependencies declare
+  `^22.22.2 || ^24.15.0 || >=26.0.0`. It is now `>=24.15`, and `engineStrict: true` in
+  `pnpm-workspace.yaml` makes `pnpm install` refuse an older Node.js with
+  `ERR_PNPM_UNSUPPORTED_ENGINE`. `workspace.test.ts` checks both, on a copy of the workspace: an
+  install for a Node.js that `engines` leaves out fails, and an install as the oldest Node.js that
+  `engines` allows (pnpm's `node-version` setting) works, so a dependency that raises the minimum
+  fails the test. An earlier commit of this review set `>=24.2`, the minimum of the scripts in
+  `scripts/`; with `engineStrict`, installs on 24.2 to 24.14 failed on jsdom.
+- Ctrl+C on `pnpm dev` stopped the API at once, cutting off open requests. `node --watch` passes
+  the terminal's Ctrl+C on to the server, which then received SIGINT twice; its handler was
+  registered with `once`, so the second SIGINT ended the process. The entrypoint now treats a
+  stop signal within a second of the first as the same one; a later one still stops it at once,
+  now with exit code 1 and a log line. Tests: two in `apps/api/src/server.test.ts`.
+
+Docs: the note above on Ctrl+C with `pnpm start` called the error cosmetic; pnpm also stops the
+API at once, which this review keeps (pnpm stops both apps when either fails, so a port that is
+taken fails `pnpm start` loudly). To let the API finish open requests, run it on its own:
+`pnpm --filter @apex/api start`.
+
+How to verify, from the repository root:
+
+```sh
+pnpm exec vitest run typecheck.test.ts workspace.test.ts apps/api/src/production.test.ts \
+  apps/api/src/server.test.ts
+# "Test Files  4 passed (4)" and "Tests  17 passed (17)"
+pnpm --filter @apex/shared build && pnpm --filter @apex/api build
+cd apps/api && node --no-strip-types dist/server.js; cd ../..
+# exits at once: ERR_UNKNOWN_FILE_EXTENSION for packages/shared/src/index.ts (no condition)
+```
+
+To see the type check fix with a real dev server:
+
+```sh
+mkdir apps/web/src/app/probe
+printf 'export default function Page() {\n  return null;\n}\n' > apps/web/src/app/probe/page.tsx
+pnpm --filter @apex/web dev   # wait for "Ready", then press Ctrl+C
+rm -r apps/web/src/app/probe
+pnpm typecheck                # passes; before the fix: TS2307 in .next/dev/types/validator.ts
+```
+
+To see Ctrl+C let an open request finish: run `pnpm --filter @apex/api dev` in terminal 1, then in
+terminal 2 start a request whose body arrives after 5 seconds, and press Ctrl+C in terminal 1
+while it waits:
+
+```sh
+(printf 'POST /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n'
+ printf 'Content-Type: application/json\r\nContent-Length: 2\r\n\r\n{'; sleep 5; printf '}') |
+  nc 127.0.0.1 4000
+```
+
+Terminal 1 logs `"msg":"shutting down"`, terminal 2 prints `HTTP/1.1 404 Not Found` when the
+5 seconds are up, and then the API exits. Before the fix, `nc` printed nothing and the API
+stopped at once.
+
+No owner actions. The web app's production start (`next start`) is still checked only by hand,
+and CI starts neither app (handed to the owner of instruction 5).
 
 ## #2 - Git hooks and conventional commits
 
@@ -114,11 +203,11 @@ None for this instruction.
   runs every test. Since Phase 0 was merged, so does staging a file that other instructions'
   tests read instead of importing: `docker-compose.yml`, an `.env.example` template, a
   `.gitignore`, a CI workflow or (since the wave w0 review) `eslint.config.mjs`.
-- `git-hooks.test.ts` (55 tests): 28 commit messages through the real commit-msg hook and
+- `git-hooks.test.ts` (54 tests): 28 commit messages through the real commit-msg hook and
   commitlint config; 10 pre-commit scenarios that run the real lint-staged with this
   repository's config in scratch git repositories, with stand-ins for ESLint, Prettier, pnpm and
   Vitest that record their calls (order, files, hiding and restoring, deleted files, fixes being
-  staged, a failure in each tool); and 17 runs of the real `vitest related` in this checkout,
+  staged, a failure in each tool); and 16 runs of the real `vitest related` in this checkout,
   which check that staging a rerun-trigger file runs every test and an unrelated file runs none.
 - README: "Git hooks" and "Commit messages" sections and a `.husky/` line in the layout.
 
@@ -129,7 +218,7 @@ Run from the repository root:
 ```sh
 pnpm install --frozen-lockfile          # a fresh install prints ". prepare$ husky"
 git config --get core.hooksPath         # prints .husky/_
-pnpm exec vitest run git-hooks.test.ts  # "Tests  55 passed (55)"
+pnpm exec vitest run git-hooks.test.ts  # "Tests  62 passed (62)" since the wave w0 review
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
@@ -196,22 +285,87 @@ None. If you commit from a GUI git client that cannot find `node` or `pnpm`, add
   the check that cannot be bypassed. Skip them only in an emergency.
 - husky stores `core.hooksPath` in the repository's git config, which every worktree shares; a
   worktree runs the hooks only once `pnpm install` has run in it.
-- `vitest related` follows imports only. Tests that run code in a separate process are not
-  selected when that code changes: editing `apps/api/src/server.ts` runs no tests in the hook,
-  because `server.test.ts` starts it with `node`. CI runs every test.
+- `vitest related` follows imports only. A test that runs code in a separate process is not
+  selected when only that code changes. For the API's entrypoint, which `server.test.ts` starts
+  with `node`, a rerun trigger makes up for it since the wave w0 review; the production test,
+  which builds and starts a copy of the API, runs in the hook only when a rerun trigger or a
+  packages/shared file is staged. CI runs every test.
 - Changing `eslint.config.mjs` or the Prettier settings lints and formats only the staged files;
   run `pnpm lint` and `pnpm format:check` to check the whole repository.
 - Untracked files are stashed and restored on every commit; keep large scratch files gitignored.
 - The hook's backup lives in the git stash, which all worktrees of a repository share. Committing
   in two worktrees at the same moment worked every time (30 commits in 15 simultaneous pairs, no
   failures, nothing lost) but left a stray `lint-staged automatic backup` entry 3 times; such an
-  entry is a copy and safe to drop. With several worktrees, pop your own stash entry by name, not
-  the top one, which may be another worktree's backup during a commit.
+  entry is a copy and safe to drop. With several worktrees, restore your own stash entry by name
+  (the steps are in the README section "Git hooks"), not the top one, which may be another
+  worktree's backup during a commit.
 - When the type check fails in one package, `pnpm --recursive` stops the other packages' checks,
   so the output also shows `Command failed with signal SIGKILL` for them.
 - The commit message rules are stricter than `config-conventional`: names in a subject must be
   lowercase or in backticks or quotes. A body line such as `Note: ...` directly after other body
   text is read as the start of the footer and rejected; add a blank line before it.
+
+**Review fixes (wave w0, round 1)**
+
+Echo reviewed this instruction with instruction 1 (see its review note). Besides the scratch-clone
+steps above, the hooks were run on `git commit -- <path>` with other files changed (a passing and
+a failing commit), on files in `[id]` and `(group)` route folders, and on merges. Fixes, each with
+a test that fails without it:
+
+- `git merge` ran none of the checks when it committed a merge without conflicts: git runs the
+  pre-merge-commit hook for those, not pre-commit, and there was none. Two branches that each
+  passed could merge into code that failed the type check (tried: one renamed a constant, the
+  other started using the old name). `.husky/pre-merge-commit` now runs the pre-commit hook, so
+  such a merge stops with "Not committing merge", its changes staged, until it is fixed and
+  committed with `git commit` or abandoned with `git merge --abort`. Tests: two in
+  `git-hooks.test.ts` that install the hooks with husky in a scratch repository and run
+  `git merge`.
+- lint-staged puts unstaged changes and untracked files back only on Ctrl+C (SIGINT). A closed
+  terminal (SIGHUP), an editor or tool that cancels the commit (SIGTERM) or SIGKILL leaves them in
+  the `lint-staged automatic backup` stash entry, with only the staged changes in the working
+  tree, and the README's advice, `git stash pop stash@{n}`, stops with a merge conflict on any
+  partly staged file. The README section "Git hooks" now names these cases and gives the steps
+  lint-staged takes itself (`git reset --hard`, `git stash apply --index`, `git stash drop`).
+  Tests: one per signal in `git-hooks.test.ts`, which start the real hook in a process group of
+  its own and signal the group while the type check runs.
+- Staging only `apps/api/src/server.ts` ran no tests: `server.test.ts` starts it as a separate
+  process, which `vitest related` cannot trace. It is now a rerun trigger, so it runs every test;
+  `git-hooks.test.ts` checks it.
+
+`git-hooks.test.ts` now has 62 tests (54 before): the seven above (two merges, four stopped
+hooks and the entrypoint trigger) and a trigger case for `eslint.config.mjs` from the review of
+instruction 4. How to verify, from the repository root:
+
+```sh
+pnpm exec vitest run git-hooks.test.ts   # "Tests  62 passed (62)"
+```
+
+To see a merge stopped by the checks, in a scratch clone (a branch committed with `--no-verify`
+stands in for one made without the hooks):
+
+```sh
+git clone . /tmp/apex-merge-try && cd /tmp/apex-merge-try && pnpm install --frozen-lockfile
+git switch --create sloppy
+printf 'export const parse = (text: string): any => JSON.parse(text);\n' > apps/api/src/try.ts
+git add apps/api/src/try.ts && git commit --no-verify --message "feat(api): add a parser"
+git switch -
+git merge --no-ff --no-edit sloppy   # stopped by @typescript-eslint/no-explicit-any:
+                                     # "Not committing merge; use 'git commit' ..."
+git status --short                   # A  apps/api/src/try.ts
+git merge --abort
+cd - && rm -rf /tmp/apex-merge-try
+```
+
+A fast-forward merge makes no commit, so no hook runs for it; `--no-ff` above forces a merge
+commit.
+
+Run times measured again in a fresh clone of this branch, committing from a non-interactive
+shell, three rounds of each, while other work used the machine (load average about 4): a
+documentation change 0.8 s (1.6 s the first time), a source change with related tests 4.2 to
+4.8 s, and a change that runs every test (450 tests) 16.4 to 16.6 s. Merges that bring in such a
+documentation change or source change took the same: 0.8 s and 4.1 s.
+
+No owner actions.
 
 ## #3 - Docker Compose services
 
@@ -739,6 +893,7 @@ in `docs/DEPENDENCIES.md`.
 - `scripts/check-build-warnings.ts` and `scripts/check-docker.ts` need Node.js 24.2 or later
   (`import.meta.main`). CI and `.nvmrc` install the latest Node.js 24; on an older one the tests
   fail, so the checks cannot pass quietly. `engines` still allows 24.0 (see docs/DECISIONS.md).
+  (Since the wave w0 review, `engines` requires 24.15 and `pnpm install` enforces it.)
 - The action SHAs do not update themselves; Dependabot arrives with instruction 106.
 
 **Review fixes (wave w0, round 1)**

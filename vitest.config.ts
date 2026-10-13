@@ -15,8 +15,8 @@ export default defineConfig({
       "packages/*/vitest.config.ts",
       "infra/vitest.config.ts",
       "scripts/vitest.config.ts",
-      // Tests for the repository's own tooling and rules (the git hooks, the .gitignore rules
-      // for env files, the lint rules for process.env), next to the files they test.
+      // Tests at the repository root, for tooling and rules that span the repository, such as
+      // the git hooks (git-hooks.test.ts) and the type check (typecheck.test.ts).
       { test: { name: "tooling", include: ["*.test.ts"] } },
     ],
     // When a changed file matches one of these, `vitest related` (run by the pre-commit hook) and
@@ -31,6 +31,8 @@ export default defineConfig({
       `${root}**/tsconfig*.json`,
       `${root}**/{vite,vitest}.config.*`,
       `${root}**/vitest.setup.*`,
+      // The API's entrypoint: apps/api/src/server.test.ts starts it as a separate process.
+      `${root}apps/api/src/server.ts`,
       `${root}.husky/*`,
       `${root}{commitlint,lint-staged}.config.*`,
       // Read from disk or through git by infra/compose.test.ts (the compose file and the root

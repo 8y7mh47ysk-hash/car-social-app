@@ -1,0 +1,145 @@
+import { spawn } from "node:child_process";
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { describe, expect, it, onTestFinished } from "vitest";
+import { z } from "zod";
+
+// package.json "engines" names the Node.js versions the repository needs, and `engineStrict` in
+// pnpm-workspace.yaml makes pnpm enforce it when it installs, for this workspace and for every
+// dependency's own "engines". These tests run pnpm on a copy of the workspace's manifests and
+// lockfile, so they change nothing in this checkout.
+
+const repoRoot = fileURLToPath(new URL(".", import.meta.url));
+
+const manifestSchema = z.looseObject({ engines: z.looseObject({ node: z.string() }) });
+
+const manifest = manifestSchema.parse(
+  JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8")),
+);
+
+/**
+ * Copies the workspace's pnpm-workspace.yaml, lockfile and every package.json into a temporary
+ * folder, with the root package.json's engines.node set to `nodeRange` if one is given.
+ */
+async function copyWorkspace(nodeRange = manifest.engines.node): Promise<string> {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "apex-workspace-")));
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+  for (const file of ["pnpm-workspace.yaml", "pnpm-lock.yaml"]) {
+    await copyFile(join(repoRoot, file), join(dir, file));
+  }
+  const changed = { ...manifest, engines: { ...manifest.engines, node: nodeRange } };
+  await writeFile(join(dir, "package.json"), `${JSON.stringify(changed, null, 2)}\n`);
+  for (const folder of ["apps", "packages"]) {
+    for (const entry of await readdir(join(repoRoot, folder), { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        await mkdir(join(dir, folder, entry.name), { recursive: true });
+        await copyFile(
+          join(repoRoot, folder, entry.name, "package.json"),
+          join(dir, folder, entry.name, "package.json"),
+        );
+      }
+    }
+  }
+  return dir;
+}
+
+/** A line of pnpm's ndjson log. Errors carry a code and a message. */
+const logLineSchema = z.looseObject({
+  code: z.string().optional(),
+  message: z.string().optional(),
+});
+
+/** The lines of pnpm's ndjson log that are JSON objects. */
+function logLines(output: string): z.infer<typeof logLineSchema>[] {
+  return output.split("\n").flatMap((line) => {
+    try {
+      const parsed = logLineSchema.safeParse(JSON.parse(line));
+      return parsed.success ? [parsed.data] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/**
+ * Runs `pnpm install` on the lockfile without the network, install scripts or any write to pnpm's
+ * store (which would record the temporary folder there), with pnpm's log as JSON lines (its usual
+ * output wraps long messages) and any `extraArgs`. Settings that an outer pnpm exports to the
+ * scripts it runs are left out of the environment.
+ */
+function install(
+  cwd: string,
+  extraArgs: readonly string[] = [],
+): Promise<{ code: number | null; output: string }> {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!/^(npm|pnpm)_config_/i.test(name)) {
+      env[name] = value;
+    }
+  }
+  const args = [
+    "install",
+    "--frozen-lockfile",
+    "--offline",
+    "--frozen-store",
+    "--ignore-scripts",
+    "--reporter=ndjson",
+    ...extraArgs,
+  ];
+  return new Promise((resolve, reject) => {
+    const child = spawn("pnpm", args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    const collect = (chunk: string): void => {
+      output += chunk;
+    };
+    child.stdout.setEncoding("utf8").on("data", collect);
+    child.stderr.setEncoding("utf8").on("data", collect);
+    child.once("error", reject);
+    child.once("close", (code) => {
+      resolve({ code, output });
+    });
+  });
+}
+
+/** The oldest version that a range such as ">=24.15" allows, such as "24.15.0". */
+function oldestAllowed(range: string): string {
+  if (!/^>=\d+\.\d+$/.test(range)) {
+    throw new Error(`engines.node should have the form ">=<major>.<minor>", not "${range}"`);
+  }
+  return `${range.slice(2)}.0`;
+}
+
+describe("the pnpm workspace", { timeout: 60_000 }, () => {
+  it("refuses to install on a Node.js version that package.json's engines leaves out", async () => {
+    const result = await install(await copyWorkspace(">=99"));
+
+    expect(result.code, result.output).not.toBe(0);
+    const error = logLines(result.output).find(
+      (line) => line.code === "ERR_PNPM_UNSUPPORTED_ENGINE",
+    );
+    expect(error?.message, result.output).toContain('wanted: {"node":">=99"}');
+  });
+
+  // engineStrict also applies every dependency's own "engines", so a dependency that needs a newer
+  // Node.js than package.json says (jsdom 30 needs 24.15) would make the install fail there.
+  // pnpm's node-version setting checks the lockfile as that Node.js version would.
+  it("installs on the oldest Node.js version that package.json's engines allows", async () => {
+    const oldest = oldestAllowed(manifest.engines.node);
+
+    const result = await install(await copyWorkspace(), [`--config.node-version=${oldest}`]);
+
+    expect(result.code, result.output).toBe(0);
+  });
+});
