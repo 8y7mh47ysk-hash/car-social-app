@@ -560,7 +560,11 @@ in `docs/DEPENDENCIES.md`.
   `git remote add origin git@github.com:<you>/apex-garage.git`, then `git push -u origin main`.
   The first push runs CI.
 - Protect `main` with a branch ruleset (Settings → Rules → Rulesets) that requires the "Checks"
-  status check to pass, so nothing merges with failing checks.
+  status check to pass, so nothing merges with failing checks. GitHub enforces rulesets (and
+  branch protection) on a private repository only on a paid plan: GitHub Pro for a personal
+  account, or Team for an organisation. On GitHub Free, CI still runs and reports on every push
+  and pull request, but nothing stops a merge or a push to `main` with failing checks, so look at
+  the run before merging.
 - Under Settings → Actions → General, keep "Workflow permissions" at "Read repository contents
   and packages permissions". If your plan offers it, also turn on the policy that requires
   actions to be pinned to a full-length commit SHA.
