@@ -668,6 +668,21 @@ instructions make; nothing needs deciding now.
 - Nothing in CI renders the diagrams; the check above is manual. In sequence diagrams a bare `#`
   silently cuts a label while rendering still succeeds, so those diagrams write `#35;` instead.
 
+**Review fixes (wave w0, round 1)**
+
+Delta reviewed this instruction and changed:
+
+- The render check: it used `npx --yes`, which installs the newest version of every package in
+  the tool's tree and runs every install script. Run in the review, it installed 204 packages,
+  four of them published less than a day before, which the repository's one-day release-age hold
+  exists to keep out. `pnpm dlx` (above) applies that hold and runs only Puppeteer's install
+  script; it rendered all six diagrams. The decisions log records the change.
+- `docs/ARCHITECTURE.md`: no longer claims built route validation (#28 adds it), styled borders
+  in sequence diagrams, an installable PWA or logs with "no secrets"; Cloudflare in the
+  home-server diagram is labelled planned; the observability section adds the crash logging and
+  the rules of instruction 8's review (see below).
+- `README.md`: the repository layout lists the architecture document.
+
 ## #7 - Developer scripts
 
 **What changed**
@@ -768,7 +783,7 @@ the Compose plugin (Linux), as instruction 3 describes. Nothing else.
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm --filter @apex/api test   # all pass: "Tests  202 passed (202)" with all of Phase 0 merged
+pnpm --filter @apex/api test   # all pass: "Tests  225 passed (225)" after the wave w0 review
 pnpm lint                      # exits with code 0
 pnpm typecheck                 # shared, api and web each report "Done"
 ```
@@ -841,3 +856,45 @@ None.
   handler should decide how errors are logged.
 - Only the API is covered: Next.js's own server output is not structured, and the web app does
   not yet pass request IDs on to the API (with the typed API client, #29).
+
+**Review fixes (wave w0, round 1)**
+
+Delta reviewed this instruction and changed:
+
+- Crashes: Node.js printed an uncaught exception or unhandled promise rejection as plain text,
+  unredacted (a connection URL's password in full) and without the request ID. The entrypoint
+  now logs it at fatal level through the logger, as one redacted JSON line that carries the ID
+  of the request whose code failed (checked with a route that throws in a timer and one that
+  leaves a rejection unhandled), then exits with code 1 as before.
+- `LOG_FORMAT=pretty` without pino-pretty (a production install) crashed with an uncaught
+  exception and two stack traces around the message. The API now prints only the message, which
+  says to use `LOG_FORMAT=json`, and exits with code 1.
+- Redaction also hides `cf-access-jwt-assertion` (the JWT Cloudflare Access adds to admin
+  requests, #190), `x-hub-signature-256` (Meta's webhooks, #150; `stripe-signature` already was),
+  Node.js's `rawHeaders` list, `pass`, `pwd`, `code_verifier` (#43) and `_csrf`.
+- Written down, in the code and in `docs/ARCHITECTURE.md` ("Observability"), for the
+  instructions that will need it:
+  - a timer, socket or connection created while a request is handled keeps that request's
+    context, so its later lines carry the request's ID (for example the error handler of a
+    database connection that a pool opened for a request): create long-lived clients at startup;
+  - the router's 400 and 414 responses never reach `setErrorHandler`, because Fastify answers
+    them from a context created with the app, so #27 must apply its error format in
+    `sendFrameworkError` too;
+  - a route that writes to `reply.raw` itself (a Server-Sent Events stream, #72) must include
+    `reply.getHeaders()`, or its response has no `x-request-id`;
+  - URL paths are logged as they are, so tokens in links (#39, #41) belong in the query string,
+    and raw bodies logged as strings (a webhook body, #91) are free text that redaction cannot
+    see into;
+  - only Fastify requests may be logged under the key `req`: anything without a `url` makes the
+    log call throw;
+  - integers beyond 2^53 (BigInt values) come out of the redaction pass rounded: log them as
+    strings.
+
+To check the fixes (the second command runs only the four new entrypoint tests):
+
+```sh
+pnpm --filter @apex/api exec vitest run src/lib/redact.test.ts src/logging.test.ts
+pnpm --filter @apex/api exec vitest run src/server.test.ts -t "pino-pretty|redacted JSON line"
+```
+
+The first ends with `Tests  135 passed (135)`, the second with `Tests  4 passed | 9 skipped (13)`.
