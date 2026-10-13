@@ -198,7 +198,8 @@ Hooks also run from scripts and IDEs. They need `node` and `pnpm` on `PATH`; if 
 cannot find them, set `PATH` in `~/.config/husky/init.sh`, which husky reads before every hook.
 
 In an emergency only, `HUSKY=0 git commit ...` (or `git commit --no-verify`) skips the hooks, and
-`HUSKY=0 pnpm install` skips installing them. CI runs the full checks either way.
+`HUSKY=0 pnpm install` skips installing them. CI still runs the lint, format, type and test
+checks either way, but it does not check commit messages: only the commit-msg hook does.
 
 ## Commit messages
 
