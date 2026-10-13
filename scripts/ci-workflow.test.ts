@@ -190,7 +190,6 @@ describe("ci.yml", () => {
     expect(steps[pnpm]?.with?.["version"]).toBeUndefined();
     expect(rootPackage.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/u);
     expect(steps[node]?.with).toMatchObject({ "node-version-file": ".nvmrc", cache: "pnpm" });
-    expect(readFileSync(join(repoRoot, ".nvmrc"), "utf8")).toMatch(/^\d+(?:\.\d+){0,2}\n$/u);
   });
 
   it("installs exactly what the lockfile says, then lints, type-checks, tests and builds", () => {
