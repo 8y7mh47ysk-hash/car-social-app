@@ -957,8 +957,9 @@ Keep entries brief. Details belong in code comments and the build log.
 
 - Date: 2026-10-11 · Instruction: #5 · Author: Charlie
 - Context: commitlint runs only in the commit-msg hook (instruction 2). Hooks can be skipped
-  (`--no-verify`, `HUSKY=0`), GitHub's web editor runs none, and a squash merge takes its message
-  from the pull request's title. The README still said that CI "runs the full checks either way".
+  (`--no-verify`, `HUSKY=0`), GitHub's web editor runs none, and a squash merge on GitHub uses
+  whatever message its merge dialog holds (by default, for two or more commits, the pull request's
+  title). The README still said that CI "runs the full checks either way".
 - Decision: CI keeps to the checks that instruction 5 lists and does not run commitlint. The
   README now says that only the commit-msg hook checks commit messages.
 - Trade-offs: a message that skipped the hook reaches `main` unchecked. Checking messages in CI
