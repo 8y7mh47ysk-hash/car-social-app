@@ -19,7 +19,8 @@ import { z } from "zod";
 
 // Checks for the GitHub Actions workflows (instruction 5). GitHub runs them, not this machine, so
 // these tests hold every workflow to the security rules in docs/DECISIONS.md, check that CI calls
-// scripts that really exist, and run ci.yml's own shell scripts the way GitHub runs them.
+// scripts that really exist and that no step is skipped by a condition that can never be true,
+// and run ci.yml's own shell scripts the way GitHub runs them.
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const workflowsDir = join(repoRoot, ".github", "workflows");
@@ -44,6 +45,7 @@ const workflowSchema = z.object({
       env: envSchema.optional(),
       steps: z.array(
         z.object({
+          id: z.string().optional(),
           name: z.string().optional(),
           if: z.string().optional(),
           uses: z.string().optional(),
@@ -103,6 +105,23 @@ describe.each(workflows)("$file", ({ text, workflow }) => {
     }
   });
 
+  it("names in `if:` only steps that run earlier in the same job", () => {
+    // GitHub reads `steps.<id>` of a step that does not exist as an empty string, without an
+    // error: a renamed or misspelt id makes the condition false, and every step that depends on it
+    // is skipped while the job still passes.
+    for (const job of jobs) {
+      const earlier = new Set<string>();
+      for (const step of job.steps) {
+        for (const [, id = ""] of (step.if ?? "").matchAll(/\bsteps\.([\w-]+)/gu)) {
+          expect(earlier.has(id), `${step.name ?? "a step"} names steps.${id}`).toBe(true);
+        }
+        if (step.id !== undefined) {
+          earlier.add(step.id);
+        }
+      }
+    }
+  });
+
   it("calls only root package.json scripts and repository files that exist", () => {
     for (const run of steps.flatMap((step) => (step.run === undefined ? [] : [step.run]))) {
       // The first word after `pnpm` that is not an option, as in `pnpm --silent lint`.
@@ -156,12 +175,16 @@ describe("ci.yml", () => {
 
   it("runs each step after the install even when an earlier check failed", () => {
     // Without a status function in `if`, GitHub adds `success()`, which skips every step after the
-    // first failure. `always()` would also keep going after the run was cancelled.
+    // first failure. `always()` would also keep going after the run was cancelled. The whole
+    // condition is checked: a misspelt outcome, such as 'sucess', would never be true, so the step
+    // would always be skipped without an error.
     const checks = steps.slice(steps.findIndex((step) => step.run?.startsWith("pnpm install")) + 1);
 
     expect(checks.length).toBeGreaterThan(0);
     for (const check of checks) {
-      expect(check.if, check.name).toMatch(/^\$\{\{ !cancelled\(\) && /u);
+      expect(check.if, check.name).toMatch(
+        /^\$\{\{ !cancelled\(\) && steps\.[\w-]+\.outcome == 'success' \}\}$/u,
+      );
     }
   });
 
