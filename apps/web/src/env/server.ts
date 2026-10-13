@@ -6,7 +6,8 @@ import "server-only";
 
 import { parseEnv } from "@apex/shared";
 
-import { serverEnvSchema, webEnvMessages } from "./schema";
+import { webEnvMessages } from "./public-schema";
+import { serverEnvSchema } from "./server-schema";
 
 /**
  * The web server's settings, validated. Server Components, Route Handlers and Server Actions read

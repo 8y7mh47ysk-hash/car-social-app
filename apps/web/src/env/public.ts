@@ -1,7 +1,7 @@
 import { parseEnv } from "@apex/shared";
 import type { z } from "zod";
 
-import { publicEnvSchema, webEnvMessages } from "./schema";
+import { publicEnvSchema, webEnvMessages } from "./public-schema";
 
 /**
  * Every public variable, read by its full name. Next.js copies a value into browser code only

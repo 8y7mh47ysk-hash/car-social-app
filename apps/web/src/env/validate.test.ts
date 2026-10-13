@@ -11,7 +11,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { serverEnvSchema, validateWebEnv } from "./schema";
+import { validateWebEnv } from "./validate";
 
 // The app's own schemas stay empty until the web app reads its first variable, so these tests
 // give validateWebEnv one stand-in variable in each group.
@@ -109,14 +109,4 @@ describe("validateWebEnv", () => {
       }).not.toThrow();
     },
   );
-});
-
-describe("serverEnvSchema", () => {
-  it("leaves NEXT_PUBLIC_ variables, which are public by definition, to publicEnvSchema", () => {
-    const publicNames = Object.keys(serverEnvSchema.shape).filter((name) =>
-      name.startsWith("NEXT_PUBLIC_"),
-    );
-
-    expect(publicNames).toEqual([]);
-  });
 });

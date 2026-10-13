@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 
 import type { NextConfig } from "next";
 
-import { validateWebEnv } from "./src/env/schema";
+import { validateWebEnv } from "./src/env/validate";
 
 // Set the monorepo root explicitly instead of letting Next.js guess it from lockfiles, so builds
 // behave the same in any checkout location (git worktrees, fresh clones, CI).
@@ -26,7 +26,7 @@ const nextConfig: NextConfig = {
  * Next.js calls this each time it loads the config, after it has read the .env files, and passes
  * the phase (dev server, production build, production server...). A missing or invalid
  * environment variable therefore stops `next dev`, `next build` and `next start` with a message
- * that names it. Which variables are checked depends on the phase (see src/env/schema.ts), which
+ * that names it. Which variables are checked depends on the phase (see src/env/validate.ts), which
  * is why the check runs here rather than when this file is loaded.
  */
 export default function config(phase: string): NextConfig {

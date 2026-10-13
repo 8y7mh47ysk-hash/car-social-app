@@ -1,4 +1,4 @@
-import { parseEnv, type EnvSource, type ParseEnvOptions } from "@apex/shared";
+import { parseEnv, type EnvSource } from "@apex/shared";
 import {
   PHASE_DEVELOPMENT_SERVER,
   PHASE_PRODUCTION_BUILD,
@@ -6,31 +6,8 @@ import {
 } from "next/constants";
 import { z } from "zod";
 
-/**
- * Variables that only the web server reads, such as secrets and internal URLs. Their names must
- * not start with NEXT_PUBLIC_. Code reads them through `serverEnv` (./server.ts), which a Client
- * Component cannot import.
- *
- * The web app reads none yet. Add each one with a test, and document it in apps/web/.env.example.
- */
-export const serverEnvSchema = z.object({});
-
-/**
- * Variables the browser may see. When Next.js compiles the app (`next dev`, `next build`), it
- * copies their values into the JavaScript it sends to every visitor, so they must never hold a
- * secret, and a changed value needs a new build. Their names must start with NEXT_PUBLIC_ (the
- * `satisfies` type below rejects any other name). Code reads them through `publicEnv`
- * (./public.ts).
- *
- * The web app reads none yet. Add each one with a test, and document it in apps/web/.env.example.
- */
-export const publicEnvSchema = z.object({} satisfies Record<`NEXT_PUBLIC_${string}`, z.ZodType>);
-
-/** How the web app's environment errors name the app and say where to fix them. */
-export const webEnvMessages: ParseEnvOptions = {
-  app: "the web app",
-  hint: "Set them in apps/web/.env (see apps/web/.env.example) or in the environment.",
-};
+import { publicEnvSchema, webEnvMessages } from "./public-schema";
+import { serverEnvSchema } from "./server-schema";
 
 /** The two groups of variables that validateWebEnv checks. */
 export interface WebEnvSchemas {
