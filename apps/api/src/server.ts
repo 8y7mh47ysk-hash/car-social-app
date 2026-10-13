@@ -1,7 +1,9 @@
 import { EnvValidationError } from "@apex/shared";
+import type { FastifyInstance } from "fastify";
 
 import { buildApp } from "./app.ts";
 import { loadConfig, type ApiConfig } from "./config.ts";
+import { LogFormatUnavailableError } from "./lib/logger.ts";
 
 /** How long in-flight requests get to finish after SIGINT/SIGTERM before the process exits. */
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -24,8 +26,25 @@ function loadConfigOrExit(): ApiConfig {
   }
 }
 
+/**
+ * Builds the app with the configured logging. If the log format cannot be used (pretty output
+ * where pino-pretty is not installed), prints why, without a stack trace, and exits with code 1,
+ * as loadConfigOrExit does for invalid variables.
+ */
+async function buildAppOrExit(config: ApiConfig): Promise<FastifyInstance> {
+  try {
+    return await buildApp({ logLevel: config.logLevel, logFormat: config.logFormat });
+  } catch (error) {
+    if (!(error instanceof LogFormatUnavailableError)) {
+      throw error;
+    }
+    console.error(error.message);
+    process.exit(1);
+  }
+}
+
 const config = loadConfigOrExit();
-const app = await buildApp({ logLevel: config.logLevel, logFormat: config.logFormat });
+const app = await buildAppOrExit(config);
 
 function shutDown(signal: NodeJS.Signals): void {
   app.log.info({ signal }, "shutting down");

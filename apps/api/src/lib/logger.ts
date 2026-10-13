@@ -20,6 +20,15 @@ import { REQUEST_ID_HEADER, requestIdFor } from "./request-id.ts";
 export const LOG_FORMATS = ["json", "pretty"] as const;
 export type LogFormat = (typeof LOG_FORMATS)[number];
 
+/**
+ * Thrown when LOG_FORMAT=pretty is asked for but pino-pretty is not installed, as in production
+ * installs, which leave development dependencies out. Its message says what to do, so the
+ * entrypoint prints only the message, as it does for invalid environment variables.
+ */
+export class LogFormatUnavailableError extends Error {
+  override readonly name = "LogFormatUnavailableError";
+}
+
 /** Somewhere log lines can go, one line per call. Tests pass an in-memory sink. */
 export interface LogDestination {
   write(line: string): void;
@@ -161,7 +170,7 @@ function sendFrameworkError(
  */
 async function prettyDestination(destination: LogDestination | undefined): Promise<LogDestination> {
   const pinoPretty = await import("pino-pretty").catch((error: unknown) => {
-    throw new Error(
+    throw new LogFormatUnavailableError(
       "LOG_FORMAT=pretty needs pino-pretty, a development dependency that production installs " +
         "leave out. Use LOG_FORMAT=json.",
       { cause: error },
