@@ -31,9 +31,10 @@ interface Result {
 
 /**
  * The environment for a hook run: git variables from an outer git process are dropped (when these
- * tests run inside the pre-commit hook, GIT_INDEX_FILE points at this repository's index), the
- * machine's global and system git config are ignored, colours are off, and `bins` come first on
- * PATH, followed by the directory of the running Node.js.
+ * tests run inside the pre-commit hook, GIT_INDEX_FILE points at this repository's index), and so
+ * is HUSKY (HUSKY=0 in the shell would skip the hooks that git runs), the machine's global and
+ * system git config are ignored, colours are off, and `bins` come first on PATH, followed by the
+ * directory of the running Node.js.
  */
 function hookEnv(
   bins: readonly string[],
@@ -41,7 +42,7 @@ function hookEnv(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(process.env)) {
-    if (!name.startsWith("GIT_") && name !== "FORCE_COLOR") {
+    if (!name.startsWith("GIT_") && name !== "HUSKY" && name !== "FORCE_COLOR") {
       env[name] = value;
     }
   }
@@ -241,6 +242,16 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
      * the hook's result.
      */
     readonly startPreCommit: (block: string) => { group: number; result: Promise<Result> };
+    /**
+     * Commits copies of this repository's pre-commit and pre-merge-commit hooks and installs them
+     * with the real husky, as `pnpm install` does, so that git itself runs them from then on.
+     */
+    readonly installHooks: () => Promise<void>;
+    /**
+     * Runs `git merge --no-ff --no-edit <branch>` and returns its result. The options name a
+     * stand-in that fails.
+     */
+    readonly merge: (branch: string, options?: { fail?: string }) => Promise<Result>;
     /** The stand-ins' log lines, with paths relative to the repository. */
     readonly calls: () => Promise<string[]>;
     /** `git status --porcelain` as lines. */
@@ -321,6 +332,22 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
         });
         return { group, result: finished(child) };
       },
+      installHooks: async () => {
+        for (const hookName of ["pre-commit", "pre-merge-commit"]) {
+          await write(
+            `.husky/${hookName}`,
+            await readFile(join(repoRoot, ".husky", hookName), "utf8"),
+          );
+        }
+        await git("add", ".husky");
+        await git("commit", "--quiet", "--message", "chore: add the git hooks");
+        const installed = await run(join(rootBin, "husky"), [], root, env);
+        if (installed.code !== 0) {
+          throw new Error(`husky failed:\n${installed.output}`);
+        }
+      },
+      merge: (branch, { fail = "" } = {}) =>
+        run("git", ["merge", "--no-ff", "--no-edit", branch], root, { ...env, STUB_FAIL: fail }),
       calls: async () =>
         (await readFile(log, "utf8").catch(() => ""))
           .replaceAll(`${root}/`, "")
@@ -455,6 +482,57 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       expect(await repo.git("stash", "list")).toBe("");
     },
   );
+
+  // `git merge` runs pre-merge-commit, not pre-commit, when it commits without conflicts.
+  describe("for a merge that git commits itself", () => {
+    /**
+     * Prepares a merge without conflicts: a branch "feature" that changes src/util.ts while main
+     * gets another commit. Then installs the hooks, so git runs them for the merge.
+     */
+    async function prepareMerge(): Promise<Repo> {
+      const repo = await createRepo();
+      await repo.git("switch", "--quiet", "--create", "feature");
+      await repo.write("src/util.ts", "export const util = 2;\n");
+      await repo.git("commit", "--quiet", "--all", "--message", "feat: change util");
+      await repo.git("switch", "--quiet", "main");
+      await repo.write("README.md", "# Test\n\nMore.\n");
+      await repo.git("commit", "--quiet", "--all", "--message", "docs: say more");
+      await repo.installHooks();
+      return repo;
+    }
+
+    it("runs the same checks on what the merge brings in", async () => {
+      const repo = await prepareMerge();
+
+      const result = await repo.merge("feature");
+
+      expect(result.code, result.output).toBe(0);
+      expect(await repo.calls()).toEqual([
+        `${eslint} src/util.ts`,
+        `${prettier} src/util.ts`,
+        typecheck,
+        `${relatedTests} src/util.ts`,
+        "M  src/util.ts",
+      ]);
+      // A merge commit, with both branches as parents.
+      expect((await repo.git("log", "-1", "--format=%p")).trim().split(" ")).toHaveLength(2);
+    });
+
+    it("stops the merge when a check fails, leaving it to be finished or aborted", async () => {
+      const repo = await prepareMerge();
+      const before = await repo.git("rev-parse", "HEAD");
+
+      const result = await repo.merge("feature", { fail: "pnpm" });
+
+      expect(result.code).not.toBe(0);
+      expect(result.output).toContain("pnpm failed");
+      expect(result.output).toContain("Not committing merge");
+      expect(await repo.git("rev-parse", "HEAD")).toBe(before);
+      expect(await repo.status()).toEqual(["M  src/util.ts"]);
+      await repo.git("merge", "--abort");
+      expect(await repo.status()).toEqual([]);
+    });
+  });
 
   describe("when the commit is stopped while a check runs", () => {
     /** The working tree before each commit: a partly staged file, an edit and a new file. */

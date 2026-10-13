@@ -1,0 +1,4 @@
+# git runs this hook instead of pre-commit when `git merge` (or a `git pull` that merges) makes a
+# merge commit without conflicts. It runs the same checks on what the merge brings in. A merge that
+# stops with conflicts is finished with `git commit`, which runs pre-commit.
+. "$(dirname "$0")/pre-commit"
