@@ -99,7 +99,7 @@ None for this instruction.
 Echo reviewed instructions 1 and 2 and took them over from Alpha. Checked by running them, in this
 checkout and in scratch clones, with ports 3050 and 4050: the "How to verify" steps of both
 instructions in a fresh clone; `pnpm dev` and `pnpm start`, for each app alone and both together,
-stopped with Ctrl+C (SIGINT to the process group) with and without a request still open, and
+stopped with Ctrl+C (SIGINT to the process group), the API also with a request still open, and
 started with the web or the API port already taken (no process was left behind in any case); the
 API signalled while it starts; `pnpm typecheck` while `next dev` runs, and `next dev` started
 again after being killed with SIGKILL; offline (`--offline`) and production (`--prod`) installs,
@@ -309,8 +309,8 @@ None. If you commit from a GUI git client that cannot find `node` or `pnpm`, add
 
 Echo reviewed this instruction with instruction 1 (see its review note). Besides the scratch-clone
 steps above, the hooks were run on `git commit -- <path>` with other files changed (a passing and
-a failing commit), on files in an `[id]` route folder, and on merges. Fixes, each with a test that
-fails without it:
+a failing commit), on files in `[id]` and `(group)` route folders, and on merges. Fixes, each with
+a test that fails without it:
 
 - `git merge` ran none of the checks when it committed a merge without conflicts: git runs the
   pre-merge-commit hook for those, not pre-commit, and there was none. Two branches that each
