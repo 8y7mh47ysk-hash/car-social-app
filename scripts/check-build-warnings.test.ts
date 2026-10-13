@@ -72,6 +72,19 @@ const errorsWhilePrerendering = [
   "apps/web build: ✓ Generating static pages using 7 workers (6/6) in 292ms",
 ].join("\n");
 
+/**
+ * Pages that log plain text while Next.js prerenders them: `console.warn("...")` in one probe
+ * build, then `console.error("...")` and `console.error("probe: %s", "...")` in another. Next.js
+ * prints the bare text, and the build succeeds.
+ */
+const textLoggedWhilePrerendering = [
+  "apps/web build: probe: a bare console.warn while prerendering",
+  "apps/web build:   Generating static pages using 5 workers (0/4) ...",
+  "apps/web build: probe: console.error with a plain string while prerendering",
+  "apps/web build: probe: console.error with a format string",
+  "apps/web build: ✓ Generating static pages using 5 workers (4/4) in 161ms",
+].join("\n");
+
 describe("findBuildWarnings", () => {
   it("finds no warnings in a clean build, ignoring the CI notice about the build cache", () => {
     expect(findBuildWarnings(cleanBuild)).toEqual([]);
@@ -129,6 +142,12 @@ describe("findBuildWarnings", () => {
     expect(findBuildWarnings(log)).toEqual(["⚠ Invalid next.config.ts options detected:"]);
   });
 
+  it("cannot see plain text that pages log while Next.js prerenders them", () => {
+    // A known limit, listed in docs/DECISIONS.md ("What "fail on any warning" means in CI"): if
+    // this test starts to fail because the check finds these lines, update that list.
+    expect(findBuildWarnings(textLoggedWhilePrerendering)).toEqual([]);
+  });
+
   it("does not flag lines that only mention warnings or errors", () => {
     const log = [
       "apps/web build: ├ ○ /settings/warnings",
@@ -166,11 +185,11 @@ describe("check-build-warnings command", { timeout: 20_000 }, () => {
     return result;
   }
 
-  it("passes a clean build and says so", () => {
+  it("passes a clean build and says that it found nothing", () => {
     const result = check(logFile(cleanBuild));
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe("The build printed no warnings or errors.\n");
+    expect(result.stdout).toBe("Found no warning or error lines in the build output.\n");
   });
 
   it("fails a build with warnings and lists them", () => {

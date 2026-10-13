@@ -15,9 +15,11 @@ import { parseArgs, stripVTControlCharacters } from "node:util";
 /**
  * How problems are marked: Next.js's log prefixes "⚠" (warning) and "⨯" (error); "Warning:", used
  * by older Next.js messages, by each of Turbopack's compile warnings and, as "(node:123) Warning:"
- * or "DeprecationWarning:", by Node.js; "Error:", which starts every printed error, such as one
- * that code logs or leaves unhandled while Next.js prerenders a page ("TypeError:" included); the
- * header above Turbopack's compile warnings; and pnpm's "WARN".
+ * or "DeprecationWarning:", by Node.js; "Error:", which starts every printed Error object, such as
+ * one that code logs or leaves unhandled while Next.js prerenders a page ("TypeError:" included);
+ * the header above Turbopack's compile warnings; and pnpm's "WARN". Plain text that code logs
+ * while a page is prerendered, even with console.error or console.warn, has no marker, so this
+ * check cannot see it.
  */
 const PROBLEM_MARKERS = [
   /⚠/u,
@@ -77,7 +79,8 @@ function main(args: readonly string[]): number {
 
   const warnings = findBuildWarnings(log);
   if (warnings.length === 0) {
-    console.log("The build printed no warnings or errors.");
+    // Not "no warnings": text that code logs while a page is prerendered has no marker.
+    console.log("Found no warning or error lines in the build output.");
     return 0;
   }
   console.error(

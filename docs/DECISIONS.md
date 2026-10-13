@@ -651,8 +651,9 @@ Keep entries brief. Details belong in code comments and the build log.
     Compose reports an unset variable as a warning and exits with status 0 (tested).
     `--profile '*'` also validates the services in the `app` profile: without it, a broken
     `depends_on` there passes (tested).
-- Not enforced: a plain `console.warn` or `console.log` that runs while Next.js prerenders a page,
-  which Next.js prints as the bare message (tested), and the few Next.js warnings written the
+- Not enforced: plain text that code logs while Next.js prerenders a page, with `console.warn`,
+  `console.log` or `console.error` (only a logged `Error` object prints "Error:"), which Next.js
+  prints as the bare message (tested), and the few Next.js warnings written the
   same way (most are for features this app does not use, such as the Pages Router, i18n and the
   edge runtime); console output or Node.js warnings printed while tests, lint or the type check
   pass (no signal that works across tools; tests should assert on the logs they expect); pnpm's

@@ -526,7 +526,7 @@ pnpm install --frozen-lockfile
 pnpm exec vitest run --project scripts            # "Test Files  4 passed (4)", "Tests  53 passed (53)"
 pnpm peers check                                  # "No peer dependency issues found"
 pnpm build 2>&1 | tee build.log                   # the route table, then "Done"
-node scripts/check-build-warnings.ts build.log    # "The build printed no warnings or errors.", status 0
+node scripts/check-build-warnings.ts build.log    # "Found no warning or error lines ...", status 0
 printf 'apps/web build: ⚠ Example warning\n' >> build.log
 node scripts/check-build-warnings.ts build.log    # lists the line and exits with status 1
 rm build.log
@@ -593,9 +593,9 @@ in `docs/DEPENDENCIES.md`.
   is (`pnpm store path`). Next.js's own build cache is not cached, so every run prints its "No
   build cache found" notice, which the warning check ignores.
 - The build-log check recognises warnings and errors by how they are written (docs/DECISIONS.md
-  lists the formats). It cannot see a plain `console.warn` that runs while Next.js prerenders a
-  page: Next.js prints the bare message (tested). Console output from passing tests is not checked
-  either.
+  lists the formats). It cannot see plain text that code logs while Next.js prerenders a page,
+  even with `console.error` or `console.warn`: Next.js prints the bare text (tested). Console
+  output from passing tests is not checked either.
 - `vitest related`, which the pre-commit hook (instruction 2) runs, cannot see that
   `scripts/ci-workflow.test.ts` reads the workflows. Since Phase 0 was merged,
   `` `${root}.github/workflows/*` `` is in `forceRerunTriggers` in `vitest.config.ts`, so a commit
