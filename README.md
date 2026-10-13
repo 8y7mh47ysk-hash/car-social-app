@@ -58,8 +58,9 @@ docs/         Playbook, build log, decisions, dependency register and review log
 - pnpm 12. The exact version is pinned in `package.json` (`packageManager`). Run
   `corepack enable` once (Corepack ships with Node.js 24), or install pnpm 12 any other way;
   either picks up the pinned version.
-- Docker with Compose (Docker Desktop or OrbStack on macOS) to run PostgreSQL and Redis; see
-  [Local services](#local-services). The apps do not use them yet, so `pnpm dev` works without it.
+- Docker with Compose (Docker Desktop or OrbStack on macOS, Docker Engine 28 or later on Linux) to
+  run PostgreSQL and Redis; see [Local services](#local-services). The apps do not use them yet,
+  so `pnpm dev` works without it.
 
 ## Quick start
 
@@ -81,8 +82,8 @@ PostgreSQL (with pgvector) and Redis run in Docker, defined in
 [docker-compose.yml](docker-compose.yml):
 
 ```sh
-cp .env.example .env          # then set POSTGRES_PASSWORD and REDIS_PASSWORD (see the file)
-docker compose up -d --wait   # starts both and waits until they are healthy
+cp .env.example .env && chmod 600 .env   # then set both passwords in it (see the file)
+docker compose up -d --wait              # starts both and waits until they are healthy
 ```
 
 Both listen on 127.0.0.1 only (ports 5432 and 6379). Day-to-day commands, connection details and

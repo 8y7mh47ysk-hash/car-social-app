@@ -20,15 +20,20 @@ Docker.
 You need Docker with Compose: Docker Desktop or OrbStack on macOS, Docker Engine on Linux. The
 file uses the health-check setting `start_interval` (checks every second while a service
 starts), which needs Compose 2.20.2 or later and Docker Engine 25 or later; any current Docker
-Desktop or OrbStack is newer than both.
+Desktop or OrbStack is newer than both. On Linux, use Docker Engine 28 or later, from Docker's
+own packages: with older engines, machines on the same local network can reach ports published
+on `127.0.0.1` (Docker's port-publishing documentation says so), and a distribution's own package
+can be older (Debian 13's `docker.io` is version 26.1).
 
 ### First run
 
 ```sh
-cp .env.example .env    # then set POSTGRES_PASSWORD and REDIS_PASSWORD in .env
-openssl rand -hex 32    # prints a strong password; run it once for each
+cp .env.example .env && chmod 600 .env   # a copy only your user can read
+openssl rand -hex 32                     # prints a strong password; run it once for each
+                                         # and put them in .env as POSTGRES_PASSWORD and
+                                         # REDIS_PASSWORD
 docker compose up -d --wait
-docker compose ps       # postgres and redis both show "(healthy)"
+docker compose ps                        # postgres and redis both show "(healthy)"
 ```
 
 `up -d` starts only `postgres` and `redis`; `--wait` returns once both are healthy. Every
@@ -46,6 +51,7 @@ Run these from the repository root.
 | `docker compose logs -f postgres`                                                 | Follows one service's log (Ctrl+C to stop following)  |
 | `docker compose stop`                                                             | Stops the services; the data stays                    |
 | `docker compose down`                                                             | Removes the containers; the data volumes stay         |
+| `docker compose --profile app down`                                               | Also removes the placeholders, if you started them    |
 | `docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'` | Opens psql inside the container                       |
 | `docker compose exec redis redis-cli`                                             | Opens redis-cli, already authenticated                |
 | `docker compose down --volumes`                                                   | Deletes the containers **and all data** (no undo)     |
@@ -62,6 +68,14 @@ escaping):
 
 Use `127.0.0.1` rather than `localhost`: the ports are published on the IPv4 loopback address
 only. If you changed `POSTGRES_USER`, `POSTGRES_DB` or a port in `.env`, use your values.
+
+### A second copy on the same machine
+
+The project name is fixed (`name: apex-garage` in the compose file), so the containers and
+volumes have the same names whatever the folder is called. Every checkout on a machine therefore
+shares one set: `docker compose up -d` in a second checkout takes over the first one's containers
+and data, even with other ports. To run a separate copy, give that checkout's `.env` another
+`COMPOSE_PROJECT_NAME` as well as other ports (see `.env.example`).
 
 ### Changing a password
 
@@ -92,6 +106,12 @@ Neither app has a container image yet: run both on the host with `pnpm dev`.
 `docker compose --profile app up` starts PostgreSQL and Redis, waits until they are healthy, and
 then each placeholder prints that reminder and exits with status 1. They are never restarted.
 
+Remove them with the profile as well: `docker compose --profile app down`. A plain
+`docker compose down` only handles the services outside a profile, so it leaves both exited
+placeholders behind while it deletes the network they were attached to; the next
+`docker compose --profile app up` then fails with "failed to set up container networking: network
+... not found". `docker compose --profile app down` clears that up too.
+
 When the apps get real images (at the latest with instruction 102, which hardens every service's
 container), the placeholders become builds from the repository root. Points to carry over: the
 API's production start needs `node --conditions=@apex/dist` (see `docs/DECISIONS.md`); inside a
@@ -101,10 +121,15 @@ and once the API image has a health check, `web` should wait for `service_health
 
 ### Security notes
 
-- Ports are published on `127.0.0.1` only. Other containers on the Compose network can still
-  reach the services; instruction 103 moves them to an internal network with no published ports.
+- Ports are published on `127.0.0.1` only, which keeps other machines out on Docker Desktop,
+  OrbStack and Docker Engine 28 or later (see above for older Linux engines). Other containers on
+  the Compose network can still reach the services; instruction 103 moves them to an internal
+  network with no published ports.
 - Neither password has a default, and `.env` is gitignored. The official Redis image turns
   Redis's protected mode off, so the password is what keeps other clients out.
+- `chmod 600 .env` keeps other accounts on the machine from reading the passwords: a plain copy
+  is readable by every local user (on macOS every account is in the `staff` group, which can
+  open home folders).
 - The passwords are visible to anyone who can run `docker inspect` on this machine (Docker access
   is root-equivalent anyway). Instruction 104 moves them to Docker secrets or an encrypted file.
 - PostgreSQL runs with a superuser for now. A least-privilege role for the API belongs with the
@@ -121,7 +146,9 @@ and once the API image has a health check, `web` should wait for `service_health
   `POSTGRES_PASSWORD=ci REDIS_PASSWORD=ci docker compose config --quiet`.
 - `pnpm test` includes `infra/compose.test.ts`, static checks that need no Docker: only
   `postgres` and `redis` start by default, ports stay on `127.0.0.1`, passwords have no default,
-  images are pinned, and `.env.example` documents every variable with the right defaults.
+  PostgreSQL comes from the pgvector image, Redis keeps its append-only file, the health checks
+  and dependencies are the ones described here, the placeholders build nothing and exit with an
+  error, images are pinned, and `.env.example` documents every variable with the right defaults.
 
 ## What comes next
 

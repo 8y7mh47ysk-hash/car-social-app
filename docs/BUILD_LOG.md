@@ -251,11 +251,11 @@ pnpm typecheck && pnpm lint            # both exit with code 0
 ```
 
 With Docker installed (see Owner actions; Docker is not installed on the build machine, so these
-were not run here):
+were not run there; the review ran them in a Linux VM, see "Review fixes (wave w0, round 1)"):
 
 ```sh
-cp .env.example .env     # then set POSTGRES_PASSWORD and REDIS_PASSWORD; `openssl rand -hex 32`
-                         # prints a suitable value (run it once for each)
+cp .env.example .env && chmod 600 .env   # then set POSTGRES_PASSWORD and REDIS_PASSWORD;
+                         # `openssl rand -hex 32` prints a suitable value (run it once for each)
 docker compose config --quiet                     # no output, exit code 0
 docker compose config --services                  # postgres and redis only
 docker compose --profile app config --services    # postgres, redis, api and web
@@ -276,7 +276,9 @@ docker compose exec redis redis-cli DEL apex:check
 docker compose --profile app up api               # prints "Placeholder: the API has no image
                                                   # yet. Run it on the host: pnpm dev" and the
                                                   # container exits with code 1
-docker compose down                               # removes the containers, keeps the data
+docker compose --profile app down                 # removes every container, the placeholder
+                                                  # too, and keeps the data (a plain `down`
+                                                  # would leave the placeholder behind)
 ```
 
 To see that the passwords are required, run `POSTGRES_PASSWORD= docker compose config --quiet`
@@ -318,8 +320,8 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
 - Install Docker on the development Mac: Docker Desktop (free for personal use and for
   businesses with fewer than 250 employees and under $10 million revenue) or OrbStack (free for
   personal, non-commercial use; business use needs its paid Pro plan). Then run
-  `cp .env.example .env`, set both passwords, run `docker compose up -d --wait` (or the
-  `docker:up` script once instruction 7 adds it) and check that `docker compose ps` shows both
+  `cp .env.example .env && chmod 600 .env`, set both passwords, run `docker compose up -d --wait`
+  (or `pnpm docker:up`, from instruction 7) and check that `docker compose ps` shows both
   services healthy. The commands under "How to verify" check the rest.
 - Confirm the Redis licence choice: Redis 8 under its AGPLv3 option, used unmodified, or switch
   to Valkey (BSD-3-Clause), which is a one-line image change. The reasoning is in
@@ -327,10 +329,11 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
 
 **Notes & limitations**
 
-- Docker is not installed on the build machine, so the containers were never started here. The
+- Docker is not installed on the build machine, so the containers were not started there. The
   file was checked with the real Compose parser, the JSON Schema and the tests above; the health
   check commands were checked against the images' entrypoints, the PostgreSQL documentation and
-  a Redis source build.
+  a Redis source build. The review then ran the containers in a Linux VM (see "Review fixes
+  (wave w0, round 1)"); they have not yet run under Docker Desktop or OrbStack (owner action).
 - The apps do not use PostgreSQL or Redis yet; that starts in Phase 2. Connection URLs are in
   `infra/README.md`.
 - Every `docker compose` command for this project needs the two passwords, so CI must pass
@@ -347,9 +350,57 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
   services (instruction 103 adds an internal network); digest pins need deliberate updates
   (instruction 106 automates them).
 - `docker compose --profile app up` ends with both placeholders exited with status 1, on purpose,
-  until the apps get real images.
+  until the apps get real images. Remove them with `docker compose --profile app down`.
 - The health checks' one-second polling while a service starts (`start_interval`) needs Docker
-  Engine 25 or later and Compose 2.20.2 or later.
+  Engine 25 or later and Compose 2.20.2 or later. On Linux, ports published on 127.0.0.1 stay
+  out of other machines' reach only from Docker Engine 28.
+
+**Review fixes (wave w0, round 1)**
+
+Alpha reviewed this instruction, took it over and re-checked every requirement by running it:
+
+- The containers ran for real in a throwaway Debian 13 VM (Lima 2.2.1, Docker Engine 29.9.0, Compose
+  5.6.0) with this branch's `docker-compose.yml` and `.env.example`. The commands under "How to
+  verify" (with `exec -T`, as there was no terminal) gave the results shown; only the old last step,
+  a plain `docker compose down`, did not (fixed below). These checks passed too: PostgreSQL turned
+  healthy only after the image's temporary set-up server had stopped and the real one was listening;
+  pgvector 0.8.7 installed and ran a distance query; `/dev/shm` was 256 MB; both servers ran as
+  unprivileged users; the VM's own network address was refused on both ports while 127.0.0.1
+  answered; a TCP login without a password was refused by both; the Redis password did not appear in
+  the process list; redis-server restarted on its own after a `kill -9`; data in both survived
+  `down` and `up`.
+- Fixed: the final `docker compose down` left the exited placeholder behind, and the next
+  `docker compose --profile app up` failed with "failed to set up container networking: network
+  ... not found": without `--profile`, `down` only handles the services outside a profile. The
+  step, `infra/README.md` and the compose file now say `docker compose --profile app down`.
+- Fixed: `infra/compose.test.ts` did not notice a PostgreSQL image without pgvector, Redis
+  without its append-only file, a `pg_isready` without the configured user and database (which
+  logs a FATAL line for every check), a placeholder that builds a Dockerfile or exits with
+  status 0, or a `web` that stops waiting for `api`. New tests cover each one, and the image
+  tags must name exact releases.
+- Fixed: on Linux, Docker Engine before 28.0 lets machines on the same network reach ports
+  published on 127.0.0.1, so the compose file's promise that other machines cannot reach the
+  services needs that engine. The README files now ask for Docker Engine 28 or later on Linux
+  (Debian 13's own `docker.io` is 26.1); the decision is in `docs/DECISIONS.md`.
+- Fixed: `cp .env.example .env` creates a file that every local account can read; the copy
+  commands for this instruction now add `chmod 600 .env`.
+- Fixed: in the VM, a second checkout that changed only the ports took over the first one's
+  containers, because the project name is fixed. `infra/README.md` explains
+  `COMPOSE_PROJECT_NAME`, `docs/ARCHITECTURE.md` no longer says that ports alone are enough, and
+  the fixed name is recorded in `docs/DECISIONS.md`.
+- Fixed: the three container images had no rows in `docs/DEPENDENCIES.md`, although this entry
+  pointed there for them.
+
+How to verify the fixes:
+
+```sh
+pnpm exec vitest run --project infra   # "Tests  21 passed (21)"
+pnpm test && pnpm typecheck && pnpm lint && pnpm format:check   # all exit with code 0
+```
+
+With Docker, run the commands under "How to verify" above; after the final
+`docker compose --profile app down`,
+`docker ps --all --filter label=com.docker.compose.project=apex-garage` lists no containers.
 
 ## #4 - Typed environment loader
 

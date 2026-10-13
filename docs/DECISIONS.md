@@ -931,3 +931,37 @@ Keep entries brief. Details belong in code comments and the build log.
   would be a second list to keep in step with the tests; these files change rarely. Tests that
   start code in a child process are still not picked by that code (`server.test.ts` and
   `src/server.ts`); CI runs every test.
+
+### Docker Engine 28 or later on Linux hosts
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Alpha
+- Context: `docker-compose.yml` publishes PostgreSQL and Redis on 127.0.0.1 only, so that other
+  machines cannot reach them. Docker's port-publishing documentation warns that before Docker
+  Engine 28.0.0, hosts on the same network segment can reach ports published to 127.0.0.1 on a
+  Linux host. The build only required Engine 25 (for `start_interval`), which allows Debian 13's
+  own `docker.io` package (26.1). Docker Desktop and OrbStack run the engine in a virtual machine
+  on the Mac and forward published ports from the Mac's own loopback address.
+- Decision: on Linux, Docker Engine 28 or later, from Docker's own packages. `README.md`,
+  `infra/README.md` and the compose file say so. In the review's VM (Engine 29.9.0) the VM's own
+  network address was refused on both ports; the routing case that the documentation describes
+  was not tested.
+- Trade-offs: distribution packages can be too old, so the home server (Phase 7) gets Docker
+  from Docker's own repository and is updated from there. Firewall rules of our own were
+  rejected: a newer engine fixes the cause, and instruction 103 removes the published ports on
+  the server anyway. Nothing checks the version yet; `scripts/check-docker.ts` (instruction 7)
+  could refuse an older engine on Linux.
+
+### A fixed Compose project name: apex-garage
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Alpha
+- Context: Compose names containers, networks and volumes after the project, which defaults to
+  the name of the folder. Instruction 3 set `name: apex-garage` in `docker-compose.yml` without
+  recording why. In the review, a second checkout on the same machine that changed only the
+  ports took over the first checkout's containers and volumes.
+- Decision: keep the fixed name, so the data volumes keep their names whatever the folder is
+  called (a renamed or re-cloned folder would otherwise start with empty volumes, while the old
+  data sat under the old names). A second copy on one machine sets its own `COMPOSE_PROJECT_NAME`
+  and ports in its `.env`; `.env.example`, `infra/README.md` and `docs/ARCHITECTURE.md` say so.
+- Trade-offs: copies on one machine share one set of containers unless each sets the variable,
+  which is easy to miss. The folder-name default would separate them automatically but would
+  tie the data to the folder's name, which is the worse surprise on the home server.
