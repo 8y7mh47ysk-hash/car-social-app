@@ -561,6 +561,7 @@ Keep entries brief. Details belong in code comments and the build log.
   102 uses one) does not load `next.config.ts`, so the server check would move to
   `instrumentation.ts`. `server-only` is installed although Next.js handles the import itself, so
   that Vitest and Storybook can resolve it.
+- Superseded by: Web env: the server schema stays out of browser code, server values are read on use
 
 ### WEB_HOST and WEB_PORT stay shell variables
 
@@ -589,6 +590,7 @@ Keep entries brief. Details belong in code comments and the build log.
   a root `tooling` Vitest project for tests of repository-wide rules.
 - Trade-offs: a template with any other name (such as `.env.sample`) would be ignored. The test
   needs `git`, which every checkout and CI runner has.
+- Superseded by: Ignore env files named like postgres.env, and direnv's .envrc, too
 
 ### CI is one GitHub Actions job that runs the root scripts
 
@@ -965,3 +967,83 @@ Keep entries brief. Details belong in code comments and the build log.
 - Trade-offs: copies on one machine share one set of containers unless each sets the variable,
   which is easy to miss. The folder-name default would separate them automatically but would
   tie the data to the folder's name, which is the worse surprise on the home server.
+
+### parseEnv never passes on an error thrown inside a check
+
+- Date: 2026-10-11 · Instruction: #4 · Author: Bravo
+- Context: found in the wave w0 review of "Typed environment loader: one Zod helper in
+  packages/shared, one schema per app". Zod turns failed checks into issues, but an error thrown
+  inside a check or a transform passes straight through `safeParse`, and the API's entrypoint
+  rethrew it. Such errors can carry the value: `JSON.parse` and `BigInt` quote it in their
+  messages, and Node.js prints a URL error's `input` property when the process crashes. An env
+  schema that parsed JSON or a URL would have printed a secret after a typo.
+- Decision: `parseEnv` catches anything thrown while the schema runs and drops it. It then checks
+  the variables one at a time, names each one whose own schema throws ("its check threw an
+  error, which is not shown because it may contain the value"), or "(environment)" if only a
+  rule about several variables throws, and still reports every other problem in the same error.
+- Trade-offs: the thrown error's message and stack are lost, also when the cause is a plain bug
+  in a schema; reproduce it in a unit test of that schema. The one-at-a-time pass runs only after
+  something has thrown, so a normal start costs nothing extra.
+
+### Web env: the server schema stays out of browser code, server values are read on use
+
+- Date: 2026-10-11 · Instruction: #4 · Author: Bravo
+- Context: replaces "Web env: server-only and NEXT_PUBLIC_ variables apart, checked per Next.js
+  phase". Builds with temporary variables (Next.js 16.4) showed three faults in the wave w0
+  review. `public.ts` imported `schema.ts`, which also built the server schema, so a Client
+  Component that used `publicEnv` sent every server variable's name, rules and defaults (an
+  internal URL, for example) to the browser. `serverEnv` was parsed when its module loaded, and
+  `next build` loads every route's modules while it collects page data, so once any route
+  imported it, even one rendered only on request, a build without the server's secrets failed,
+  although that entry said such a build succeeds. And `validateWebEnv` merged the two schemas'
+  shapes, which drops a rule on a whole schema, so `next start` could start with values that the
+  app then rejected.
+- Decision: the rest of the design stands: two groups, `server-only` on `server.ts`, public
+  variables read by their literal names, and checks per phase in `next.config.ts`.
+  `public-schema.ts` (with the shared error wording) is the only env module that browser code
+  loads; `server-schema.ts` holds the server schema; `validate.ts` (formerly `schema.ts`) holds
+  `validateWebEnv`, which now checks each group with its own schema and reports both groups'
+  problems in one error. `server.ts` exports `getServerEnv()`, which validates `process.env` each
+  time it is called. Tests fail if browser code loads the server schema, if `server.ts` reads a
+  variable when it loads, if a rule about several variables is skipped, or if `next.config.ts`
+  stops running the check.
+- Trade-offs: three small modules instead of one. `server-schema.ts` cannot import `server-only`,
+  because `next.config.ts` loads it outside React Server Components, so only a comment and the
+  test keep browser code from importing it. `getServerEnv()` validates again on every call
+  (microseconds for a few variables) rather than caching, so there is no stale copy to reset. A
+  request that reads a missing variable fails, but `next dev` and `next start` refuse to start
+  without it in the first place; a page prerendered by `next build` that calls it still needs
+  the variable at build time.
+
+### Ignore env files named like postgres.env, and direnv's .envrc, too
+
+- Date: 2026-10-11 · Instruction: #4 · Author: Bravo
+- Context: replaces "Every .env file is ignored, and a test asks git to prove it", which kept the
+  rules `.env`, `.env.*` and `!.env.example` and said that every env file is ignored. Files for
+  `docker run --env-file` and Compose's `env_file:` are usually named like `postgres.env`, and
+  direnv reads `.envrc`; both usually hold secrets, and neither was ignored.
+- Decision: `.gitignore` also ignores `*.env` and `.envrc`, listed before `.env` so that the
+  older rules still decide for their own names. `env-files.test.ts` asks git about 22 env-file
+  names (five more) and the three templates, and fails if a file with any of these names other
+  than a template is committed. Defaults still live in the Zod schemas, and only the
+  `.env.example` templates are committed.
+- Trade-offs: no committed file can end in `.env`, and sharing a direnv `.envrc` would need a
+  negation rule. The test needs `git`, which every checkout and CI runner has.
+
+### The env lint rule also bans importing process
+
+- Date: 2026-10-11 · Instruction: #4 · Author: Bravo
+- Context: "Typed environment loader: one Zod helper in packages/shared, one schema per app"
+  enforces "only the env modules read `process.env`" with `no-restricted-properties`, and lists
+  `import { env } from "node:process"` as a route it misses. The wave w0 review found that
+  `pnpm lint` also accepted a namespace import, a default import under another name,
+  `globalThis.process` and `global.process`.
+- Decision: in `apps/*/src` and `packages/*/src`, outside the env modules, ESLint also rejects
+  importing `process` or `node:process` (`no-restricted-imports`) and reaching `process` through
+  `globalThis` or `global`; `process` is a global, so no code needs either. `env-access.test.ts`
+  asks ESLint which rules the repository's config gives such files and the env modules, and runs
+  them on every route. `eslint.config.mjs` joins the pre-commit hook's rerun triggers, following
+  "Files that tests read from disk also make the pre-commit hook run every test".
+- Trade-offs: code in those folders cannot import `process` for other uses either; the global
+  works the same. Config files, scripts and root-level tests are still not covered, and
+  `Reflect.get(process, "env")` still passes: the rule guards against mistakes, not intent.

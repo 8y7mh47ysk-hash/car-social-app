@@ -43,6 +43,10 @@ export class EnvValidationError extends Error {
   }
 }
 
+const THROWN = "its check threw an error, which is not shown because it may contain the value";
+const THROWN_BY_RULE =
+  "a rule about several variables threw an error, which is not shown because it may contain a value";
+
 /**
  * Validates environment variables against a Zod object schema and returns the typed result.
  *
@@ -51,7 +55,9 @@ export class EnvValidationError extends Error {
  *   the way `${NAME:-default}` behaves in a shell and in Docker Compose.
  * - Every problem is collected before throwing, so one run shows everything that needs fixing.
  * - Messages never include values. Zod leaves the input out of its issues and its default
- *   messages; custom messages in env schemas must not add it back.
+ *   messages; custom messages in env schemas must not add it back. An error thrown inside a
+ *   check or a transform (`JSON.parse` and `new URL` throw on bad input) is never passed on,
+ *   because it can quote the value; the variable is reported as one whose check threw.
  *
  * @throws {EnvValidationError} if a required variable is missing or any value is invalid.
  */
@@ -66,7 +72,46 @@ export function parseEnv<Schema extends z.ZodObject>(
     input.set(name, value === "" ? undefined : value);
   }
 
-  const result = schema.safeParse(Object.fromEntries(input));
+  /** One Zod issue about variable `name`; `onValue` is false for an issue about a part of it. */
+  const describe = (name: string, issue: z.core.$ZodIssue, onValue: boolean): EnvIssue => {
+    // Any check on the value itself fails when the variable is unset (the code depends on the
+    // schema: invalid_type, invalid_value for enums, invalid_union...), so say what is really
+    // wrong. Custom refinements keep their message: they explain rules such as "required when X
+    // is set".
+    if (input.get(name) === undefined && onValue && issue.code !== "custom") {
+      const problem = source[name] === "" ? "is required but empty" : "is required but not set";
+      return { variable: name, problem };
+    }
+    return { variable: name, problem: issue.message };
+  };
+
+  let result: z.ZodSafeParseResult<z.output<Schema>>;
+  try {
+    result = schema.safeParse(Object.fromEntries(input));
+  } catch {
+    // Zod reports failed checks as issues, but an error thrown inside a check or a transform
+    // passes straight through it, and such an error can carry the value: JSON.parse quotes it in
+    // its message, and Node.js prints a URL error's `input` property when the process crashes.
+    // So the error is dropped, and the variables are checked one at a time to name each one whose
+    // own schema throws and still report every other problem.
+    const issues: EnvIssue[] = [];
+    for (const [name, variableSchema] of Object.entries<z.ZodType>(schema.shape)) {
+      try {
+        const variableResult = z.safeParse(variableSchema, input.get(name));
+        for (const issue of variableResult.error?.issues ?? []) {
+          issues.push(describe(name, issue, issue.path.length === 0));
+        }
+      } catch {
+        issues.push({ variable: name, problem: THROWN });
+      }
+    }
+    if (!issues.some(({ problem }) => problem === THROWN)) {
+      // No variable's own schema throws, so a rule about several of them did.
+      issues.push({ variable: "(environment)", problem: THROWN_BY_RULE });
+    }
+    throw new EnvValidationError(options, issues);
+  }
+
   if (result.success) {
     return result.data;
   }
@@ -78,15 +123,7 @@ export function parseEnv<Schema extends z.ZodObject>(
         // A rule about how variables combine, rather than about one of them.
         return { variable: "(environment)", problem: issue.message };
       }
-      // Any check on the value itself fails when the variable is unset (the code depends on the
-      // schema: invalid_type, invalid_value for enums, invalid_union...), so say what is really
-      // wrong. Custom refinements keep their message: they explain rules such as "required
-      // when X is set".
-      if (input.get(name) === undefined && issue.path.length === 1 && issue.code !== "custom") {
-        const problem = source[name] === "" ? "is required but empty" : "is required but not set";
-        return { variable: name, problem };
-      }
-      return { variable: name, problem: issue.message };
+      return describe(name, issue, issue.path.length === 1);
     }),
   );
 }

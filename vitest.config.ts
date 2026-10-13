@@ -16,7 +16,7 @@ export default defineConfig({
       "infra/vitest.config.ts",
       "scripts/vitest.config.ts",
       // Tests for the repository's own tooling and rules (the git hooks, the .gitignore rules
-      // for env files), next to the files they test.
+      // for env files, the lint rules for process.env), next to the files they test.
       { test: { name: "tooling", include: ["*.test.ts"] } },
     ],
     // When a changed file matches one of these, `vitest related` (run by the pre-commit hook) and
@@ -34,12 +34,13 @@ export default defineConfig({
       `${root}.husky/*`,
       `${root}{commitlint,lint-staged}.config.*`,
       // Read from disk or through git by infra/compose.test.ts (the compose file and the root
-      // template), env-files.test.ts (the ignore rules and the templates) and
-      // scripts/ci-workflow.test.ts (the workflows).
+      // template), env-files.test.ts (the ignore rules and the templates),
+      // scripts/ci-workflow.test.ts (the workflows) and env-access.test.ts (the ESLint config).
       `${root}docker-compose.yml`,
       `${root}**/.env.example`,
       `${root}**/.gitignore`,
       `${root}.github/workflows/*`,
+      `${root}eslint.config.*`,
     ],
   },
 });

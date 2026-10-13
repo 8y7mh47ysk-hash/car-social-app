@@ -9,6 +9,9 @@ import tseslint from "typescript-eslint";
 // package is added (e.g. packages/ui), add its files here.
 const reactFiles = ["apps/web/**/*.{js,jsx,mjs,ts,tsx}"];
 
+const envModuleRule =
+  "Read environment variables through the app's env module (docs/DECISIONS.md).";
+
 export default defineConfig(
   globalIgnores([
     "**/.next/",
@@ -55,17 +58,27 @@ export default defineConfig(
 
   // Application code reads environment variables only through its app's env module, which
   // validates them with Zod: apps/api/src/server.ts and apps/web/src/env/ (instruction 4). Shared
-  // code never reads them, because it also runs in browsers.
+  // code never reads them, because it also runs in browsers. `process` is a global, so code never
+  // needs to import it or reach it through globalThis; banning those closes the routes to `env`
+  // that the property rule cannot see, such as `import { env } from "node:process"`.
+  // env-access.test.ts checks these rules.
   {
     files: ["apps/*/src/**", "packages/*/src/**"],
     ignores: ["apps/api/src/server.ts", "apps/web/src/env/public.ts", "apps/web/src/env/server.ts"],
     rules: {
       "no-restricted-properties": [
         "error",
+        { object: "process", property: "env", message: envModuleRule },
+        { object: "globalThis", property: "process", message: envModuleRule },
+        { object: "global", property: "process", message: envModuleRule },
+      ],
+      "no-restricted-imports": [
+        "error",
         {
-          object: "process",
-          property: "env",
-          message: "Read environment variables through the app's env module (docs/DECISIONS.md).",
+          paths: [
+            { name: "node:process", message: `Use the global process. ${envModuleRule}` },
+            { name: "process", message: `Use the global process. ${envModuleRule}` },
+          ],
         },
       ],
     },

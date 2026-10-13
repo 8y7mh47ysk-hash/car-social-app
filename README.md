@@ -121,10 +121,11 @@ it starts, the web app whenever Next.js starts or builds it. If a variable is mi
 the command stops and names every problem, without ever printing a value. Settings can also live
 in a gitignored `.env` file next to the app: copy the app's template to create one.
 
-| File            | Read by                                            | Template                |
-| --------------- | -------------------------------------------------- | ----------------------- |
-| `apps/api/.env` | The API, in `pnpm dev` and `pnpm start`            | `apps/api/.env.example` |
-| `apps/web/.env` | Next.js, in `pnpm dev`, `pnpm build`, `pnpm start` | `apps/web/.env.example` |
+| File            | Read by                                                       | Template                |
+| --------------- | ------------------------------------------------------------- | ----------------------- |
+| `.env`          | Docker Compose, for `docker-compose.yml` (see Local services) | `.env.example`          |
+| `apps/api/.env` | The API, in `pnpm dev` and `pnpm start`                       | `apps/api/.env.example` |
+| `apps/web/.env` | Next.js, in `pnpm dev`, `pnpm build`, `pnpm start`            | `apps/web/.env.example` |
 
 Variables set in the shell win over the files. `WEB_HOST` and `WEB_PORT` work only from the
 shell, because Next.js opens its port before it reads `.env` files. The templates explain each
@@ -173,8 +174,8 @@ are not checked.
   is TypeScript, JSON or a pnpm workspace file, and `vitest related` for the unit tests that
   import a staged file. Staging a `package.json`, a pnpm lockfile or workspace file, a tsconfig,
   a Vitest config or setup file, a git hook or its config, or a file that tests read instead of
-  importing (`docker-compose.yml`, an `.env.example` template, a `.gitignore` or a CI workflow)
-  runs every test instead. Deleted files count as staged, so deleting a module that is still
+  importing (`docker-compose.yml`, an `.env.example` template, a `.gitignore`, a CI workflow or
+  `eslint.config.mjs`) runs every test instead. Deleted files count as staged, so deleting a module that is still
   imported fails the type check. A failing step does not stop the others, so one run shows every
   problem.
 - **commit-msg** ([`.husky/commit-msg`](.husky/commit-msg)) checks the message with commitlint

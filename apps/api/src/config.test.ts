@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs";
+
 import { EnvValidationError } from "@apex/shared";
 import { describe, expect, it } from "vitest";
 
-import { loadConfig } from "./config.ts";
+import { apiEnvSchema, loadConfig } from "./config.ts";
 
 /** Runs loadConfig and returns the EnvValidationError it throws; fails if it throws nothing. */
 function configError(env: Readonly<Record<string, string>>): EnvValidationError {
@@ -115,5 +117,27 @@ describe("loadConfig", () => {
     expect(configError({ LOG_FORMAT: value }).issues).toEqual([
       { variable: "LOG_FORMAT", problem: "must be one of json, pretty" },
     ]);
+  });
+});
+
+describe("apps/api/.env.example", () => {
+  // NAME=value lines, set or commented out ("# NAME=value"); prose lines do not match.
+  const entries = [
+    ...readFileSync(new URL("../.env.example", import.meta.url), "utf8").matchAll(
+      /^(#\s*)?([A-Z][A-Z0-9_]*)=(.*)$/gm,
+    ),
+  ].map(([, commentedOut, name = "", value = ""]) => ({ commentedOut, name, value }));
+
+  it("documents every variable the API reads, and no other", () => {
+    expect(entries.map(({ name }) => name).sort()).toEqual(Object.keys(apiEnvSchema.shape).sort());
+  });
+
+  // The template's rule: a commented-out value is the default, so uncommenting it changes nothing.
+  it("shows each optional variable's default", () => {
+    for (const { commentedOut, name, value } of entries) {
+      if (commentedOut !== undefined) {
+        expect(loadConfig({ [name]: value }), name).toEqual(loadConfig({}));
+      }
+    }
   });
 });

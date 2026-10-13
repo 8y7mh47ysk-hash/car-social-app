@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = import.meta.dirname;
 
-/** Real env files, under the names Next.js, Node.js and Docker Compose read: all are ignored. */
+/** Real env files, under the names Next.js, Node.js, Docker and direnv read: all are ignored. */
 const ENV_FILES = [
   ".env",
   ".env.local",
@@ -30,6 +30,12 @@ const ENV_FILES = [
   "apps/web/.env.production.local",
   "infra/.env",
   "packages/shared/.env",
+  // Files for `docker run --env-file` and Compose's `env_file:`, and direnv's file.
+  "postgres.env",
+  "infra/postgres.env",
+  "apps/api/production.env",
+  ".envrc",
+  "apps/web/.envrc",
 ];
 
 /** The templates for the env files that Docker Compose, the API and the web app read. */
@@ -117,7 +123,9 @@ describe("env files in the repository", () => {
   });
 
   it("are never committed, apart from the templates", () => {
-    const committed = trackedPaths().filter((path) => /(?:^|\/)\.env(?:\.[^/]*)?$/.test(path));
+    const committed = trackedPaths().filter((path) =>
+      /(?:^|\/)(?:[^/]*\.env|\.env\.[^/]*|\.envrc)$/.test(path),
+    );
 
     expect(committed.filter((path) => !/(?:^|\/)\.env\.example$/.test(path))).toEqual([]);
   });
