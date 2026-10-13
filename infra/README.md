@@ -28,10 +28,12 @@ can be older (Debian 13's `docker.io` is version 26.1).
 ### First run
 
 ```sh
-cp .env.example .env    # then set POSTGRES_PASSWORD and REDIS_PASSWORD in .env
-openssl rand -hex 32    # prints a strong password; run it once for each
+cp .env.example .env && chmod 600 .env   # a copy only your user can read
+openssl rand -hex 32                     # prints a strong password; run it once for each
+                                         # and put them in .env as POSTGRES_PASSWORD and
+                                         # REDIS_PASSWORD
 docker compose up -d --wait
-docker compose ps       # postgres and redis both show "(healthy)"
+docker compose ps                        # postgres and redis both show "(healthy)"
 ```
 
 `up -d` starts only `postgres` and `redis`; `--wait` returns once both are healthy. Every
@@ -117,6 +119,9 @@ and once the API image has a health check, `web` should wait for `service_health
   network with no published ports.
 - Neither password has a default, and `.env` is gitignored. The official Redis image turns
   Redis's protected mode off, so the password is what keeps other clients out.
+- `chmod 600 .env` keeps other accounts on the machine from reading the passwords: a plain copy
+  is readable by every local user (on macOS every account is in the `staff` group, which can
+  open home folders).
 - The passwords are visible to anyone who can run `docker inspect` on this machine (Docker access
   is root-equivalent anyway). Instruction 104 moves them to Docker secrets or an encrypted file.
 - PostgreSQL runs with a superuser for now. A least-privilege role for the API belongs with the

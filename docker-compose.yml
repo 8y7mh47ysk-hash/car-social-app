@@ -1,9 +1,9 @@
 # Local services for Apex Garage (playbook instruction 3): PostgreSQL and Redis, plus placeholders
 # for the API and web apps. How to use it: infra/README.md. Trade-offs: docs/DECISIONS.md.
 #
-#   cp .env.example .env          # then set POSTGRES_PASSWORD and REDIS_PASSWORD in .env
-#   docker compose up -d --wait   # starts postgres and redis only; waits until both are healthy
-#   docker compose ps             # both show "(healthy)"
+#   cp .env.example .env && chmod 600 .env   # then set POSTGRES_PASSWORD and REDIS_PASSWORD
+#   docker compose up -d --wait              # starts postgres and redis only, waits until healthy
+#   docker compose ps                        # both show "(healthy)"
 #
 # Ports are published on 127.0.0.1 only, so other machines cannot reach these services. On Linux
 # that needs Docker Engine 28 or later: older engines let machines on the same network reach them.

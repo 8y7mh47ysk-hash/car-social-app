@@ -82,8 +82,8 @@ PostgreSQL (with pgvector) and Redis run in Docker, defined in
 [docker-compose.yml](docker-compose.yml):
 
 ```sh
-cp .env.example .env          # then set POSTGRES_PASSWORD and REDIS_PASSWORD (see the file)
-docker compose up -d --wait   # starts both and waits until they are healthy
+cp .env.example .env && chmod 600 .env   # then set both passwords in it (see the file)
+docker compose up -d --wait              # starts both and waits until they are healthy
 ```
 
 Both listen on 127.0.0.1 only (ports 5432 and 6379). Day-to-day commands, connection details and

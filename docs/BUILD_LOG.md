@@ -254,8 +254,8 @@ With Docker installed (see Owner actions; Docker is not installed on the build m
 were not run here):
 
 ```sh
-cp .env.example .env     # then set POSTGRES_PASSWORD and REDIS_PASSWORD; `openssl rand -hex 32`
-                         # prints a suitable value (run it once for each)
+cp .env.example .env && chmod 600 .env   # then set POSTGRES_PASSWORD and REDIS_PASSWORD;
+                         # `openssl rand -hex 32` prints a suitable value (run it once for each)
 docker compose config --quiet                     # no output, exit code 0
 docker compose config --services                  # postgres and redis only
 docker compose --profile app config --services    # postgres, redis, api and web
@@ -320,8 +320,8 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
 - Install Docker on the development Mac: Docker Desktop (free for personal use and for
   businesses with fewer than 250 employees and under $10 million revenue) or OrbStack (free for
   personal, non-commercial use; business use needs its paid Pro plan). Then run
-  `cp .env.example .env`, set both passwords, run `docker compose up -d --wait` (or the
-  `docker:up` script once instruction 7 adds it) and check that `docker compose ps` shows both
+  `cp .env.example .env && chmod 600 .env`, set both passwords, run `docker compose up -d --wait`
+  (or `pnpm docker:up`, from instruction 7) and check that `docker compose ps` shows both
   services healthy. The commands under "How to verify" check the rest.
 - Confirm the Redis licence choice: Redis 8 under its AGPLv3 option, used unmodified, or switch
   to Valkey (BSD-3-Clause), which is a one-line image change. The reasoning is in
