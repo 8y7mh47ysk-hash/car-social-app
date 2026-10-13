@@ -1,20 +1,21 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { delimiter, dirname, join } from "node:path";
+import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, delimiter, dirname, join } from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { healthResponseSchema } from "@apex/shared";
-import { beforeAll, describe, expect, it, onTestFinished } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import { z } from "zod";
 
 // The production path: `pnpm build` compiles packages/shared and the API to their dist/ folders,
 // and `pnpm start` runs the compiled API, which loads packages/shared's compiled code through the
-// "@apex/dist" export condition (docs/DECISIONS.md). These tests run both packages' build scripts,
-// which replace their dist/ folders as `pnpm build` does, and then the API's start script.
+// "@apex/dist" export condition (docs/DECISIONS.md). These tests copy both packages to a temporary
+// folder, run their build scripts there and then the API's start script. They never touch this
+// checkout's dist/ folders, which a `pnpm build` or `pnpm start` running meanwhile may be using.
 
-const apiRoot = fileURLToPath(new URL("..", import.meta.url));
-const sharedRoot = fileURLToPath(new URL("../../../packages/shared/", import.meta.url));
+const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
 const packageScripts = z.object({ scripts: z.record(z.string(), z.string()) });
 
@@ -28,6 +29,47 @@ async function script(root: string, name: string): Promise<string> {
     throw new Error(`${join(root, "package.json")} has no "${name}" script`);
   }
   return command;
+}
+
+/**
+ * Whether a file or folder of a package belongs in the copy: everything except installed
+ * dependencies, build output and local .env settings, as in a fresh checkout.
+ */
+function isCheckedIn(path: string): boolean {
+  const name = basename(path);
+  return (
+    !["node_modules", "dist"].includes(name) &&
+    (!name.startsWith(".env") || name === ".env.example")
+  );
+}
+
+/**
+ * Copies packages/shared and apps/api, and the base tsconfig they extend, into `dir` with the
+ * repository's layout. Each copy uses this checkout's installed dependencies, except that the
+ * API's @apex/shared is the copy of packages/shared.
+ */
+async function copyPackages(dir: string): Promise<{ sharedRoot: string; apiRoot: string }> {
+  const sharedRoot = join(dir, "packages", "shared");
+  const apiRoot = join(dir, "apps", "api");
+  await cp(join(repoRoot, "tsconfig.base.json"), join(dir, "tsconfig.base.json"));
+  for (const root of [sharedRoot, apiRoot]) {
+    const source = join(repoRoot, root.slice(dir.length + 1));
+    await cp(source, root, { recursive: true, filter: isCheckedIn });
+  }
+  await symlink(
+    join(repoRoot, "packages", "shared", "node_modules"),
+    join(sharedRoot, "node_modules"),
+  );
+  const apiModules = join(repoRoot, "apps", "api", "node_modules");
+  for (const name of await readdir(apiModules)) {
+    if (name !== "@apex") {
+      await mkdir(join(apiRoot, "node_modules"), { recursive: true });
+      await symlink(join(apiModules, name), join(apiRoot, "node_modules", name));
+    }
+  }
+  await mkdir(join(apiRoot, "node_modules", "@apex"), { recursive: true });
+  await symlink(sharedRoot, join(apiRoot, "node_modules", "@apex", "shared"));
+  return { sharedRoot, apiRoot };
 }
 
 interface Exit {
@@ -82,12 +124,11 @@ async function build(root: string): Promise<void> {
 }
 
 /**
- * Starts the API with `command` as its start script, on a port picked by the OS. `exec` makes
- * Node.js replace the shell, so signals reach it directly. Every variable the API reads is set
- * here, so apps/api/.env, which the start script loads, cannot change the result. The process
- * is killed when the test ends, even if the test failed.
+ * Starts the API in `apiRoot` with `command` as its start script, on a port picked by the OS.
+ * `exec` makes Node.js replace the shell, so signals reach it directly. Every variable the API
+ * reads is set here. The process is killed when the test ends, even if the test failed.
  */
-function startApi(command: string): ScriptProcess {
+function startApi(apiRoot: string, command: string): ScriptProcess {
   const api = runScript(apiRoot, `exec ${command}`, {
     API_HOST: "127.0.0.1",
     API_PORT: "0",
@@ -125,14 +166,24 @@ function listening(api: ScriptProcess): Promise<URL | undefined> {
 }
 
 describe("the production build of the API", { timeout: 30_000 }, () => {
+  let dir = "";
+  let apiRoot = "";
+
   // packages/shared first: the API's compiled code loads its dist/ output.
   beforeAll(async () => {
-    await build(sharedRoot);
-    await build(apiRoot);
+    dir = await realpath(await mkdtemp(join(tmpdir(), "apex-production-")));
+    const copies = await copyPackages(dir);
+    apiRoot = copies.apiRoot;
+    await build(copies.sharedRoot);
+    await build(copies.apiRoot);
   }, 120_000);
 
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
   it("serves the health contract from compiled code, then shuts down cleanly", async () => {
-    const api = startApi(await script(apiRoot, "start"));
+    const api = startApi(apiRoot, await script(apiRoot, "start"));
     const url = await listening(api);
     expect(url, api.output()).toBeDefined();
 
@@ -153,7 +204,7 @@ describe("the production build of the API", { timeout: 30_000 }, () => {
     const withoutCondition = start.replace(" --conditions=@apex/dist", "");
     expect(withoutCondition).not.toBe(start);
 
-    const api = startApi(withoutCondition);
+    const api = startApi(apiRoot, withoutCondition);
 
     expect(await listening(api)).toBeUndefined();
     expect(await api.exited).toEqual({ code: 1, signal: null });
