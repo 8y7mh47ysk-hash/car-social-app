@@ -5,12 +5,27 @@
 import "server-only";
 
 import { parseEnv } from "@apex/shared";
+import type { z } from "zod";
 
 import { webEnvMessages } from "./public-schema";
 import { serverEnvSchema } from "./server-schema";
 
+/** The web server's settings. */
+export type ServerEnv = z.output<typeof serverEnvSchema>;
+
 /**
- * The web server's settings, validated. Server Components, Route Handlers and Server Actions read
- * environment variables only through this.
+ * Returns the web server's settings, validated. Server Components, Route Handlers and Server
+ * Actions read environment variables only through this.
+ *
+ * It reads them when it is called, not when this module loads: `next build` loads the modules of
+ * every route while it collects page data, so reading them on load would make every build need
+ * the server's secrets, even for routes that only run on request. A page that `next build`
+ * prerenders and that calls this still needs them at build time. `next dev` and `next start`
+ * check these variables as they start (see next.config.ts), so a missing one stops the server
+ * before it serves a request.
+ *
+ * @throws {EnvValidationError} if a variable is missing or invalid; it never shows a value.
  */
-export const serverEnv = parseEnv(serverEnvSchema, process.env, webEnvMessages);
+export function getServerEnv(): ServerEnv {
+  return parseEnv(serverEnvSchema, process.env, webEnvMessages);
+}

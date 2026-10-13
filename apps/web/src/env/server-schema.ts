@@ -2,8 +2,8 @@ import { z } from "zod";
 
 /**
  * Variables that only the web server reads, such as secrets and internal URLs. Their names must
- * not start with NEXT_PUBLIC_. Code reads them through `serverEnv` (./server.ts), which a Client
- * Component cannot import.
+ * not start with NEXT_PUBLIC_. Code reads them through `getServerEnv()` (./server.ts), which a
+ * Client Component cannot import.
  *
  * The schema itself (names, rules and defaults) must not reach the browser either, so only
  * ./server.ts and ./validate.ts may import this module. It cannot import "server-only" to enforce
