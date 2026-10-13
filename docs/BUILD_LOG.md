@@ -523,7 +523,7 @@ from the repository root:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm exec vitest run --project scripts            # "Test Files  4 passed (4)", "Tests  53 passed (53)"
+pnpm exec vitest run --project scripts            # "Test Files  4 passed (4)", "Tests  59 passed (59)"
 pnpm peers check                                  # "No peer dependency issues found"
 pnpm build 2>&1 | tee build.log                   # the route table, then "Done"
 node scripts/check-build-warnings.ts build.log    # "Found no warning or error lines ...", status 0
@@ -620,6 +620,36 @@ in `docs/DEPENDENCIES.md`.
   fail, so the checks cannot pass quietly. `engines` still allows 24.0 (see docs/DECISIONS.md).
 - The action SHAs do not update themselves; Dependabot arrives with instruction 106.
 
+**Review fixes (wave w0, round 1)**
+
+Charlie reviewed instructions 5 and 7, took them over from Delta and re-checked them by running
+them: every "How to verify" step above in a fresh clone; a simulation of every `run:` step of
+`ci.yml` on a fresh clone of the review branch, with Compose 5.1.3 (the runner's version), in
+which every step passed (441 tests); actionlint 1.7.12 with shellcheck 0.11.0 and zizmor 1.30.1,
+all checksum-verified, without findings; every action SHA against the GitHub API (each is its
+latest release and on its default branch); and 26 deliberate breakages of the workflow and the
+scripts, each failing a test. Fixes, each with a test where it changed code or a test:
+
+- No test held the workflow's set-up or its step conditions. Renaming a step id (GitHub then
+  reads `steps.<id>` as empty and skips every check that names it, while the job passes),
+  misspelling `'success'`, removing `cache: pnpm`, the `.nvmrc` input or `cancel-in-progress`,
+  setting up Node.js before pnpm, dropping `2>&1` from the Build step and removing the Compose
+  step's passwords all left the tests green; `scripts/ci-workflow.test.ts` now fails on each.
+- The build-log check said "The build printed no warnings or errors." even when a page had
+  logged plain text with `console.error` while it was prerendered, which Next.js prints bare
+  (seen in a probe build). It now says "Found no warning or error lines in the build output.",
+  and docs/DECISIONS.md lists `console.error` among what the check cannot see; a test with the
+  probe build's output pins that limit.
+- The set-up test rejected Corepack's integrity hash in `packageManager`
+  (`pnpm@12.11.2+sha512.<hex>`), which pnpm/action-setup accepts. It now allows it.
+- Owner actions: a ruleset on a private repository is enforced only on a paid GitHub plan.
+- Docs: the README said that CI "runs the full checks either way" when hooks are skipped, but CI
+  does not check commit messages ("CI does not check commit messages" in docs/DECISIONS.md); the
+  README's prerequisites now name Node.js 24.2, which `scripts/` needs; docs/DECISIONS.md said
+  that pinning `ubuntu-26.04` keeps the runner image fixed, but GitHub updates its software
+  weekly; and the decision on "fail on any warning" pointed here for provoking real build output,
+  which "How to verify" now shows.
+
 ## #6 - Architecture and decision docs
 
 **What changed**
@@ -688,8 +718,9 @@ instructions make; nothing needs deciding now.
 
 - Root `package.json` scripts, next to `dev`, `build`, `test` and the others:
   - `docker:up` (`docker compose up --detach --wait`: starts PostgreSQL and Redis and returns
-    once both are healthy), `docker:down` (removes the containers and keeps the data volumes)
-    and `docker:logs` (follows the logs; `pnpm docker:logs postgres` for one service).
+    once both are healthy), `docker:down` (`docker compose --profile '*' down`: removes the
+    containers of every profile, the app placeholders too, and keeps the data volumes) and
+    `docker:logs` (follows the logs; `pnpm docker:logs postgres` for one service).
   - `db:migrate` and `db:seed`: placeholders that print "not available yet" and exit with status
     1 until instruction 26 adds migrations and seed data.
 - `scripts/check-docker.ts` runs before each `docker:*` script. It explains what to do when
@@ -707,7 +738,7 @@ instructions make; nothing needs deciding now.
 pnpm run                              # lists db:migrate, db:seed, docker:up, docker:down, docker:logs
 pnpm db:migrate; echo "status $?"     # db:migrate: not available yet. ... instruction 26. ... status 1
 pnpm db:seed; echo "status $?"        # db:seed: not available yet. ... instruction 26. ... status 1
-pnpm exec vitest run --project scripts  # "Tests  53 passed (53)"
+pnpm exec vitest run --project scripts  # "Tests  59 passed (59)"
 ```
 
 Without Docker, `pnpm docker:up` prints "Docker is not installed, or the `docker` command is not
@@ -737,14 +768,43 @@ the Compose plugin (Linux), as instruction 3 describes. Nothing else.
 
 **Notes & limitations**
 
-- The `docker:*` scripts have not been run against a real Docker engine: this machine has no
-  Docker. The tests use a stand-in `docker` command, and CI validates the Compose file.
+- This machine has no Docker, so the tests use a stand-in `docker` command, and CI validates the
+  Compose file. The review then ran the scripts against a real engine in a Linux VM (see "Review
+  fixes (wave w0, round 1)"); they have not yet run under Docker Desktop or OrbStack.
 - `db:migrate` and `db:seed` fail on purpose until instruction 26 replaces them.
 - The scripts need a POSIX shell, like the existing ones. The tests pass with `/bin/sh` as bash
   (macOS) and as dash (as on Ubuntu, checked with macOS's `/bin/dash`).
-- The Docker check costs each `docker:*` command about 0.05 seconds for Node.js and the check
-  (measured with a stand-in `docker`), plus whatever its two `docker` commands take, which could
-  not be measured here.
+- The Docker check costs each `docker:*` command about 0.05 seconds: measured with a stand-in
+  `docker` on the Mac, and with both `docker` commands against a running engine in the VM.
+
+**Review fixes (wave w0, round 1)**
+
+Charlie took this instruction over with instruction 5 (see there). One fix: `docker:down` ran a
+plain `docker compose down`, which handles only the services outside a profile, so after
+`docker compose --profile app up` it left both placeholders behind and removed their network, and
+the next `docker compose --profile app up` failed with "network ... not found" (seen in a Linux
+VM by the review of instruction 3). It now runs `docker compose --profile '*' down`; a test fails
+if the profile is dropped or the shell expands the asterisk.
+
+The scripts then ran against a real engine, in a throwaway Debian 13 VM (Lima 2.2.1, Docker
+Engine 29.9.0, Compose 5.6.0, Node.js 24.21.0 and pnpm 12.11.2, all checksum-verified), as a
+developer runs them:
+
+- A user who could not reach the Docker socket got the "engine is not running, or this user
+  cannot reach it" message, and so did everyone once the engine was stopped; with the Compose
+  plugin moved away, or no `docker` on `PATH`, the scripts printed the message for that case.
+  Each exited with status 1 without starting Compose.
+- Without the root `.env`, `pnpm docker:up` stopped with Compose's message naming both passwords.
+  With it, `pnpm docker:up` returned once both services were healthy: 15 s with the image pulls,
+  0.6 s when they were already running.
+- `pnpm docker:logs redis` showed only Redis's log and ended on Ctrl+C (SIGINT to the process
+  group), with no Compose process left.
+- After the placeholders had run, `pnpm docker:down` removed them, both services and the network
+  and kept both volumes; `docker compose --profile app up api` then worked, and a Redis value
+  written before `pnpm docker:down` was there after the next `pnpm docker:up`.
+- In a checkout without `node_modules`, pnpm 12 installs the dependencies before it runs any
+  script (its default `verifyDepsBeforeRun: install`), so the first `pnpm docker:up` there ran
+  an install first.
 
 ## #8 - Structured logging with request IDs
 
