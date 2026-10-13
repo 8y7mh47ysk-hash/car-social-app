@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node --env-file-if-exists=.env --watch --watch-preserve-output src/server.ts",
     "build": "rm -rf dist && tsc --project tsconfig.build.json",
-    "start": "node --env-file-if-exists=.env --conditions=@apex/dist --enable-source-maps dist/server.js",
+    "start": "node --env-file-if-exists=.env --conditions=@apex/dist --no-experimental-strip-types --enable-source-maps dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

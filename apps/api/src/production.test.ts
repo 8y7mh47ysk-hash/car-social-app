@@ -144,4 +144,20 @@ describe("the production build of the API", { timeout: 30_000 }, () => {
     expect(await api.exited).toEqual({ code: 0, signal: null });
     expect(api.output()).toContain('"msg":"shutting down"');
   });
+
+  // Without the condition, Node.js would resolve packages/shared's default export, its
+  // TypeScript source, and strip the types: the API would start, and nobody would notice. The
+  // start script turns type stripping off, so it fails instead.
+  it("refuses to run TypeScript source when the export condition is missing", async () => {
+    const start = await script(apiRoot, "start");
+    const withoutCondition = start.replace(" --conditions=@apex/dist", "");
+    expect(withoutCondition).not.toBe(start);
+
+    const api = startApi(withoutCondition);
+
+    expect(await listening(api)).toBeUndefined();
+    expect(await api.exited).toEqual({ code: 1, signal: null });
+    expect(api.output()).toContain("ERR_UNKNOWN_FILE_EXTENSION");
+    expect(api.output()).toContain(join("packages", "shared", "src", "index.ts"));
+  });
 });
