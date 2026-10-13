@@ -912,3 +912,22 @@ Keep entries brief. Details belong in code comments and the build log.
   of `process.env`. The merge adds `LOG_FORMAT` to the loader's schema, `ApiConfig` and
   `apps/api/.env.example`, and the entrypoint calls
   `buildApp({ logLevel: config.logLevel, logFormat: config.logFormat })`.
+
+### Files that tests read from disk also make the pre-commit hook run every test
+
+- Date: 2026-10-11 · Instruction: #2, #3, #4, #5 · Author: Integrator (wave w0)
+- Context: the pre-commit hook (instruction 2) runs `vitest related`, which picks tests by their
+  imports. The tests for `docker-compose.yml` and the root `.env.example` (instruction 3), for the
+  env-file ignore rules and templates (instruction 4) and for the CI workflows (instruction 5)
+  read those files from disk or ask git about them, so after the merge a commit that changed only
+  one of them ran no tests. The build log entries for instructions 3 and 5 asked for these files
+  to become rerun triggers once the branches were merged.
+- Decision: the root `vitest.config.ts` adds `docker-compose.yml`, every `.env.example`, every
+  `.gitignore` and `.github/workflows/*` to `forceRerunTriggers`, after the triggers chosen in
+  "Related unit tests in the pre-commit hook, with absolute rerun triggers". `git-hooks.test.ts`
+  checks each one.
+- Trade-offs: staging one of these files runs every test instead of only the tests that read it.
+  Vitest has no setting that maps a file to particular tests, and a lint-staged task per file
+  would be a second list to keep in step with the tests; these files change rarely. Tests that
+  start code in a child process are still not picked by that code (`server.test.ts` and
+  `src/server.ts`); CI runs every test.

@@ -171,9 +171,11 @@ are not checked.
   commit; any ESLint warning fails), `pnpm typecheck` for the whole repository when a staged file
   is TypeScript, JSON or a pnpm workspace file, and `vitest related` for the unit tests that
   import a staged file. Staging a `package.json`, a pnpm lockfile or workspace file, a tsconfig,
-  a Vitest config or setup file, or a git hook or its config runs every test instead. Deleted
-  files count as staged, so deleting a module that is still imported fails the type check. A
-  failing step does not stop the others, so one run shows every problem.
+  a Vitest config or setup file, a git hook or its config, or a file that tests read instead of
+  importing (`docker-compose.yml`, an `.env.example` template, a `.gitignore` or a CI workflow)
+  runs every test instead. Deleted files count as staged, so deleting a module that is still
+  imported fails the type check. A failing step does not stop the others, so one run shows every
+  problem.
 - **commit-msg** ([`.husky/commit-msg`](.husky/commit-msg)) checks the message with commitlint
   (see "Commit messages").
 

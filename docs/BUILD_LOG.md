@@ -106,12 +106,14 @@ None for this instruction.
   `Co-Authored-By:` trailer passes when it has a paragraph of its own).
 - Root `vitest.config.ts`: a `tooling` project for tests at the repository root, and
   `forceRerunTriggers` so that staging dependency, tsconfig, Vitest, hook or hook-config files
-  runs every test.
-- `git-hooks.test.ts` (48 tests): 27 commit messages through the real commit-msg hook and
+  runs every test. Since Phase 0 was merged, so does staging a file that other instructions'
+  tests read instead of importing: `docker-compose.yml`, an `.env.example` template, a
+  `.gitignore` or a CI workflow.
+- `git-hooks.test.ts` (54 tests): 28 commit messages through the real commit-msg hook and
   commitlint config; 10 pre-commit scenarios that run the real lint-staged with this
   repository's config in scratch git repositories, with stand-ins for ESLint, Prettier, pnpm and
   Vitest that record their calls (order, files, hiding and restoring, deleted files, fixes being
-  staged, a failure in each tool); and 11 runs of the real `vitest related` in this checkout,
+  staged, a failure in each tool); and 16 runs of the real `vitest related` in this checkout,
   which check that staging a rerun-trigger file runs every test and an unrelated file runs none.
 - README: "Git hooks" and "Commit messages" sections and a `.husky/` line in the layout.
 
@@ -122,7 +124,7 @@ Run from the repository root:
 ```sh
 pnpm install --frozen-lockfile          # a fresh install prints ". prepare$ husky"
 git config --get core.hooksPath         # prints .husky/_
-pnpm exec vitest run --project tooling  # "Tests  48 passed (48)"
+pnpm exec vitest run git-hooks.test.ts  # "Tests  54 passed (54)"
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
@@ -330,8 +332,8 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
   throwaway values: `POSTGRES_PASSWORD=ci REDIS_PASSWORD=ci docker compose config --quiet`.
 - The tests read `docker-compose.yml` and `.env.example` from disk, so `vitest related` (used by
   the pre-commit hook from instruction 2) cannot connect a change to those files with
-  `infra/compose.test.ts`; they need to be listed in the root Vitest config's
-  `forceRerunTriggers` once that config exists. `pnpm test` and CI always run them.
+  `infra/compose.test.ts`. Since Phase 0 was merged, both are in the root Vitest config's
+  `forceRerunTriggers`, so staging either one runs every test. `pnpm test` and CI always run them.
 - `POSTGRES_PASSWORD`, `POSTGRES_USER` and `POSTGRES_DB` apply only when the data volume is
   first created; `infra/README.md` explains how to change the password later.
 - The passwords are visible through `docker inspect` (instruction 104 moves them to Docker
@@ -588,11 +590,10 @@ in `docs/DEPENDENCIES.md`.
   lists the formats). It cannot see a plain `console.warn` that runs while Next.js prerenders a
   page: Next.js prints the bare message (tested). Console output from passing tests is not checked
   either.
-- After Alpha's git hooks (instruction 2) are merged, a commit that changes only
-  `.github/workflows/ci.yml` runs no tests in the pre-commit hook ("No test files found"), because
-  `vitest related` cannot see that `scripts/ci-workflow.test.ts` reads the workflow. Adding
-  `` `${root}.github/workflows/*` `` to `forceRerunTriggers` in `vitest.config.ts` makes such a
-  commit run every test (checked on a trial merge: 262 tests). CI runs them either way.
+- `vitest related`, which the pre-commit hook (instruction 2) runs, cannot see that
+  `scripts/ci-workflow.test.ts` reads the workflows. Since Phase 0 was merged,
+  `` `${root}.github/workflows/*` `` is in `forceRerunTriggers` in `vitest.config.ts`, so a commit
+  that changes only a workflow runs every test. CI runs them either way.
 - `scripts/check-build-warnings.ts` and `scripts/check-docker.ts` need Node.js 24.2 or later
   (`import.meta.main`). CI and `.nvmrc` install the latest Node.js 24; on an older one the tests
   fail, so the checks cannot pass quietly. `engines` still allows 24.0 (see docs/DECISIONS.md).
