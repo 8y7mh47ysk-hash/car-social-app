@@ -501,7 +501,7 @@ Bravo reviewed this instruction with a security focus, took it over and re-check
 it: every "How to verify" step above (on ports 3020 and 4020), `pnpm build`, hostile values
 (values that make a schema's own code throw, and 1 MB values, which the port and host checks
 reject in under 3 ms), and real `next build`, `next start` and `next dev` runs with temporary
-variables, removed afterwards. Each fix has a test that fails without it:
+variables, removed afterwards. Each code fix has a test that fails without it:
 
 - `parseEnv` passed on any error thrown inside a check or a transform, and the API's entrypoint
   rethrew it. `JSON.parse` and `BigInt` quote the value in their messages, and Node.js prints a
