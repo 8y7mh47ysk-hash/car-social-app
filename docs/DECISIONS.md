@@ -931,3 +931,21 @@ Keep entries brief. Details belong in code comments and the build log.
   would be a second list to keep in step with the tests; these files change rarely. Tests that
   start code in a child process are still not picked by that code (`server.test.ts` and
   `src/server.ts`); CI runs every test.
+
+### docker:down removes the containers of every Compose profile
+
+- Date: 2026-10-11 · Instruction: #7 · Author: Charlie
+- Context: `docker:down` ran a plain `docker compose down`, which handles only the services outside
+  a profile. Compose 5.1.3's `down` removes the containers of the active services, does not count
+  the services of other profiles as orphans, and then removes the project's network; Docker's
+  profiles documentation says the same. After `docker compose --profile app up`, it left both
+  exited placeholders behind, attached to a network that no longer existed, and the next
+  `docker compose --profile app up` failed with "network ... not found" (seen in a Linux VM by the
+  wave w0 review of instruction 3).
+- Decision: `docker:down` runs `docker compose --profile '*' down`. With every profile active,
+  Compose removes every container of the project and then its network; the data volumes stay, as
+  before. `docker:up` and `docker:logs` keep no profile, so `docker:up` still starts only
+  PostgreSQL and Redis. The asterisk is quoted, so the shell passes it to Compose as it is.
+- Trade-offs: a service that a later instruction puts in a profile of its own is also removed by
+  `docker:down`, which is what "down" should mean for this project's local services. Compose has
+  understood `*` as "every profile" since version 2.0.

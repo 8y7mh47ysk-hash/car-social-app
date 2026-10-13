@@ -103,7 +103,7 @@ Run these from the repository root.
 | `pnpm format`                   | Formats all files with Prettier.                                        |
 | `pnpm format:check`             | Checks formatting without changing files.                               |
 | `pnpm docker:up`                | Starts PostgreSQL and Redis in Docker and waits until both are healthy. |
-| `pnpm docker:down`              | Stops and removes those containers; their data volumes are kept.        |
+| `pnpm docker:down`              | Removes the containers (app placeholders too); keeps the data volumes.  |
 | `pnpm docker:logs`              | Follows their logs (`pnpm docker:logs postgres` for one); Ctrl+C stops. |
 | `pnpm db:migrate`               | Not available yet (instruction 26): prints a notice and fails.          |
 | `pnpm db:seed`                  | Not available yet (instruction 26): prints a notice and fails.          |
