@@ -678,9 +678,12 @@ Delta reviewed this instruction and changed:
   exists to keep out. `pnpm dlx` (above) applies that hold and runs only Puppeteer's install
   script; it rendered all six diagrams. The decisions log records the change.
 - `docs/ARCHITECTURE.md`: no longer claims built route validation (#28 adds it), styled borders
-  in sequence diagrams, an installable PWA or logs with "no secrets"; Cloudflare in the
-  home-server diagram is labelled planned; the observability section adds the crash logging and
-  the rules of instruction 8's review (see below).
+  in sequence diagrams, an installable PWA (the web app's node now says "PWA planned #64"), logs
+  with "no secrets", or that every log line is structured and carries a request ID (the web
+  app's server output is plain text, and only lines logged during a request carry an ID);
+  Cloudflare in the home-server diagram is labelled planned; the observability section adds the
+  crash logging and the rules of instruction 8's review (see below). All six diagrams still
+  render with the command above.
 - `README.md`: the repository layout lists the architecture document.
 
 ## #7 - Developer scripts
@@ -866,14 +869,19 @@ Delta reviewed this instruction and changed:
 - Crashes: Node.js printed an uncaught exception or unhandled promise rejection as plain text,
   unredacted (a connection URL's password in full) and without the request ID. The entrypoint
   now logs it at fatal level through the logger, as one redacted JSON line that carries the ID
-  of the request whose code failed (checked with a route that throws in a timer and one that
-  leaves a rejection unhandled), then exits with code 1 as before.
+  of the request whose code failed, then exits with code 1 as before. Two entrypoint tests check
+  this with a route that leaves a timer behind, which throws or leaves a promise rejection
+  unhandled after the response has gone.
 - `LOG_FORMAT=pretty` without pino-pretty (a production install) crashed with an uncaught
   exception and two stack traces around the message. The API now prints only the message, which
   says to use `LOG_FORMAT=json`, and exits with code 1.
 - Redaction also hides `cf-access-jwt-assertion` (the JWT Cloudflare Access adds to admin
   requests, #190), `x-hub-signature-256` (Meta's webhooks, #150; `stripe-signature` already was),
   Node.js's `rawHeaders` list, `pass`, `pwd`, `code_verifier` (#43) and `_csrf`.
+- The docs named two responses without `x-request-id`, one of them "the bare 400 that Node.js
+  sends". Fastify writes that 400 itself, and also a 431 for headers over 16 KB (a very long URL
+  is enough) and a 408 for headers that arrive too slowly. The notes above, `docs/ARCHITECTURE.md`
+  and the request ID decision now list them all.
 - Written down, in the code and in `docs/ARCHITECTURE.md` ("Observability"), for the
   instructions that will need it:
   - a timer, socket or connection created while a request is handled keeps that request's

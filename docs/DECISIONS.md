@@ -963,10 +963,10 @@ Keep entries brief. Details belong in code comments and the build log.
 - Decision: `apps/api/src/server.ts` handles `uncaughtException`, which Node.js also emits for an
   unhandled rejection (its default `--unhandled-rejections=throw`). The handler logs
   `{ err, origin }` at fatal level through `app.log`, then calls `process.exit(1)`. It runs in
-  the failing code's async context, so the line carries the ID of the request whose code failed
-  (checked with a timer that throws and a rejection left unhandled, both inside a route). It is
-  installed once the app is built; earlier failures, such as invalid settings, keep their own
-  messages.
+  the failing code's async context, so the line carries the ID of the request whose code failed;
+  the entrypoint tests check this with a timer, left behind by a route, that throws or leaves a
+  rejection unhandled. It is installed once the app is built; earlier failures, such as invalid
+  settings, keep their own messages.
 - Trade-offs: `uncaughtExceptionMonitor` would log without taking over, but Node.js would still
   print its unredacted report. Exiting at once, without closing the server, follows Node.js's
   advice that the process is in an unknown state; requests in flight are cut off, as they were
