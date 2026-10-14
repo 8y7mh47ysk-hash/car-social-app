@@ -6,4 +6,15 @@
 #                         every check
 #   --concurrent false    the tasks run one at a time, in the config's order: fixers before checks
 #   --continue-on-error   a failing task does not stop the others, so one run shows every problem
-lint-staged --hide-all --diff-filter=ACMRD --concurrent false --continue-on-error
+#
+# `git commit` also finishes a merge that stopped, for conflicts or because pre-merge-commit failed.
+# While a merge is in progress (MERGE_HEAD exists), lint-staged on its own checks only the staged
+# files that also differ from the merged branch, in effect the files both sides changed, so the
+# rest of what the merge brings in would go unchecked. There, --diff=--staged makes it check every
+# staged file, as for any other commit, and --stash turns back on the backup that --diff turns off;
+# --hide-all needs that backup to set files aside and to restore everything after a failed check.
+set --
+if git rev-parse --quiet --verify MERGE_HEAD > /dev/null; then
+  set -- --diff=--staged --stash
+fi
+lint-staged --hide-all --diff-filter=ACMRD --concurrent false --continue-on-error "$@"

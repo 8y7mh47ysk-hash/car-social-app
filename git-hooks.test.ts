@@ -252,6 +252,11 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
      * stand-in that fails.
      */
     readonly merge: (branch: string, options?: { fail?: string }) => Promise<Result>;
+    /**
+     * Runs `git commit --no-edit`, which finishes a merge that stopped, and returns its result.
+     * The options name a stand-in that fails.
+     */
+    readonly finishMerge: (options?: { fail?: string }) => Promise<Result>;
     /** The stand-ins' log lines, with paths relative to the repository. */
     readonly calls: () => Promise<string[]>;
     /** `git status --porcelain` as lines. */
@@ -348,6 +353,8 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       },
       merge: (branch, { fail = "" } = {}) =>
         run("git", ["merge", "--no-ff", "--no-edit", branch], root, { ...env, STUB_FAIL: fail }),
+      finishMerge: ({ fail = "" } = {}) =>
+        run("git", ["commit", "--no-edit"], root, { ...env, STUB_FAIL: fail }),
       calls: async () =>
         (await readFile(log, "utf8").catch(() => ""))
           .replaceAll(`${root}/`, "")
@@ -483,24 +490,28 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
     },
   );
 
+  /**
+   * Prepares a merge of a branch "feature", which changes src/util.ts, into main, which gets
+   * another commit that changes README.md. With `conflict`, the branch changes README.md too, so
+   * the merge stops there. Then installs the hooks, so git runs them for the merge.
+   */
+  async function prepareMerge({ conflict = false } = {}): Promise<Repo> {
+    const repo = await createRepo();
+    await repo.git("switch", "--quiet", "--create", "feature");
+    await repo.write("src/util.ts", "export const util = 2;\n");
+    if (conflict) {
+      await repo.write("README.md", "# Test\n\nFrom the feature.\n");
+    }
+    await repo.git("commit", "--quiet", "--all", "--message", "feat: change util");
+    await repo.git("switch", "--quiet", "main");
+    await repo.write("README.md", "# Test\n\nMore.\n");
+    await repo.git("commit", "--quiet", "--all", "--message", "docs: say more");
+    await repo.installHooks();
+    return repo;
+  }
+
   // `git merge` runs pre-merge-commit, not pre-commit, when it commits without conflicts.
   describe("for a merge that git commits itself", () => {
-    /**
-     * Prepares a merge without conflicts: a branch "feature" that changes src/util.ts while main
-     * gets another commit. Then installs the hooks, so git runs them for the merge.
-     */
-    async function prepareMerge(): Promise<Repo> {
-      const repo = await createRepo();
-      await repo.git("switch", "--quiet", "--create", "feature");
-      await repo.write("src/util.ts", "export const util = 2;\n");
-      await repo.git("commit", "--quiet", "--all", "--message", "feat: change util");
-      await repo.git("switch", "--quiet", "main");
-      await repo.write("README.md", "# Test\n\nMore.\n");
-      await repo.git("commit", "--quiet", "--all", "--message", "docs: say more");
-      await repo.installHooks();
-      return repo;
-    }
-
     it("runs the same checks on what the merge brings in", async () => {
       const repo = await prepareMerge();
 
@@ -531,6 +542,69 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       expect(await repo.status()).toEqual(["M  src/util.ts"]);
       await repo.git("merge", "--abort");
       expect(await repo.status()).toEqual([]);
+    });
+  });
+
+  // A merge that stopped, for conflicts or because pre-merge-commit failed, is finished with
+  // `git commit`, which runs pre-commit while the merge is still in progress (MERGE_HEAD exists).
+  // lint-staged on its own would then check only the files that both branches changed.
+  describe("for a merge finished with git commit", () => {
+    it("checks all that the merge brings in again, so a check that still fails stops it", async () => {
+      const repo = await prepareMerge();
+      expect((await repo.merge("feature", { fail: "pnpm" })).code).not.toBe(0);
+      const before = await repo.git("rev-parse", "HEAD");
+      const earlierCalls = (await repo.calls()).length;
+      // Not part of the merge: an unstaged edit and an untracked file.
+      await repo.write("src/app.ts", "export const app = 2;\n");
+      await repo.write("notes.txt", "draft\n");
+
+      const stillFailing = await repo.finishMerge({ fail: "pnpm" });
+
+      expect(stillFailing.code).not.toBe(0);
+      expect(stillFailing.output).toContain("pnpm failed");
+      expect(await repo.git("rev-parse", "HEAD")).toBe(before);
+      expect((await repo.calls()).slice(earlierCalls)).toEqual([
+        `${eslint} src/util.ts`,
+        `${prettier} src/util.ts`,
+        typecheck,
+        `${relatedTests} src/util.ts`,
+        // git status while the tasks ran: the edit and the new file were set aside.
+        "M  src/util.ts",
+      ]);
+      // Everything is as it was: the merge is still in progress, with its changes staged.
+      expect(await repo.status()).toEqual([" M src/app.ts", "M  src/util.ts", "?? notes.txt"]);
+      await repo.git("rev-parse", "--quiet", "--verify", "MERGE_HEAD");
+      expect(await repo.git("stash", "list")).toBe("");
+
+      const fixed = await repo.finishMerge();
+
+      expect(fixed.code, fixed.output).toBe(0);
+      expect((await repo.git("log", "-1", "--format=%p")).trim().split(" ")).toHaveLength(2);
+      expect(await repo.git("show", "HEAD:src/util.ts")).toBe("export const util = 2;\n");
+      expect(await repo.status()).toEqual([" M src/app.ts", "?? notes.txt"]);
+      expect(await repo.git("stash", "list")).toBe("");
+    });
+
+    it("checks the files that only one branch changed, not only the conflicts", async () => {
+      const repo = await prepareMerge({ conflict: true });
+      expect((await repo.merge("feature")).code).not.toBe(0);
+      expect(await repo.status()).toEqual(["UU README.md", "M  src/util.ts"]);
+      await repo.write("README.md", "# Test\n\nMore, and from the feature.\n");
+      await repo.git("add", "README.md");
+
+      const result = await repo.finishMerge();
+
+      expect(result.code, result.output).toBe(0);
+      expect(await repo.calls()).toEqual([
+        `${eslint} src/util.ts`,
+        `${prettier} src/util.ts`,
+        `${prettierOther} README.md`,
+        typecheck,
+        `${relatedTests} README.md src/util.ts`,
+        "M  README.md",
+        "M  src/util.ts",
+      ]);
+      expect((await repo.git("log", "-1", "--format=%p")).trim().split(" ")).toHaveLength(2);
     });
   });
 
