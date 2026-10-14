@@ -75,9 +75,9 @@ function logLines(output: string): z.infer<typeof logLineSchema>[] {
 
 /**
  * Runs `pnpm install` on the lockfile without the network, install scripts or any write to pnpm's
- * store (which would record the temporary folder there), with pnpm's log as JSON lines (its usual
- * output wraps long messages) and any `extraArgs`. Settings that an outer pnpm exports to the
- * scripts it runs are left out of the environment.
+ * store (which would record the temporary folder there) or to its cache, with pnpm's log as JSON
+ * lines (its usual output wraps long messages) and any `extraArgs`. Settings that an outer pnpm
+ * exports to the scripts it runs are left out of the environment.
  */
 function install(
   cwd: string,
@@ -96,6 +96,13 @@ function install(
     "--frozen-store",
     "--ignore-scripts",
     "--reporter=ndjson",
+    // Before it installs, pnpm checks every locked version against the one-day release-age hold,
+    // which needs each package's registry metadata. Offline, a lockfile that this machine has not
+    // checked yet then fails with ERR_PNPM_NO_OFFLINE_META whenever some metadata is not cached.
+    // These tests are about engines; real installs keep the hold. A cache folder of the copy's
+    // own keeps pnpm's records of the temporary folder out of the machine's cache.
+    "--config.minimum-release-age=0",
+    `--config.cache-dir=${join(cwd, ".pnpm-cache")}`,
     ...extraArgs,
   ];
   return new Promise((resolve, reject) => {
