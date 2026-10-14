@@ -802,8 +802,8 @@ variables, removed afterwards. Each code fix has a test that fails without it:
   `http://internal-only-host.example:9999`) and `SESSION_SECRET`, and a Client Component using
   `publicEnv`, `.next/static` held both names, their rules and the URL. The schemas now live in
   `public-schema.ts` and `server-schema.ts`, and `validateWebEnv` in `validate.ts`;
-  `public.test.ts` fails if browser code loads the server schema. The same build now has none of
-  them in `.next/static`.
+  `public.test.ts` fails if `public.ts` loads the server schema (other browser code was not
+  covered until round 2). The same build now has none of them in `.next/static`.
 - `serverEnv` was parsed when its module loaded, and `next build` loads every route's modules
   while it collects page data, so a build without the server's secret failed ("Failed to collect
   configuration for /probe-dynamic", a route rendered only on request). `server.ts` now exports
@@ -836,7 +836,7 @@ How to verify the fixes:
 pnpm exec vitest run packages/shared/src/env.test.ts       # "Tests  54 passed (54)"
 pnpm exec vitest run apps/web/src/env                      # "Tests  33 passed (33)"
 pnpm exec vitest run apps/api/src/config.test.ts apps/api/src/server.test.ts  # "Tests  46 passed (46)"
-pnpm exec vitest run env-access.test.ts env-files.test.ts  # "Tests  61 passed (61)"
+pnpm exec vitest run env-access.test.ts env-files.test.ts  # "Tests  92 passed (92)" (61 before round 2)
 ```
 
 To repeat the build check by hand: add `SESSION_SECRET: z.string().min(32)` to
@@ -848,6 +848,53 @@ afterwards.
 
 Not changed: `WEB_HOST` and `WEB_PORT` stay shell variables that our loader does not validate
 (see "WEB_HOST and WEB_PORT stay shell variables" in DECISIONS).
+
+**Review fixes (wave w0, round 2)**
+
+Alpha reviewed this instruction as a new developer meets it: in a fresh clone, the README and
+every "How to verify" step above, run as written (on ports 3010 and 4010), including the manual
+build check with a temporary `SESSION_SECRET` and the recovery of `pnpm dev` from a bad
+`apps/api/.env`; all of them behaved as described. Then the two open items from the round-1
+verification, each reproduced first with real `pnpm exec eslint` runs and a real `next build`.
+Each code fix has a test that fails without it:
+
+- `import()` of `process` or `node:process` got past the env lint rules, because
+  `no-restricted-imports` does not check `import()`, while the config's comment said that the
+  import bans closed every route. ESLint now rejects it, written as a string or a template
+  literal. Code that passes `process` around as a value (`const proc = process`,
+  `Reflect.get(process, "env")`) still gets through; DECISIONS says why.
+- A Client Component could import `src/env/server-schema.ts`, or `validate.ts`, directly: lint
+  and the tests passed, and `next build` put the server schema's names and rules into
+  `.next/static`. ESLint now rejects importing either through an `env` folder, statically or
+  with `import()`, anywhere in `apps/web/src`.
+- The error for a bad variable said to set it in `apps/api/.env` "or in the environment", but a
+  variable exported by the shell wins over the file: with `LOG_LEVEL=DEBUG` in the shell,
+  `LOG_LEVEL=debug` in `apps/api/.env` changed nothing and the same message came back. Both apps'
+  messages now end "or in the environment, which overrides the file" (the web app's: "the .env
+  files"), and the README says how to spot a shell value. The README also said that the command
+  stops, but in `pnpm dev` the API waits for a fixed file.
+- Nothing tested that the API's `dev` and `start` scripts read `apps/api/.env`, or that the shell
+  wins over it: with `--env-file-if-exists=.env` removed from both scripts, all 586 tests passed.
+  `apps/api/src/env-file.test.ts` runs each real script in a scratch folder with a stand-in
+  entrypoint that prints what it received, with and without the file and with a shell variable.
+- The templates' copy commands left `apps/api/.env` and `apps/web/.env` readable by every
+  account on the machine, although server secrets belong in `apps/web/.env` and the root `.env`
+  already gets `chmod 600`. The templates, the README and the step above now add `chmod 600`.
+
+How to verify the fixes:
+
+```sh
+pnpm exec vitest run env-access.test.ts               # "Tests  64 passed (64)"
+pnpm exec vitest run apps/api/src/env-file.test.ts    # "Tests  6 passed (6)"
+mkdir -p apps/web/src/app/probe
+printf '"use client";\n\nexport { serverEnvSchema } from "../../env/server-schema";\n' \
+  > apps/web/src/app/probe/leak.tsx
+pnpm exec eslint apps/web/src/app/probe   # 1 error: "... The server env schema must never reach the browser. ..."
+rm -r apps/web/src/app/probe
+printf 'export const { env } = await import("node:process");\n' > apps/api/src/probe.ts
+pnpm exec eslint apps/api/src/probe.ts    # 1 error: "Use the global process. ..." (no-restricted-syntax)
+rm apps/api/src/probe.ts
+```
 
 ## #5 - GitHub Actions CI
 
