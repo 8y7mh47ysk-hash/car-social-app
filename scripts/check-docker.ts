@@ -1,8 +1,8 @@
 // Runs before every docker:* script in package.json (instruction 7). It checks that Docker is ready
-// to run Docker Compose (installed, with the Compose plugin and a running engine) and, when it is
-// not, explains what to do instead of leaving the shell to fail with "docker: command not found".
-// Exits with status 1 after printing the problem; prints nothing and exits with status 0 when
-// Docker is ready.
+// to run Docker Compose (installed, with the Compose plugin and a running engine, on Linux Docker
+// Engine 28 or later) and, when it is not, explains what to do instead of leaving the shell to fail
+// with "docker: command not found". Exits with status 1 after printing the problem; prints nothing
+// and exits with status 0 when Docker is ready.
 //
 // Usage, from the repository root: node scripts/check-docker.ts
 
@@ -14,6 +14,8 @@ export interface CommandResult {
   readonly status: number | null;
   /** Set when the command could not be started, for example `{ code: "ENOENT" }`. */
   readonly error?: NodeJS.ErrnoException | undefined;
+  /** What the command printed on its standard output. */
+  readonly stdout?: string | undefined;
 }
 
 /** Runs a command and reports how it ended. */
@@ -37,19 +39,51 @@ export const DOCKER_PROBLEMS = {
     "then try again. On Linux, if Docker works only with sudo, see",
     "https://docs.docker.com/engine/install/linux-postinstall/",
   ],
+  engineTooOld: [
+    "Docker Engine is older than version 28. On Linux, older engines let other machines on the same",
+    "network reach ports published on 127.0.0.1, so PostgreSQL and Redis would not stay private.",
+    "Upgrade Docker Engine from Docker's own packages: https://docs.docker.com/engine/install/",
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type DockerProblem = keyof typeof DOCKER_PROBLEMS;
 
+/**
+ * The oldest Docker Engine major version allowed on Linux. Before 28.0.0, hosts on the same
+ * network segment can reach ports published on 127.0.0.1 (Docker's port-publishing documentation,
+ * moby/moby#45610). Docker Desktop and OrbStack on macOS run the engine in a virtual machine and
+ * publish ports on the Mac's own loopback address, so the version is not checked there.
+ */
+export const MIN_LINUX_ENGINE_MAJOR = 28;
+
 /** Waits at most this long for each Docker command, in case the engine hangs. */
 const TIMEOUT_MS = 20_000;
 
-/** Runs a command without showing its output. */
-const runQuietly: RunCommand = (command, args) =>
-  spawnSync(command, args, { stdio: "ignore", timeout: TIMEOUT_MS });
+/** Runs a command without showing its output, and returns what it printed. */
+export const runQuietly: RunCommand = (command, args) =>
+  spawnSync(command, args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: TIMEOUT_MS,
+  });
 
-/** Checks, in order, that Docker is installed, has the Compose plugin and has a running engine. */
-export function findDockerProblem(run: RunCommand = runQuietly): DockerProblem | undefined {
+/**
+ * The major version of the engine, read from the server version that `docker version` prints,
+ * such as 29 for "29.9.0"; undefined for anything that does not start with a release number.
+ */
+function engineMajorVersion(stdout: string | undefined): number | undefined {
+  const match = /^(\d+)\.\d+/.exec(stdout?.trim() ?? "");
+  return match?.[1] === undefined ? undefined : Number(match[1]);
+}
+
+/**
+ * Checks, in order, that Docker is installed, has the Compose plugin and has a running engine,
+ * and on Linux (`platform`, the running system by default) that the engine is new enough.
+ */
+export function findDockerProblem(
+  run: RunCommand = runQuietly,
+  platform: NodeJS.Platform = process.platform,
+): DockerProblem | undefined {
   // Needs only the client and the Compose plugin, not the engine.
   const compose = run("docker", ["compose", "version"]);
   if (compose.error?.code === "ENOENT") {
@@ -62,6 +96,12 @@ export function findDockerProblem(run: RunCommand = runQuietly): DockerProblem |
   const engine = run("docker", ["version", "--format", "{{.Server.Version}}"]);
   if (engine.status !== 0) {
     return "notRunning";
+  }
+  // Docker's own builds print a release number. A version that is not one (a development build,
+  // or a client that prints nothing) is let through: the check is for old distribution packages.
+  const major = engineMajorVersion(engine.stdout);
+  if (platform === "linux" && major !== undefined && major < MIN_LINUX_ENGINE_MAJOR) {
+    return "engineTooOld";
   }
   return undefined;
 }

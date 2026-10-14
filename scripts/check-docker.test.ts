@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { DOCKER_PROBLEMS, findDockerProblem, type CommandResult } from "./check-docker.ts";
+import {
+  DOCKER_PROBLEMS,
+  findDockerProblem,
+  runQuietly,
+  type CommandResult,
+} from "./check-docker.ts";
 
 const ok: CommandResult = { status: 0 };
 const failed: CommandResult = { status: 1 };
@@ -62,6 +67,57 @@ describe("findDockerProblem", () => {
     const docker = fakeDocker(ok, engine);
 
     expect(findDockerProblem(docker.run)).toBe("notRunning");
+  });
+
+  /** The engine check's result when the engine answers with `version` and a newline. */
+  const engineVersion = (version: string): CommandResult => ({ status: 0, stdout: `${version}\n` });
+
+  // Before Docker Engine 28, other hosts on the same network segment can reach ports published
+  // on 127.0.0.1 on a Linux host (Debian 13's own docker.io package is 26.1).
+  it.each(["26.1.5", "27.5.1", "20.10.24+dfsg1"])(
+    "reports an engine that is too old on Linux: %s",
+    (version) => {
+      const docker = fakeDocker(ok, engineVersion(version));
+
+      expect(findDockerProblem(docker.run, "linux")).toBe("engineTooOld");
+    },
+  );
+
+  it.each(["28.0.0", "29.9.0", "30.0.0-rc.1"])("accepts Docker Engine %s on Linux", (version) => {
+    const docker = fakeDocker(ok, engineVersion(version));
+
+    expect(findDockerProblem(docker.run, "linux")).toBeUndefined();
+  });
+
+  it("does not check the engine's version on macOS, where it runs in a virtual machine", () => {
+    const docker = fakeDocker(ok, engineVersion("27.5.1"));
+
+    expect(findDockerProblem(docker.run, "darwin")).toBeUndefined();
+  });
+
+  it.each([
+    ["no version", ""],
+    ["a development build's version", "dev"],
+  ])("lets an engine through on Linux when it prints %s", (_label, version) => {
+    const docker = fakeDocker(ok, engineVersion(version));
+
+    expect(findDockerProblem(docker.run, "linux")).toBeUndefined();
+  });
+});
+
+// The command runner that the script uses when no stand-in is given.
+describe("runQuietly", () => {
+  it("returns a command's exit status and what it printed, which the version check reads", () => {
+    const result = runQuietly(process.execPath, ["-e", 'console.log("29.9.0"); process.exit(3)']);
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toBe("29.9.0\n");
+  });
+
+  it("reports a command that does not exist as ENOENT", () => {
+    const result = runQuietly("apex-no-such-command", []);
+
+    expect(result.error?.code).toBe("ENOENT");
   });
 });
 
