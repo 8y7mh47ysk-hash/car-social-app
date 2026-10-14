@@ -350,7 +350,8 @@ flowchart TB
   frozen-lockfile install, then peer dependency, formatting, lint, type and test checks, the
   build, whose output is checked for warnings and for errors that did not stop it ("What "fail on
   any warning" means in CI" in [DECISIONS.md](DECISIONS.md) lists what that check cannot see),
-  and a check of `docker-compose.yml`. Dependency and container scanning follow in #106.
+  a start of both production builds, each of which must answer, and a check of
+  `docker-compose.yml`. Dependency and container scanning follow in #106.
 
 ## Observability
 

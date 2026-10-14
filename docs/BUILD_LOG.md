@@ -178,7 +178,8 @@ Terminal 1 logs `"msg":"shutting down"`, terminal 2 prints `HTTP/1.1 404 Not Fou
 stopped at once.
 
 No owner actions. The web app's production start (`next start`) is still checked only by hand,
-and CI starts neither app (handed to the owner of instruction 5).
+and CI starts neither app (handed to the owner of instruction 5; since the round-1 integration CI
+starts both, see instruction 5's integration note).
 
 **Integration fixes (wave w0, round 1)**
 
@@ -1007,6 +1008,33 @@ scripts, each failing a test. Fixes, each with a test where it changed code or a
   updates its software weekly; the decision on "fail on any warning" pointed here for provoking
   real build output, which "How to verify" now shows; and the README's pre-push commands now
   include the Compose check.
+
+**Integration fixes (wave w0, round 1)**
+
+- CI built both apps but started neither (Echo's hand-off from the review of instruction 1). A
+  build that succeeds can still fail to start: `next start` checks the web server's environment
+  variables only as it starts, and the API's production start runs the compiled code with flags
+  of its own. A new step after the build-warning check, "Start the production build", runs
+  `scripts/check-start.ts`. It starts both production builds with `pnpm start` on free loopback
+  ports, waits up to a minute until the API answers GET /health with `{"status":"ok"}` and the
+  web app serves its home page as HTML, then stops them with SIGTERM, and kills them if they have
+  not stopped after ten seconds. On failure it says which app did not answer, or how the command
+  ended, and prints what the apps printed. `scripts/check-start.test.ts` runs it against a
+  stand-in for `pnpm start` (both apps answer; a wrong health body; no web app; the command exits
+  early; the apps ignore SIGTERM), and `scripts/ci-workflow.test.ts` checks the step's place and
+  condition; six deliberate breakages each failed the tests. Against this Mac's real build it
+  passed in 0.4 s, and it reported the API's error with an invalid `LOG_LEVEL` and Next.js's with
+  `WEB_HOST=256.0.0.1`. actionlint 1.7.12 with shellcheck 0.11.0 reports nothing. It has not run
+  on GitHub yet (see Owner actions).
+
+How to verify, from the repository root:
+
+```sh
+pnpm exec vitest run scripts/check-start.test.ts   # "Tests  5 passed (5)"
+pnpm build && node scripts/check-start.ts           # "Both apps started: the API answered ..."
+LOG_LEVEL=loud node scripts/check-start.ts          # "`pnpm start` exited with code 1 before
+                                                    # both apps answered.", then the API's error
+```
 
 ## #6 - Architecture and decision docs
 

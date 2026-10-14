@@ -144,8 +144,9 @@ The API logs one JSON object per line. To read its log in a terminal while devel
 GitHub Actions runs [.github/workflows/ci.yml](.github/workflows/ci.yml) for every push to `main`
 and every pull request. It installs the locked dependencies (`pnpm install --frozen-lockfile`,
 with pnpm's package store cached between runs), runs `pnpm peers check`, `pnpm format:check`,
-`pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build`, and validates `docker-compose.yml`.
-Each check runs even when an earlier one fails, so one run lists every problem.
+`pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build`, starts the production build to
+check that both apps answer, and validates `docker-compose.yml`. Each check runs even when an
+earlier one fails, so one run lists every problem.
 
 CI fails on any warning: ESLint warnings, unformatted files, unmet peer dependencies, warnings in
 the build output and errors that did not stop the build (Next.js prints both but still finishes
@@ -155,10 +156,13 @@ what is enforced, what is not and why. To run the same checks before pushing:
 ```sh
 pnpm peers check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test
 pnpm build > build.log 2>&1 && node scripts/check-build-warnings.ts build.log
+node scripts/check-start.ts
 ```
 
 The second line saves the build's output in `build.log` (git ignores `*.log` files) and runs CI's
-check on it. If the build itself fails, the reason is in `build.log`. With Docker and the root
+check on it. If the build itself fails, the reason is in `build.log`. The third starts both
+production builds with `pnpm start` on free ports, as CI does, and stops them once both answer;
+if one does not, it says which and prints what the apps printed. With Docker and the root
 `.env` (see [Local services](#local-services)), `docker compose --profile '*' config --quiet` runs
 CI's last check, on `docker-compose.yml`: it prints nothing when the file is valid.
 

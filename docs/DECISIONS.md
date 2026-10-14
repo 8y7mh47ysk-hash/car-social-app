@@ -1405,3 +1405,23 @@ Keep entries brief. Details belong in code comments and the build log.
   stop every merge or pull that brings in dependency changes until someone runs `pnpm install` by
   hand, and `warn`, which would let the stale lockfile through to CI, whose frozen install then
   fails.
+
+### CI starts the production build and checks that both apps answer
+
+- Date: 2026-10-11 · Instruction: #5 · Author: Integrator (wave w0, round 1)
+- Context: CI built both apps but started neither (Echo's hand-off from the review of instruction
+  1). `apps/api/src/production.test.ts` starts a copy of the compiled API, but nothing ran
+  `next start`, which is where the web app checks its server-only environment variables (#4), so
+  once the web app needs one, a production start without it would fail only in production. Echo
+  suggested a smoke step after the build; Playwright tests (#68) and container images (#102)
+  come much later.
+- Decision: a CI step after the build-warning check, "Start the production build", runs
+  `node scripts/check-start.ts`. It starts the apps with the `pnpm start` that developers run, on
+  free loopback ports (`WEB_PORT`, `API_PORT`) and in a process group of its own; requires GET
+  /health to answer `{"status":"ok"}` (checked with Zod) and the home page to be a 200 HTML page
+  within a minute; then stops the group with SIGTERM and fails if the apps have not stopped ten
+  seconds later. The README's pre-push commands include it.
+- Trade-offs: a few seconds of CI time. It shows only that the apps start, answer and stop, not
+  what they serve; #68's Playwright tests cover pages and flows. Once the web app has a required
+  server variable (Phase 2), this step needs a throwaway value for it, as the Compose step has
+  for the passwords. The time limits are generous, so a slow runner does not fail it.
