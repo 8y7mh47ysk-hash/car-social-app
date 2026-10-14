@@ -45,7 +45,8 @@ const processImports = {
 const webServerEnvImports = {
   regex: "(?:^|\\/)env\\/(?:server-schema|validate)(?:\\.[cm]?[jt]sx?)?$",
   message:
-    "The server env schema must never reach the browser. Server code reads server variables with getServerEnv() from src/env/server.ts (docs/DECISIONS.md).",
+    "The server env schema must never reach the browser. Server code reads server variables " +
+    "with getServerEnv() from src/env/server.ts (docs/DECISIONS.md).",
 };
 
 export default defineConfig(
