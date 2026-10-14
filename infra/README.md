@@ -23,7 +23,8 @@ starts), which needs Compose 2.20.2 or later and Docker Engine 25 or later; any 
 Desktop or OrbStack is newer than both. On Linux, use Docker Engine 28 or later, from Docker's
 own packages: with older engines, machines on the same local network can reach ports published
 on `127.0.0.1` (Docker's port-publishing documentation says so), and a distribution's own package
-can be older (Debian 13's `docker.io` is version 26.1).
+can be older (Debian 13's `docker.io` is version 26.1). On Linux, the `pnpm docker:*` scripts
+refuse to run with an older engine.
 
 ### First run
 
@@ -99,6 +100,28 @@ Each check runs every 10 seconds (every second while the service starts, for up 
 for PostgreSQL and 10 for Redis) and times out after 5; five failures in a row mark the service
 unhealthy.
 
+### Redis's memory warning on Linux
+
+When the Linux kernel that runs the containers has `vm.overcommit_memory` set to 0, the default
+on most distributions, Redis logs `WARNING Memory overcommit must be enabled!` as it starts (seen
+on Debian 13 in the wave w0 review). Redis starts a child process to write its snapshots and to
+rewrite its append-only file, and with that setting the kernel can refuse to start one when
+memory is short. A failed snapshot makes Redis refuse writes (`MISCONF` errors) until a later one
+succeeds, because Redis's default `stop-writes-on-bgsave-error` is on. The setting belongs to the
+host's kernel, and a container cannot change it. On a Linux machine that runs these services, set
+it once:
+
+```sh
+echo 'vm.overcommit_memory = 1' | sudo tee /etc/sysctl.d/99-redis.conf   # kept after a reboot
+sudo sysctl -w vm.overcommit_memory=1                                    # applies it now
+```
+
+It applies to every process on that machine: the kernel then always grants memory and, if memory
+runs out, its out-of-memory killer stops a process instead. Docker Desktop and OrbStack run the
+engine in a Linux virtual machine of their own, which this project does not configure; on a
+development machine the warning can be ignored. The home server must have the setting (host
+hardening, instruction 105).
+
 ### App placeholders
 
 The `api` and `web` services are in the `app` profile, so a plain `docker compose up` skips them.
@@ -122,9 +145,9 @@ and once the API image has a health check, `web` should wait for `service_health
 ### Security notes
 
 - Ports are published on `127.0.0.1` only, which keeps other machines out on Docker Desktop,
-  OrbStack and Docker Engine 28 or later (see above for older Linux engines). Other containers on
-  the Compose network can still reach the services; instruction 103 moves them to an internal
-  network with no published ports.
+  OrbStack and Docker Engine 28 or later (see above for older Linux engines, which the
+  `pnpm docker:*` scripts refuse). Other containers on the Compose network can still reach the
+  services; instruction 103 moves them to an internal network with no published ports.
 - Neither password has a default, and `.env` is gitignored. The official Redis image turns
   Redis's protected mode off, so the password is what keeps other clients out.
 - `chmod 600 .env` keeps other accounts on the machine from reading the passwords: a plain copy
