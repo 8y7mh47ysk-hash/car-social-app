@@ -296,7 +296,10 @@ Keep entries brief. Details belong in code comments and the build log.
 - Trade-offs: husky writes `core.hooksPath = .husky/_` to the repository's git config, which all
   worktrees share; a worktree only runs the hooks once `pnpm install` has created its own
   `.husky/_`, and commits made there before that are not checked. Hooks can always be skipped
-  (`--no-verify`, `HUSKY=0`), so CI remains the gate that cannot be bypassed.
+  (`--no-verify`, `HUSKY=0`), so CI remains the gate that cannot be bypassed. (Corrected in the
+  wave w0 review: CI runs on every push and pull request, but it does not check commit messages,
+  see "CI does not check commit messages", and on GitHub Free a private repository cannot require
+  it to pass before a merge, see the owner actions of instruction 5 in BUILD_LOG.md.)
 
 ### The pre-commit hook checks exactly the staged snapshot, one task at a time
 
@@ -964,7 +967,8 @@ Keep entries brief. Details belong in code comments and the build log.
   from Docker's own repository and is updated from there. Firewall rules of our own were
   rejected: a newer engine fixes the cause, and instruction 103 removes the published ports on
   the server anyway. Nothing checks the version yet; `scripts/check-docker.ts` (instruction 7)
-  could refuse an older engine on Linux.
+  could refuse an older engine on Linux (since the round-1 integration it does: see "The docker
+  scripts refuse Docker Engine before 28 on Linux").
 
 ### A fixed Compose project name: apex-garage
 
@@ -1325,3 +1329,79 @@ Keep entries brief. Details belong in code comments and the build log.
   files". Passing the two flags on every commit would save the `if`, but would move every commit
   onto the `--diff` path, which lint-staged's README offers for comparing branches, for example in
   CI; ordinary commits keep its default path.
+
+### The type check finishes every package's check when one fails
+
+- Date: 2026-10-11 · Instruction: #1, #2 · Author: Integrator (wave w0, round 1)
+- Context: the root `typecheck` script ran `pnpm --recursive typecheck`, which stops the other
+  packages' checks with SIGKILL as soon as one fails. The pre-commit hook and CI both run
+  `pnpm typecheck`, so they showed one package's errors followed by "Command failed with signal
+  SIGKILL" for the rest (reported by Echo in the wave w0 review; checked with type errors in the
+  API and the web app).
+- Decision: `tsc --project tsconfig.json && pnpm --recursive --no-bail typecheck`. Every package's
+  check runs to the end, and the script still fails when any of them fails ("failed in 2
+  packages"). `typecheck.test.ts` runs the script on a stand-in workspace whose two packages fail.
+- Trade-offs: a failing type check takes as long as a passing one. A type error in the root files
+  still stops the script before the packages are checked; running both whatever happens would
+  need a shell construct that keeps both exit codes, which the root's few files do not justify.
+
+### The docker scripts refuse Docker Engine before 28 on Linux
+
+- Date: 2026-10-11 · Instruction: #3, #7 · Author: Integrator (wave w0, round 1)
+- Context: "Docker Engine 28 or later on Linux hosts" asks for Engine 28 on Linux, because before
+  28.0.0 hosts on the same network segment can reach ports published on 127.0.0.1 (Docker's
+  port-publishing documentation, moby/moby#45610), and noted that nothing checked it. Debian 13's
+  own `docker.io` package is 26.1, so a Linux machine set up the obvious way would expose
+  PostgreSQL and Redis to its local network.
+- Decision: `scripts/check-docker.ts`, which every `docker:*` script runs first, reads the
+  engine's version from `docker version --format {{.Server.Version}}`, the call it already made
+  to see whether the engine runs. On Linux only, it stops with an explanation and a link to
+  Docker's install guide when the major version is below 28. On macOS, Docker Desktop and
+  OrbStack run the engine in a virtual machine and publish ports on the Mac's own loopback
+  address, so the version is not checked. Tests cover old, new and unreadable versions on both
+  systems and the command runner's capture of the output.
+- Trade-offs: a version that does not start with a release number (a development build, or a
+  client that prints nothing) is let through: the check is meant for old distribution packages,
+  not to block unusual set-ups. An engine other than Docker's that reports its own version number,
+  below 28, would be refused; the documentation asks for Docker Engine. Plain `docker compose`
+  commands are not checked; infra/README.md gives the minimum.
+
+### Redis's memory warning on Linux is fixed on the host, not in the compose file
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Integrator (wave w0, round 1)
+- Context: in the wave w0 review's Debian 13 VM (Docker Engine 29.9.0), Redis 8.10.2 logged
+  "WARNING Memory overcommit must be enabled!" as it started (reported by Charlie). With the
+  kernel's default `vm.overcommit_memory = 0`, the child process that writes a snapshot or
+  rewrites the append-only file can fail to start when memory is short, and Redis's default
+  `stop-writes-on-bgsave-error yes` then refuses writes until a snapshot succeeds. A container
+  cannot change this kernel setting.
+- Decision: no change to `docker-compose.yml`. infra/README.md explains the warning and how to
+  set `vm.overcommit_memory = 1` on a Linux host (a file in `/etc/sysctl.d/` and `sysctl -w`), as
+  Redis's own message advises, and says that the home server must have it (host hardening, #105).
+- Trade-offs: the setting is host-wide: the kernel then grants every allocation, and running out
+  of memory is handled by its out-of-memory killer instead of a failed allocation. Rejected for
+  now: turning snapshots off (`--save ""`), which removes the forks that can stop writes but
+  changes how Redis keeps its data, a choice for instruction 3's owner to weigh with the queues
+  and sessions that will use Redis (#37, #40); and turning `stop-writes-on-bgsave-error` off,
+  which would let Redis keep accepting writes it can no longer save, unnoticed.
+
+### The pre-commit type check may install dependencies first
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Integrator (wave w0, round 1)
+- Context: pnpm 12's `verifyDepsBeforeRun` defaults to `install`: `pnpm run` installs first when
+  `node_modules` is out of date. The hook's type check runs `pnpm typecheck`, so a commit that
+  stages a `package.json` whose dependencies no longer match the lockfile (edited without running
+  `pnpm install`) makes pnpm install, run the `prepare` script again and rewrite
+  `pnpm-lock.yaml` while the hook runs, and lint-staged then adds the rewritten lockfile to the
+  commit like a fixer's change. Checked in a scratch clone: with only `package.json` staged after
+  a range change, the commit held both files. Charlie raised the question in the wave w0 review
+  without testing it. A merge that brings in new dependencies gets them installed the same way
+  before its type check, which would otherwise fail on the missing packages.
+- Decision: keep pnpm's default. The README section "Git hooks" says that the type check may
+  install first and that the updated lockfile then becomes part of the commit.
+- Trade-offs: a commit can download packages and change `node_modules`, and the lockfile change
+  joins the commit without being staged (the commit's summary lists it). The install keeps
+  pnpm's safeguards (the one-day release-age hold, `allowBuilds`). Rejected: `error`, which would
+  stop every merge or pull that brings in dependency changes until someone runs `pnpm install` by
+  hand, and `warn`, which would let the stale lockfile through to CI, whose frozen install then
+  fails.
