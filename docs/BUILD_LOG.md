@@ -147,7 +147,7 @@ How to verify, from the repository root:
 ```sh
 pnpm exec vitest run typecheck.test.ts workspace.test.ts apps/api/src/production.test.ts \
   apps/api/src/server.test.ts
-# "Test Files  4 passed (4)" and "Tests  17 passed (17)"
+# "Test Files  4 passed (4)" and "Tests  22 passed (22)" since the round-1 integration
 pnpm --filter @apex/shared build && pnpm --filter @apex/api build
 cd apps/api && node --no-strip-types dist/server.js; cd ../..
 # exits at once: ERR_UNKNOWN_FILE_EXTENSION for packages/shared/src/index.ts (no condition)
@@ -179,6 +179,21 @@ stopped at once.
 
 No owner actions. The web app's production start (`next start`) is still checked only by hand,
 and CI starts neither app (handed to the owner of instruction 5).
+
+**Integration fixes (wave w0, round 1)**
+
+- `workspace.test.ts` passed only while this machine's pnpm cache had already checked the lockfile
+  or held every locked package's registry metadata. Before it installs, pnpm checks each locked
+  version against the one-day release-age hold, which needs that metadata, and offline it fails
+  with `ERR_PNPM_NO_OFFLINE_META` when some is missing. That happened in a scratch clone after the
+  pre-commit hook had installed a hand-edited `package.json` (see instruction 2's integration
+  note), and every time with an empty pnpm cache. The test's offline install now turns the hold
+  off, since the test is about engines, and uses a cache folder of its own, so it neither depends
+  on the machine's cache nor writes records of its temporary folders there. Removing the setting
+  now fails the test every time.
+- The merge added four entrypoint tests from the review of instruction 8 to `server.test.ts`, and
+  the integration a test of the root type check to `typecheck.test.ts`, so the first command
+  above now reports 22 tests.
 
 ## #2 - Git hooks and conventional commits
 
@@ -282,7 +297,10 @@ None. If you commit from a GUI git client that cannot find `node` or `pnpm`, add
 **Notes & limitations**
 
 - Hooks are local and can be skipped (`git commit --no-verify`, `HUSKY=0`); CI (instruction 5) is
-  the check that cannot be bypassed. Skip them only in an emergency.
+  the check that cannot be bypassed. Skip them only in an emergency. (Corrected in the wave w0
+  review: CI runs on every push and pull request, but it does not check commit messages, and on
+  GitHub Free a private repository cannot require it to pass before a merge; see the owner
+  actions of instruction 5.)
 - husky stores `core.hooksPath` in the repository's git config, which every worktree shares; a
   worktree runs the hooks only once `pnpm install` has run in it.
 - `vitest related` follows imports only. A test that runs code in a separate process is not
@@ -300,7 +318,9 @@ None. If you commit from a GUI git client that cannot find `node` or `pnpm`, add
   (the steps are in the README section "Git hooks"), not the top one, which may be another
   worktree's backup during a commit.
 - When the type check fails in one package, `pnpm --recursive` stops the other packages' checks,
-  so the output also shows `Command failed with signal SIGKILL` for them.
+  so the output also shows `Command failed with signal SIGKILL` for them. (Since the round-1
+  integration, `--no-bail` lets every package's check finish, so one run shows all their errors;
+  see "Integration fixes (wave w0, round 1)" below.)
 - The commit message rules are stricter than `config-conventional`: names in a subject must be
   lowercase or in backticks or quotes. A body line such as `Note: ...` directly after other body
   text is read as the start of the footer and rejected; add a blank line before it.
@@ -370,7 +390,7 @@ No owner actions.
 
 **Integration fixes (wave w0, round 1)**
 
-Found while merging the round's five branches:
+Found while merging the round's five branches, and from the reviewers' hand-offs:
 
 - The merge check above stopped short of the commit that finishes a merge. git runs the
   pre-commit hook for that `git commit`, after failed checks or after a conflict, and while a
@@ -381,13 +401,37 @@ Found while merging the round's five branches:
   `--diff=--staged --stash`, so lint-staged checks every staged file and keeps its backup (see
   "A commit that finishes a merge checks everything the merge brings in" in docs/DECISIONS.md).
   Tests: two in `git-hooks.test.ts`; both fail without the change, and the first also fails
-  without `--stash`.
+  without `--stash`. With the real tools, in a scratch clone: the merge in the recipe above,
+  stopped by ESLint, was finished with `git commit --no-edit`, which before the fix printed
+  "lint-staged could not find any staged files." and made the merge commit, and now stops with
+  the same ESLint error.
+- When the type check failed in one package, `pnpm --recursive` stopped the other packages'
+  checks (SIGKILL), so the hook and CI showed one package's errors (Echo's hand-off). The root
+  `typecheck` script now runs `pnpm --recursive --no-bail typecheck`: every package's check
+  finishes and the script still fails. Test: `typecheck.test.ts` runs the script on a stand-in
+  workspace whose two packages fail.
+- The hook's type check runs `pnpm typecheck`, and pnpm 12 installs dependencies first when
+  `node_modules` is out of date (`verifyDepsBeforeRun: install`, its default). Charlie asked
+  whether that can rewrite the lockfile during a commit; it does. In a scratch clone, a commit
+  that staged only a `package.json` with a changed dependency range ran an install and the
+  `prepare` script, and the commit held both `package.json` and the rewritten
+  `pnpm-lock.yaml`. pnpm's default is kept, so that merges that bring in new dependencies install
+  them before their type check; the README section "Git hooks" now says so, and docs/DECISIONS.md
+  records why ("The pre-commit type check may install dependencies first").
+- The note above that CI is the check that cannot be bypassed is qualified (Charlie's hand-off):
+  CI does not check commit messages, and on GitHub Free a private repository cannot require it to
+  pass. The same correction is in the DECISIONS entry on the hooks.
 
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "merge"   # "Tests  5 passed | 59 skipped (64)"
+pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  5 passed | 59 skipped (64)"
+pnpm exec vitest run typecheck.test.ts -t "root type check"  # "Tests  1 passed | 2 skipped (3)"
 ```
+
+In the scratch clone of the merge recipe above, run `git commit --no-edit` before
+`git merge --abort`: it stops with the same `@typescript-eslint/no-explicit-any` error, and
+`git status --short` still shows `A  apps/api/src/try.ts`.
 
 ## #3 - Docker Compose services
 
@@ -577,6 +621,20 @@ pnpm test && pnpm typecheck && pnpm lint && pnpm format:check   # all exit with 
 With Docker, run the commands under "How to verify" above; after the final
 `docker compose --profile app down`,
 `docker ps --all --filter label=com.docker.compose.project=apex-garage` lists no containers.
+
+**Integration fixes (wave w0, round 1)**
+
+From the reviewers' hand-offs:
+
+- In the review's Debian 13 VM, Redis 8.10.2 logged "WARNING Memory overcommit must be enabled!"
+  as it started (Charlie). With the kernel's default `vm.overcommit_memory = 0`, the child process
+  that writes a snapshot or rewrites the append-only file can fail to start when memory is short,
+  and Redis then refuses writes until a snapshot succeeds. A container cannot change the setting:
+  `infra/README.md` ("Redis's memory warning on Linux") says how to set it on a Linux host and
+  that the home server must have it (instruction 105). `docker-compose.yml` is unchanged; the
+  decision is in docs/DECISIONS.md.
+- Nothing enforced Docker Engine 28 on Linux (Alpha): the `docker:*` scripts now refuse an older
+  engine there, see instruction 7's integration note.
 
 ## #4 - Typed environment loader
 
@@ -773,7 +831,7 @@ How to verify the fixes:
 ```sh
 pnpm exec vitest run packages/shared/src/env.test.ts       # "Tests  54 passed (54)"
 pnpm exec vitest run apps/web/src/env                      # "Tests  33 passed (33)"
-pnpm exec vitest run apps/api/src/config.test.ts apps/api/src/server.test.ts  # "Tests  40 passed (40)"
+pnpm exec vitest run apps/api/src/config.test.ts apps/api/src/server.test.ts  # "Tests  46 passed (46)"
 pnpm exec vitest run env-access.test.ts env-files.test.ts  # "Tests  61 passed (61)"
 ```
 
@@ -943,11 +1001,12 @@ scripts, each failing a test. Fixes, each with a test where it changed code or a
 - Owner actions: a ruleset on a private repository is enforced only on a paid GitHub plan.
 - Docs: the README said that CI "runs the full checks either way" when hooks are skipped, but CI
   does not check commit messages ("CI does not check commit messages" in docs/DECISIONS.md); the
-  README's prerequisites now name Node.js 24.2, which `scripts/` needs; docs/DECISIONS.md said
-  that pinning `ubuntu-26.04` keeps the runner image fixed, but GitHub updates its software
-  weekly; the decision on "fail on any warning" pointed here for provoking real build output,
-  which "How to verify" now shows; and the README's pre-push commands now include the Compose
-  check.
+  README's prerequisites now name Node.js 24.2, which `scripts/` needs (once merged, 24.15: the
+  review of instruction 1 raised the minimum for a dependency and made pnpm enforce it);
+  docs/DECISIONS.md said that pinning `ubuntu-26.04` keeps the runner image fixed, but GitHub
+  updates its software weekly; the decision on "fail on any warning" pointed here for provoking
+  real build output, which "How to verify" now shows; and the README's pre-push commands now
+  include the Compose check.
 
 ## #6 - Architecture and decision docs
 
@@ -1030,6 +1089,14 @@ Delta reviewed this instruction and changed:
   render with the command above.
 - `README.md`: the repository layout lists the architecture document.
 
+**Integration fixes (wave w0, round 1)**
+
+- `docs/ARCHITECTURE.md` said that after the build CI runs "a check that fails on any warning it
+  printed". That check fails only on the warning and error lines it recognises; plain text that
+  a page logs while Next.js prerenders it gets through (Charlie's hand-off from the review of
+  instruction 5). The sentence now says the output is checked for warnings and for errors that
+  did not stop the build, and points to the DECISIONS entry that lists what the check cannot see.
+
 ## #7 - Developer scripts
 
 **What changed**
@@ -1064,8 +1131,8 @@ on your PATH." with an install link, and exits with status 1. With Docker instal
 running (Docker Desktop quit), it prints "Docker is installed, but its engine is not running, or
 this user cannot reach it." instead.
 
-With Docker running and the root `.env` set up (instruction 3, `cp .env.example .env` and set
-both passwords):
+With Docker running and the root `.env` set up (instruction 3:
+`cp .env.example .env && chmod 600 .env`, then set both passwords):
 
 ```sh
 pnpm docker:up          # returns once both services are healthy
@@ -1124,6 +1191,28 @@ developer runs them:
   script (its default `verifyDepsBeforeRun: install`), so the first `pnpm docker:up` there ran
   an install first.
 
+**Integration fixes (wave w0, round 1)**
+
+From Alpha's hand-offs from the review of instruction 3:
+
+- On Linux, Docker Engine before 28 lets other machines on the same network reach ports
+  published on 127.0.0.1, and nothing enforced the minimum that the docs give. The Docker check
+  now reads the engine's version from the `docker version` call it already made and, on Linux
+  only, stops the `docker:*` scripts when the major version is below 28 ("Docker Engine is older
+  than version 28. ..."). macOS is not checked: Docker Desktop and OrbStack run the engine in a
+  virtual machine. Tests in `scripts/check-docker.test.ts` cover old, new and unreadable versions
+  on both systems and the command runner's capture of the output; five deliberate breakages each
+  failed them. It has not run against a real old engine: the end-to-end check used a stand-in
+  `docker` that reports 26.1.5, with Node.js told that it runs on Linux.
+- The "How to verify" step above now creates the root `.env` with `chmod 600`, like instruction
+  3's own steps since its review.
+
+How to verify, from the repository root:
+
+```sh
+pnpm exec vitest run scripts/check-docker.test.ts   # "Tests  21 passed (21)"
+```
+
 ## #8 - Structured logging with request IDs
 
 **What changed**
@@ -1160,7 +1249,7 @@ developer runs them:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm --filter @apex/api test   # all pass: "Tests  225 passed (225)" after the wave w0 review
+pnpm --filter @apex/api test   # all pass: "Tests  231 passed (231)" after the wave w0 review
 pnpm lint                      # exits with code 0
 pnpm typecheck                 # shared, api and web each report "Done"
 ```
@@ -1281,4 +1370,4 @@ pnpm --filter @apex/api exec vitest run src/lib/redact.test.ts src/logging.test.
 pnpm --filter @apex/api exec vitest run src/server.test.ts -t "pino-pretty|redacted JSON line"
 ```
 
-The first ends with `Tests  135 passed (135)`, the second with `Tests  4 passed | 9 skipped (13)`.
+The first ends with `Tests  135 passed (135)`, the second with `Tests  4 passed | 11 skipped (15)`.
