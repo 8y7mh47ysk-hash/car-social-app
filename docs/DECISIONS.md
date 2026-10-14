@@ -1021,16 +1021,16 @@ Keep entries brief. Details belong in code comments and the build log.
   loads; `server-schema.ts` holds the server schema; `validate.ts` (formerly `schema.ts`) holds
   `validateWebEnv`, which now checks each group with its own schema and reports both groups'
   problems in one error. `server.ts` exports `getServerEnv()`, which validates `process.env` each
-  time it is called. Tests fail if browser code loads the server schema, if `server.ts` reads a
-  variable when it loads, if a rule about several variables is skipped, or if `next.config.ts`
-  stops running the check.
+  time it is called. Tests fail if `public.ts` brings the server schema into browser code, if
+  `server.ts` reads a variable when it loads, if a rule about several variables is skipped, or if
+  `next.config.ts` stops running the check.
 - Trade-offs: three small modules instead of one. `server-schema.ts` cannot import `server-only`,
-  because `next.config.ts` loads it outside React Server Components, so only a comment and the
-  test keep browser code from importing it. `getServerEnv()` validates again on every call
-  (microseconds for a few variables) rather than caching, so there is no stale copy to reset. A
-  request that reads a missing variable fails, but `next dev` and `next start` refuse to start
-  without it in the first place; a page prerendered by `next build` that calls it still needs
-  the variable at build time.
+  because `next.config.ts` loads it outside React Server Components, so only a comment keeps
+  other browser code from importing it; the test covers what `public.ts` loads. `getServerEnv()`
+  validates again on every call (microseconds for a few variables) rather than caching, so there
+  is no stale copy to reset. A request that reads a missing variable fails, but `next dev` and
+  `next start` refuse to start without it in the first place; a page prerendered by `next build`
+  that calls it still needs the variable at build time.
 
 ### Ignore env files named like postgres.env, and direnv's .envrc, too
 
@@ -1428,3 +1428,48 @@ Keep entries brief. Details belong in code comments and the build log.
   what they serve; #68's Playwright tests cover pages and flows. Once the web app has a required
   server variable (Phase 2), this step needs a throwaway value for it, as the Compose step has
   for the passwords. The time limits are generous, so a slow runner does not fail it.
+
+### The env lint rules also ban import() of process; process passed as a value is left to review
+
+- Date: 2026-10-11 · Instruction: #4 · Author: Alpha (wave w0 review, round 2)
+- Context: found in the round-2 review of "The env lint rule also bans importing process".
+  `no-restricted-imports` does not check `import()`, so `await import("node:process")` and
+  `await import("process")` reached `process.env` in `apps/*/src` and `packages/*/src` without a
+  lint error, and so did an alias (`const proc = process`). The config's comment said that
+  banning imports closed the routes that the property rule cannot see, and that entry named only
+  `Reflect.get(process, "env")` as a route that still passes.
+- Decision: a `no-restricted-syntax` rule rejects `import()` of `process` or `node:process`,
+  written as a string or a template literal. `banImports()` in `eslint.config.mjs` builds both
+  rules from one list of patterns, so the static and the `import()` bans stay in step.
+  `env-access.test.ts` checks the three new routes in each folder, and that `import()` of other
+  modules still passes. The config's comment now names the routes that remain.
+- Trade-offs: code that passes `process` around as a value still gets through: an alias,
+  `Reflect.get(process, "env")`, `process[name]`, `createRequire(import.meta.url)("process")`,
+  and an `import()` whose source is computed. Each takes intent rather than a slip, and review
+  catches it. Selectors see syntax, not scopes: a ban on the bare name `process` would also hit a
+  local variable of that name, and listing every allowed use (`process.exitCode`,
+  `typeof process`, a property named `process`) makes a long, fragile selector. A rule of our own
+  with scope analysis would be exact, but it is code to maintain for routes nobody takes by
+  accident.
+
+### Web env: ESLint keeps browser code from importing the server schema
+
+- Date: 2026-10-11 · Instruction: #4 · Author: Alpha (wave w0 review, round 2)
+- Context: found in the round-2 review. "Web env: the server schema stays out of browser code,
+  server values are read on use" relied on a comment and `public.test.ts` to keep browser code
+  from loading `server-schema.ts`, but that test covers only the modules that `public.ts` loads.
+  A Client Component that imported `server-schema.ts` directly passed lint and the tests, and
+  `next build` put the schema's variable names and rules into `.next/static`.
+- Decision: in `apps/web/src`, ESLint rejects importing `server-schema` or `validate` (which
+  imports it) through an `env` folder, such as `../../env/server-schema`, with or without an
+  extension, as an import, a re-export or an `import()`. The env modules' own imports
+  (`./server-schema`) still pass, and `public.test.ts` still checks the modules that browser code
+  loads; `next.config.ts`, outside `src`, imports `validate.ts`. A later config block replaces a
+  rule that an earlier block sets for the same files, so this block repeats the ban on importing
+  `process` (`banImports`). `env-access.test.ts` checks each route and the allowed imports.
+- Trade-offs: the rule matches import paths, not modules. A new module inside `src/env` that
+  browser code loads needs a check like `public.test.ts`'s; a module elsewhere that re-exports
+  the schema has to import it through an env folder, which the rule rejects. A server-only module
+  that has to run the check (an `instrumentation.ts`, if instruction 102 needs one) goes in the
+  block's `ignores`. `server-schema.ts` still cannot import `server-only`, because
+  `next.config.ts` loads it outside React Server Components.
