@@ -41,6 +41,13 @@ const processImports = {
   message: `Use the global process. ${envModuleRule}`,
 };
 
+/** The web app's server env schema, and validate.ts, which imports it. */
+const webServerEnvImports = {
+  regex: "(?:^|\\/)env\\/(?:server-schema|validate)(?:\\.[cm]?[jt]sx?)?$",
+  message:
+    "The server env schema must never reach the browser. Server code reads server variables with getServerEnv() from src/env/server.ts (docs/DECISIONS.md).",
+};
+
 export default defineConfig(
   globalIgnores([
     "**/.next/",
@@ -105,6 +112,20 @@ export default defineConfig(
       ],
       ...banImports(processImports),
     },
+  },
+
+  // Browser code must never load the web app's server env schema, which would send the server
+  // variables' names, rules and defaults to every visitor. So no module imports it, or validate.ts,
+  // through an env folder (`../env/server-schema`): server code reads server variables with
+  // getServerEnv() from src/env/server.ts, which "server-only" keeps out of browser code, and
+  // next.config.ts, outside src, runs validate.ts's check. The env modules' own imports
+  // (`./server-schema`) pass; public.test.ts checks that the ones browser code loads never load
+  // the schema. A server-only module that has to run the check (an instrumentation.ts, if
+  // instruction 102 needs one) goes in `ignores`. These rules replace the block above's for these
+  // files, so they repeat its ban on importing process. env-access.test.ts checks them.
+  {
+    files: ["apps/web/src/**"],
+    rules: banImports(processImports, webServerEnvImports),
   },
 
   // Plain JavaScript config files are not part of any tsconfig, so skip type-aware rules.
