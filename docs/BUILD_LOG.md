@@ -721,7 +721,8 @@ API_PORT=99999 LOG_LEVEL=loud pnpm --filter @apex/api start
 The API reads `apps/api/.env`, and the shell wins over it:
 
 ```sh
-cp apps/api/.env.example apps/api/.env && echo "API_PORT=4010" >> apps/api/.env
+cp apps/api/.env.example apps/api/.env && chmod 600 apps/api/.env
+echo "API_PORT=4010" >> apps/api/.env
 pnpm --filter @apex/api dev                  # logs "Server listening at http://127.0.0.1:4010"
 curl http://127.0.0.1:4010/health            # second terminal: {"status":"ok"}
 ```

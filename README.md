@@ -123,7 +123,9 @@ arguments lists every script.
 Each app reads its settings from environment variables and validates them with Zod: the API as
 it starts, the web app whenever Next.js starts or builds it. If a variable is missing or invalid,
 the command stops and names every problem, without ever printing a value. Settings can also live
-in a gitignored `.env` file next to the app: copy the app's template to create one.
+in a gitignored `.env` file next to the app: copy the app's template to create one, and make
+the copy readable by your user only (`chmod 600`, as for the root `.env`), because settings can
+include secrets.
 
 | File            | Read by                                                       | Template                |
 | --------------- | ------------------------------------------------------------- | ----------------------- |
