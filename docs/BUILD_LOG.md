@@ -417,8 +417,10 @@ Found while merging the round's five branches, and from the reviewers' hand-offs
   that staged only a `package.json` with a changed dependency range ran an install and the
   `prepare` script, and the commit held both `package.json` and the rewritten
   `pnpm-lock.yaml`. pnpm's default is kept, so that merges that bring in new dependencies install
-  them before their type check; the README section "Git hooks" now says so, and docs/DECISIONS.md
-  records why ("The pre-commit type check may install dependencies first").
+  them before their type check (with `--config.verify-deps-before-run=error` such a merge stopped
+  until `pnpm install` was run: tried in a scratch clone); the README section "Git hooks" now says
+  so, and docs/DECISIONS.md records why ("The pre-commit type check may install dependencies
+  first").
 - The note above that CI is the check that cannot be bypassed is qualified (Charlie's hand-off):
   CI does not check commit messages, and on GitHub Free a private repository cannot require it to
   pass. The same correction is in the DECISIONS entry on the hooks.

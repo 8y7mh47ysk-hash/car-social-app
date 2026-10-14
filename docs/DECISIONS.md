@@ -1401,10 +1401,13 @@ Keep entries brief. Details belong in code comments and the build log.
   install first and that the updated lockfile then becomes part of the commit.
 - Trade-offs: a commit can download packages and change `node_modules`, and the lockfile change
   joins the commit without being staged (the commit's summary lists it). The install keeps
-  pnpm's safeguards (the one-day release-age hold, `allowBuilds`). Rejected: `error`, which would
-  stop every merge or pull that brings in dependency changes until someone runs `pnpm install` by
-  hand, and `warn`, which would let the stale lockfile through to CI, whose frozen install then
-  fails.
+  pnpm's safeguards (the one-day release-age hold, `allowBuilds`). Rejected: `error` for the
+  hook's type check (`pnpm --config.verify-deps-before-run=error typecheck`, tried in scratch
+  clones). It stops the commit that stages only `package.json` ("a modified manifest is no longer
+  satisfied by the lockfile"), but also every merge that brings in a new dependency ("the
+  installed dependencies are not up to date with the lockfile"), and it would stop the first
+  commit after a pull that brings one in, until someone runs `pnpm install`. `warn` would let
+  the stale lockfile through to CI, whose frozen install then fails.
 
 ### CI starts the production build and checks that both apps answer
 
