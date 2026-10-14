@@ -22,5 +22,5 @@ export const publicEnvSchema = z.object({} satisfies Record<`NEXT_PUBLIC_${strin
  */
 export const webEnvMessages: ParseEnvOptions = {
   app: "the web app",
-  hint: "Set them in apps/web/.env (see apps/web/.env.example) or in the environment.",
+  hint: "Set them in apps/web/.env (see apps/web/.env.example) or in the environment, which overrides the .env files.",
 };

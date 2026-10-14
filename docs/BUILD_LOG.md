@@ -714,7 +714,7 @@ API_PORT=99999 LOG_LEVEL=loud pnpm --filter @apex/api start
 # Invalid environment variables for the API (values are not shown):
 #   - API_PORT: must be a whole number from 0 to 65535
 #   - LOG_LEVEL: must be one of fatal, error, warn, info, debug, trace, silent
-# Set them in apps/api/.env (see apps/api/.env.example) or in the environment.
+# Set them in apps/api/.env (see apps/api/.env.example) or in the environment, which overrides the file.
 # then pnpm reports "Command failed with exit code 1"
 ```
 

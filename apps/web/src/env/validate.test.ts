@@ -103,7 +103,7 @@ describe("validateWebEnv", () => {
         "Invalid environment variables for the web app (values are not shown):",
         "  - NEXT_PUBLIC_API_URL: must be a URL",
         "  - SESSION_SECRET: must be at least 32 characters",
-        "Set them in apps/web/.env (see apps/web/.env.example) or in the environment.",
+        "Set them in apps/web/.env (see apps/web/.env.example) or in the environment, which overrides the .env files.",
       ].join("\n"),
     );
     expect(JSON.stringify(error?.issues)).not.toContain("s3cr3t");
