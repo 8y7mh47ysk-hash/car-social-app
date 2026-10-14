@@ -113,9 +113,10 @@ Run these from the repository root.
 | `pnpm db:seed`                  | Not available yet (instruction 26): prints a notice and fails.          |
 | `pnpm --filter <package> <cmd>` | Runs one package's script, for example `pnpm --filter @apex/api test`.  |
 
-The `docker:*` scripts first check that Docker, its Compose plugin and its engine are ready, and
-say what to do if one is not. Docker Compose reads its passwords from the root `.env` file (see
-[infra/README.md](infra/README.md)). `pnpm run` with no arguments lists every script.
+The `docker:*` scripts first check that Docker, its Compose plugin and its engine are ready (on
+Linux, Docker Engine 28 or later), and say what to do if one is not. Docker Compose reads its
+passwords from the root `.env` file (see [infra/README.md](infra/README.md)). `pnpm run` with no
+arguments lists every script.
 
 ## Configuration
 
@@ -200,6 +201,12 @@ left as they were: fix the problem, stage the fix and commit again. A merge whos
 left in progress with its changes staged: fix the problem and run `git commit`, or give up with
 `git merge --abort`. The `git commit` that finishes a merge, after failed checks or after
 conflicts, checks everything the merge brings in again, not only the files with conflicts.
+
+`pnpm typecheck` installs dependencies first when `node_modules` is out of date (pnpm's
+`verifyDepsBeforeRun` setting), and the hook runs it. So if you stage a `package.json` whose
+dependencies no longer match `pnpm-lock.yaml`, the hook installs them and the updated lockfile
+becomes part of the commit. To review that change first, run `pnpm install` and stage the
+lockfile yourself.
 
 While the pre-commit hook runs, it keeps a backup of your changes in the git stash, in an entry
 named `lint-staged automatic backup`. Only Ctrl+C (SIGINT) lets it tidy up. If it is stopped in
