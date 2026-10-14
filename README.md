@@ -198,7 +198,8 @@ are not checked.
 If a hook fails, or you press Ctrl+C while it runs, the commit is not made and your files are
 left as they were: fix the problem, stage the fix and commit again. A merge whose checks fail is
 left in progress with its changes staged: fix the problem and run `git commit`, or give up with
-`git merge --abort`.
+`git merge --abort`. The `git commit` that finishes a merge, after failed checks or after
+conflicts, checks everything the merge brings in again, not only the files with conflicts.
 
 While the pre-commit hook runs, it keeps a backup of your changes in the git stash, in an entry
 named `lint-staged automatic backup`. Only Ctrl+C (SIGINT) lets it tidy up. If it is stopped in

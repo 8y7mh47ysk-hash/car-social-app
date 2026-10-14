@@ -1297,3 +1297,31 @@ Keep entries brief. Details belong in code comments and the build log.
   brings in a lockfile change runs every test (about 16 seconds). Fast-forward merges and rebases
   make no merge commit and run no hook; their commits were checked when they were made, unless
   someone skipped the hooks. `git merge --no-verify` skips the hook, like `git commit --no-verify`.
+
+### A commit that finishes a merge checks everything the merge brings in
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Integrator (wave w0, round 1)
+- Context: "Merge commits that git makes run the pre-commit checks" leaves a merge whose checks
+  fail in progress, to be finished with `git commit`, which also finishes a merge that stopped
+  with conflicts. git runs pre-commit for that commit while `MERGE_HEAD` exists, and lint-staged
+  17.6 then keeps only the staged files that also differ from `MERGE_HEAD`, in effect the files
+  that both sides changed (`lib/getStagedFiles.js`; its README does not mention this). Found while
+  integrating round 1: after a failed pre-merge-commit check, `git commit` ran no check at all and
+  made the merge commit; after a conflict, only the conflicted files were checked, so the type
+  check and the related tests ran only if a conflicted file called for them.
+- Decision: while `MERGE_HEAD` exists, `.husky/pre-commit` adds `--diff=--staged --stash` to the
+  lint-staged command. With `--diff`, lint-staged skips that filter and takes the files from
+  `git diff --staged`, the same list as for any other commit. `--diff` also turns the backup stash
+  off, and `--hide-all` needs it to set unstaged changes and untracked files aside and to restore
+  everything after a failed check, so `--stash` turns it back on. Two tests in
+  `git-hooks.test.ts` finish a merge with `git commit`: after a failed pre-merge-commit check (a
+  check that still fails stops it again, with an unrelated edit and a new file set aside and
+  restored and the merge still in progress) and after a conflict (the file that only the merged
+  branch changed is checked too).
+- Trade-offs: this relies on how lint-staged handles `--diff`, which its README documents only as
+  replacing `--staged`; the tests fail if a later version changes that. The commit that finishes a
+  merge checks everything the merge brings in again, which takes as long as the pre-merge-commit
+  run did. During a merge, lint-staged's progress lines say "changed files" instead of "staged
+  files". Passing the two flags on every commit would save the `if`, but would move every commit
+  onto the `--diff` path, which lint-staged's README offers for comparing branches, for example in
+  CI; ordinary commits keep its default path.

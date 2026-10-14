@@ -218,7 +218,7 @@ Run from the repository root:
 ```sh
 pnpm install --frozen-lockfile          # a fresh install prints ". prepare$ husky"
 git config --get core.hooksPath         # prints .husky/_
-pnpm exec vitest run git-hooks.test.ts  # "Tests  62 passed (62)" since the wave w0 review
+pnpm exec vitest run git-hooks.test.ts  # "Tests  64 passed (64)" since the wave w0 review
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
@@ -332,12 +332,13 @@ a test that fails without it:
   process, which `vitest related` cannot trace. It is now a rerun trigger, so it runs every test;
   `git-hooks.test.ts` checks it.
 
-`git-hooks.test.ts` now has 62 tests (54 before): the seven above (two merges, four stopped
-hooks and the entrypoint trigger) and a trigger case for `eslint.config.mjs` from the review of
-instruction 4. How to verify, from the repository root:
+`git-hooks.test.ts` now has 64 tests (54 before): the seven above (two merges, four stopped
+hooks and the entrypoint trigger), a trigger case for `eslint.config.mjs` from the review of
+instruction 4 and two merge tests from the round's integration (see below). How to verify, from
+the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts   # "Tests  62 passed (62)"
+pnpm exec vitest run git-hooks.test.ts   # "Tests  64 passed (64)"
 ```
 
 To see a merge stopped by the checks, in a scratch clone (a branch committed with `--no-verify`
@@ -366,6 +367,27 @@ documentation change 0.8 s (1.6 s the first time), a source change with related 
 documentation change or source change took the same: 0.8 s and 4.1 s.
 
 No owner actions.
+
+**Integration fixes (wave w0, round 1)**
+
+Found while merging the round's five branches:
+
+- The merge check above stopped short of the commit that finishes a merge. git runs the
+  pre-commit hook for that `git commit`, after failed checks or after a conflict, and while a
+  merge is in progress lint-staged checks only the staged files that also differ from the merged
+  branch, in effect the files that both sides changed. So after a failed pre-merge-commit check,
+  `git commit` made the merge commit without running any check, and after a conflict only the
+  conflicted files were checked. While a merge is in progress, the pre-commit hook now passes
+  `--diff=--staged --stash`, so lint-staged checks every staged file and keeps its backup (see
+  "A commit that finishes a merge checks everything the merge brings in" in docs/DECISIONS.md).
+  Tests: two in `git-hooks.test.ts`; both fail without the change, and the first also fails
+  without `--stash`.
+
+How to verify, from the repository root:
+
+```sh
+pnpm exec vitest run git-hooks.test.ts -t "merge"   # "Tests  5 passed | 59 skipped (64)"
+```
 
 ## #3 - Docker Compose services
 
