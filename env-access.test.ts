@@ -8,7 +8,7 @@ import { z } from "zod";
 
 const eslint = new ESLint({ cwd: import.meta.dirname });
 
-const ENV_RULES = ["no-restricted-properties", "no-restricted-imports"];
+const ENV_RULES = ["no-restricted-properties", "no-restricted-imports", "no-restricted-syntax"];
 
 /** A rule's setting as ESLint resolves it: the severity, then any options. */
 const ruleSettingSchema = z.tuple(
@@ -21,6 +21,7 @@ const resolvedConfigSchema = z.object({
   rules: z.object({
     "no-restricted-properties": ruleSettingSchema.optional(),
     "no-restricted-imports": ruleSettingSchema.optional(),
+    "no-restricted-syntax": ruleSettingSchema.optional(),
   }),
 });
 
@@ -57,6 +58,18 @@ const ROUTES_TO_THE_ENVIRONMENT = [
     route: "a default import under another name",
     code: 'import proc from "process";\nexport const port = proc.env.API_PORT;',
   },
+  {
+    route: "import() of node:process",
+    code: 'const { env } = await import("node:process");\nexport const port = env.API_PORT;',
+  },
+  {
+    route: "import() of process",
+    code: 'const proc = await import("process");\nexport const port = proc.env.API_PORT;',
+  },
+  {
+    route: "import() with a template literal",
+    code: "const { env } = await import(`node:process`);\nexport const port = env.API_PORT;",
+  },
   { route: "globalThis.process", code: "export const port = globalThis.process.env.API_PORT;" },
   { route: "global.process", code: "export const port = global.process.env.API_PORT;" },
   {
@@ -82,6 +95,14 @@ describe("the rules that keep process.env in the env modules", () => {
 
     it("allow the global process for anything else", async () => {
       expect(rulesBrokenBy("process.exitCode = 1;", await envRulesFor(path))).toEqual([]);
+    });
+
+    it("allow importing other modules, statically or with import()", async () => {
+      const code =
+        'import { join } from "node:path";\nconst os = await import("node:os");\n' +
+        "const timers = await import(`node:timers`);\nexport { join, os, timers };";
+
+      expect(rulesBrokenBy(code, await envRulesFor(path))).toEqual([]);
     });
   });
 
