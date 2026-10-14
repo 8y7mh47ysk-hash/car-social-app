@@ -89,6 +89,12 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: node scripts/check-build-warnings.ts "$RUNNER_TEMP/build.log"
 
+      # A build that succeeds can still fail to start: start both production builds with
+      # `pnpm start` and check that each one answers, then stop them.
+      - name: Start the production build
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: node scripts/check-start.ts
+
       # Needs only Docker, which the runner has, so it also runs when the install failed.
       - name: Validate docker-compose.yml
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}

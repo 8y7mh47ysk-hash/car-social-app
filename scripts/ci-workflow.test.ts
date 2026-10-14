@@ -206,6 +206,17 @@ describe("ci.yml", () => {
     expect(runs.some((run) => run.startsWith("node scripts/check-build-warnings.ts "))).toBe(true);
   });
 
+  it("starts the production build once the Build step has passed", () => {
+    // `pnpm build` cannot show that the apps start: next start checks the server's environment
+    // only as it starts, and the API's start runs the compiled code with flags of its own.
+    const build = steps.findIndex((step) => step.run?.startsWith("pnpm build") === true);
+    const start = steps.findIndex((step) => step.run === "node scripts/check-start.ts");
+
+    expect(build).toBeGreaterThanOrEqual(0);
+    expect(start).toBeGreaterThan(build);
+    expect(steps[start]?.if).toContain(`steps.${steps[build]?.id ?? "?"}.outcome == 'success'`);
+  });
+
   it("runs each step after the install even when an earlier check failed", () => {
     // Without a status function in `if`, GitHub adds `success()`, which skips every step after the
     // first failure. `always()` would also keep going after the run was cancelled. The whole
