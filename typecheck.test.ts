@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import {
+  chmod,
   copyFile,
   cp,
   mkdir,
@@ -17,16 +18,110 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { z } from "zod";
 
-// `pnpm typecheck` runs each package's `typecheck` script. These tests run the web app's script
-// on a copy of the app, so they can put generated files in its .next folder without touching this
-// checkout's.
+// `pnpm typecheck` checks the root files and then runs each package's `typecheck` script. These
+// tests run the root script on a stand-in workspace, and the web app's script on a copy of the
+// app, so they can put generated files in its .next folder without touching this checkout's.
 
 const repoRoot = fileURLToPath(new URL(".", import.meta.url));
 const webRoot = join(repoRoot, "apps", "web");
 
-const webScripts = z
-  .object({ scripts: z.object({ typecheck: z.string() }) })
-  .parse(JSON.parse(await readFile(join(webRoot, "package.json"), "utf8"))).scripts;
+const typecheckScript = z.object({ scripts: z.object({ typecheck: z.string() }) });
+
+const rootScripts = typecheckScript.parse(
+  JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8")),
+).scripts;
+
+const webScripts = typecheckScript.parse(
+  JSON.parse(await readFile(join(webRoot, "package.json"), "utf8")),
+).scripts;
+
+/**
+ * Runs a package.json script with `sh -c` in `cwd`, as pnpm does, with `bins` and the running
+ * Node.js first on PATH; resolves with its exit code and output. Settings that an outer pnpm
+ * exports to the scripts it runs are left out of the environment.
+ */
+function runScript(
+  script: string,
+  cwd: string,
+  bins: readonly string[],
+): Promise<{ code: number | null; output: string }> {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!/^(npm|pnpm)_config_/i.test(name)) {
+      env[name] = value;
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const child = spawn("sh", ["-c", script], {
+      cwd,
+      env: {
+        ...env,
+        NEXT_TELEMETRY_DISABLED: "1",
+        PATH: [...bins, dirname(process.execPath), process.env["PATH"]]
+          .filter((entry) => entry !== undefined)
+          .join(delimiter),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    const collect = (chunk: string): void => {
+      output += chunk;
+    };
+    child.stdout.setEncoding("utf8").on("data", collect);
+    child.stderr.setEncoding("utf8").on("data", collect);
+    child.once("error", reject);
+    child.once("close", (code) => {
+      resolve({ code, output });
+    });
+  });
+}
+
+/**
+ * Creates a pnpm workspace with two packages whose `typecheck` scripts stand in for type checks
+ * that fail: "first" fails at once, "second" a second later. Each writes its name to checks.log
+ * before it fails, so the log shows which checks got that far. A stand-in `tsc` in its bin folder
+ * passes the root files' check.
+ */
+async function failingWorkspace(): Promise<{ dir: string; bin: string }> {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "apex-typecheck-root-")));
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+  const files = {
+    "pnpm-workspace.yaml": "packages:\n  - packages/*\n",
+    "package.json": `${JSON.stringify({ name: "workspace", private: true })}\n`,
+    "packages/first/package.json": `${JSON.stringify({
+      name: "first",
+      private: true,
+      scripts: { typecheck: "echo first >> ../../checks.log; exit 2" },
+    })}\n`,
+    "packages/second/package.json": `${JSON.stringify({
+      name: "second",
+      private: true,
+      scripts: { typecheck: "sleep 1; echo second >> ../../checks.log; exit 2" },
+    })}\n`,
+    "bin/tsc": "#!/bin/sh\nexit 0\n",
+  };
+  for (const [path, content] of Object.entries(files)) {
+    await mkdir(dirname(join(dir, path)), { recursive: true });
+    await writeFile(join(dir, path), content);
+  }
+  await chmod(join(dir, "bin", "tsc"), 0o755);
+  return { dir, bin: join(dir, "bin") };
+}
+
+describe("the root type check", { timeout: 60_000 }, () => {
+  // `pnpm --recursive` stops the other packages' checks when one fails, unless it runs with
+  // --no-bail, and the hook and CI would then show only the first package's errors.
+  it("runs every package's check when one fails, so one run shows all their errors", async () => {
+    const workspace = await failingWorkspace();
+
+    const result = await runScript(rootScripts.typecheck, workspace.dir, [workspace.bin]);
+
+    expect(result.code, result.output).not.toBe(0);
+    const log = await readFile(join(workspace.dir, "checks.log"), "utf8");
+    const finished = log.split("\n").filter((line) => line !== "");
+    expect(finished.sort()).toEqual(["first", "second"]);
+  });
+});
 
 /**
  * Whether a file or folder of the web app belongs in the copy: everything except installed
@@ -60,33 +155,7 @@ async function copyWebApp(files: Readonly<Record<string, string>>): Promise<stri
 
 /** Runs the web app's `typecheck` script in `cwd`; resolves with its exit code and output. */
 function typecheck(cwd: string): Promise<{ code: number | null; output: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("sh", ["-c", webScripts.typecheck], {
-      cwd,
-      env: {
-        ...process.env,
-        NEXT_TELEMETRY_DISABLED: "1",
-        PATH: [
-          join(webRoot, "node_modules", ".bin"),
-          dirname(process.execPath),
-          process.env["PATH"],
-        ]
-          .filter((entry) => entry !== undefined)
-          .join(delimiter),
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let output = "";
-    const collect = (chunk: string): void => {
-      output += chunk;
-    };
-    child.stdout.setEncoding("utf8").on("data", collect);
-    child.stderr.setEncoding("utf8").on("data", collect);
-    child.once("error", reject);
-    child.once("close", (code) => {
-      resolve({ code, output });
-    });
-  });
+  return runScript(webScripts.typecheck, cwd, [join(webRoot, "node_modules", ".bin")]);
 }
 
 /**

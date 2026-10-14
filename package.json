@@ -14,7 +14,7 @@
     "build": "pnpm --recursive build",
     "start": "pnpm --parallel --filter @apex/api --filter @apex/web start",
     "lint": "eslint . --max-warnings 0",
-    "typecheck": "tsc --project tsconfig.json && pnpm --recursive typecheck",
+    "typecheck": "tsc --project tsconfig.json && pnpm --recursive --no-bail typecheck",
     "test": "vitest run",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
