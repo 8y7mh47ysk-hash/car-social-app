@@ -122,10 +122,11 @@ arguments lists every script.
 
 Each app reads its settings from environment variables and validates them with Zod: the API as
 it starts, the web app whenever Next.js starts or builds it. If a variable is missing or invalid,
-the command stops and names every problem, without ever printing a value. Settings can also live
-in a gitignored `.env` file next to the app: copy the app's template to create one, and make
-the copy readable by your user only (`chmod 600`, as for the root `.env`), because settings can
-include secrets.
+the app does not start, or the build stops, and the error names every problem without ever
+printing a value (in `pnpm dev`, the API waits and starts again when you save a fixed
+`apps/api/.env`). Settings can also live in a gitignored `.env` file next to the app: copy the
+app's template to create one, and make the copy readable by your user only (`chmod 600`, as for
+the root `.env`), because settings can include secrets.
 
 | File            | Read by                                                       | Template                |
 | --------------- | ------------------------------------------------------------- | ----------------------- |
@@ -133,9 +134,11 @@ include secrets.
 | `apps/api/.env` | The API, in `pnpm dev` and `pnpm start`                       | `apps/api/.env.example` |
 | `apps/web/.env` | Next.js, in `pnpm dev`, `pnpm build`, `pnpm start`            | `apps/web/.env.example` |
 
-Variables set in the shell win over the files. `WEB_HOST` and `WEB_PORT` work only from the
-shell, because Next.js opens its port before it reads `.env` files. The templates explain each
-variable and the rules for adding one; the design is in [docs/DECISIONS.md](docs/DECISIONS.md).
+Variables set in the shell win over the files: if an error names a variable that the file sets
+correctly, the shell has its own value (check with `echo "$LOG_LEVEL"`, for example). `WEB_HOST`
+and `WEB_PORT` work only from the shell, because Next.js opens its port before it reads `.env`
+files. The templates explain each variable and the rules for adding one; the design is in
+[docs/DECISIONS.md](docs/DECISIONS.md).
 
 The API logs one JSON object per line. To read its log in a terminal while developing, add
 `LOG_FORMAT=pretty` to `apps/api/.env`; how logging works is in
