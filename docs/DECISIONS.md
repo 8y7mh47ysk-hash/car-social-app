@@ -123,7 +123,9 @@ Keep entries brief. Details belong in code comments and the build log.
   no build step. It also exports an `"@apex/dist"` condition pointing at `dist/`, which `tsc`
   builds. `pnpm --filter @apex/api start` runs `node --conditions=@apex/dist dist/server.js`, so
   production loads only compiled JavaScript. `pnpm build` builds packages/shared first because
-  pnpm runs recursive scripts in dependency order.
+  pnpm runs recursive scripts in dependency order. (Next.js needs no `transpilePackages` to read
+  the source: corrected in round 2 of the wave w0 review, see "Next.js compiles @apex/shared
+  without transpilePackages".)
 - Trade-offs: the production API needs packages/shared built and the `--conditions` flag (future
   Dockerfiles must pass it, and since the wave w0 review `--no-strip-types` too, or run the API's
   `start` script). Without packages/shared built, the start fails with
@@ -229,7 +231,8 @@ Keep entries brief. Details belong in code comments and the build log.
   it detects an AI coding agent. (The version-matched Next.js docs that file points to are in
   `node_modules/next/dist/docs/`.) `next-env.d.ts` is generated, so it is gitignored and
   `pnpm typecheck` runs `next typegen` before `tsc`. No `next/font/google`: fonts are self-hosted
-  from instruction 10.
+  from instruction 10. (The `transpilePackages` entry was removed in round 2 of the wave w0
+  review: see "Next.js compiles @apex/shared without transpilePackages".)
 - Trade-offs: `typecheck` for the web app takes about a second longer for type generation.
 
 ### API structure: app factory, plugin routes and a small entrypoint
@@ -1520,3 +1523,20 @@ Keep entries brief. Details belong in code comments and the build log.
   the test too. The check that every test file runs lives in the "tooling" project and cannot see
   that project's own removal. Options are compared only for jsx-a11y, whose recommended set
   differs from its strict set in options alone.
+
+### Next.js compiles @apex/shared without transpilePackages
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Delta (wave w0 review, round 2)
+- Context: "Next.js app configuration" listed `@apex/shared` in `transpilePackages`, and
+  "Workspace packages are consumed as TypeScript source; the production API runs compiled code"
+  named it as how Next.js reads the package's source. The documentation that ships with Next.js
+  16.4 (node_modules/next/dist/docs, `transpilePackages`) says that Turbopack compiles workspace
+  packages by itself under both routers, as webpack does for the App Router; the setting is for
+  `node_modules` packages that ship TypeScript or JSX, and for the Pages Router. In round 2 of the
+  review, removing it passed every check: the tests, `pnpm build`, CI's build-warning and start
+  checks, and a Client Component that imports the package, built and served by `next dev`.
+- Decision: apps/web/next.config.ts has no `transpilePackages`; a comment there says why. Its
+  settings test now also checks the two root settings, `turbopack.root` and
+  `outputFileTracingRoot`, which no check covered either.
+- Trade-offs: one setting fewer that looked necessary and did nothing. A `node_modules` package
+  that ships TypeScript, or a move to the Pages Router built with webpack, would need an entry.

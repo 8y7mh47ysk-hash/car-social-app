@@ -2,6 +2,7 @@
 // next.config.ts runs in Node.js, not in a browser.
 
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 import { PHASE_PRODUCTION_BUILD } from "next/constants";
 import { describe, expect, it, vi } from "vitest";
@@ -37,5 +38,14 @@ describe("the settings in next.config.ts", () => {
 
   it("stop next dev from writing an AGENTS.md into the app when an AI agent runs it", () => {
     expect(settings.agentRules).toBe(false);
+  });
+
+  // Otherwise Next.js infers the monorepo root from the workspace and lock files it finds above
+  // the app, so a stray one above the checkout could change what it watches and traces.
+  it("set the repository root as the monorepo root, for Turbopack and for output tracing", () => {
+    const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
+
+    expect(settings.turbopack?.root).toBe(repoRoot);
+    expect(settings.outputFileTracingRoot).toBe(repoRoot);
   });
 });
