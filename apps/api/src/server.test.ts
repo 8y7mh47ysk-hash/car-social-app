@@ -1,10 +1,13 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { connect, createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join } from "node:path";
 import type { Readable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 
 import { REDACTED } from "./lib/redact.ts";
@@ -503,5 +506,56 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
     expect(response.status).toBe(200);
     server.child.kill("SIGTERM");
     expect(await server.exited).toEqual({ code: 0, signal: null });
+  });
+});
+
+/** The API's package.json scripts. */
+const apiScripts = z
+  .object({ scripts: z.object({ dev: z.string() }) })
+  .parse(JSON.parse(await readFile(join(apiRoot, "package.json"), "utf8"))).scripts;
+
+describe("the dev script", { timeout: 20_000 }, () => {
+  // `pnpm dev` loads apps/api/.env. The script runs here in a folder of its own, which holds a .env
+  // file and a link to this package's src/, so a developer's own apps/api/.env plays no part.
+  it("reads its settings from apps/api/.env", async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "apex-api-dev-")));
+    onTestFinished(() => rm(dir, { recursive: true, force: true }));
+    await symlink(join(apiRoot, "src"), join(dir, "src"));
+    await writeFile(join(dir, ".env"), "LOG_FORMAT=yaml\n");
+    // `node --watch` runs the server in a child process, so the script gets a process group of its
+    // own, which the test stops as a whole.
+    const child = spawn("sh", ["-c", apiScripts.dev], {
+      cwd: dir,
+      detached: true,
+      env: { API_PORT: "0", PATH: [dirname(process.execPath), "/usr/bin", "/bin"].join(delimiter) },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const group = child.pid;
+    if (group === undefined) {
+      throw new Error("could not start the dev script");
+    }
+    onTestFinished(() => {
+      try {
+        process.kill(-group, "SIGKILL");
+      } catch {
+        // The group has already exited.
+      }
+    });
+    let output = "";
+    const collect = (chunk: string): void => {
+      output += chunk;
+    };
+    child.stdout.setEncoding("utf8").on("data", collect);
+    child.stderr.setEncoding("utf8").on("data", collect);
+
+    // Once the server has exited, `node --watch` waits for a file to change.
+    await vi.waitFor(
+      () => {
+        expect(output).toMatch(/Waiting for file changes|Server listening/);
+      },
+      { timeout: 10_000, interval: 50 },
+    );
+    expect(output).toContain("LOG_FORMAT: must be one of json, pretty");
+    expect(output).not.toContain("Server listening");
   });
 });
