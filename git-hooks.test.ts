@@ -459,16 +459,53 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
     ]);
   });
 
-  it("type-checks when the lockfile changes", async () => {
+  it("gives each kind of staged file to the tasks that handle it", async () => {
     const repo = await createRepo();
-    await repo.write("pnpm-lock.yaml", "lockfileVersion: '9.1'\n");
-    await repo.git("add", "pnpm-lock.yaml");
+    const code = [
+      "scripts/tool.cjs",
+      "scripts/tool.mjs",
+      "src/legacy.js",
+      "src/legacy.jsx",
+      "src/module.cts",
+      "src/module.mts",
+      "src/view.tsx",
+    ];
+    const other = ["src/data.json", "src/theme.css"];
+    for (const file of [...code, ...other]) {
+      await repo.write(file, "content\n");
+    }
+    await repo.git("add", "--all");
+    // git lists files sorted by path, and lint-staged keeps that order.
+    const staged = [...code, ...other].sort();
 
     const result = await repo.preCommit();
 
     expect(result.code, result.output).toBe(0);
-    expect(await repo.calls()).toContain(typecheck);
+    expect(await repo.calls()).toEqual([
+      `${eslint} ${code.join(" ")}`,
+      `${prettier} ${code.join(" ")}`,
+      `${prettierOther} ${other.join(" ")}`,
+      typecheck,
+      `${relatedTests} ${staged.join(" ")}`,
+      ...staged.map((file) => `A  ${file}`),
+    ]);
   });
+
+  // Files that can change types: TypeScript, JSON (package.json, tsconfig files, imported JSON)
+  // and the pnpm files that pin the versions of the dependencies and their types.
+  it.for(["src/view.tsx", "src/data.json", "pnpm-workspace.yaml", "pnpm-lock.yaml"])(
+    "type-checks when %s is staged",
+    async (file) => {
+      const repo = await createRepo();
+      await repo.write(file, "changed: true\n");
+      await repo.git("add", file);
+
+      const result = await repo.preCommit();
+
+      expect(result.code, result.output).toBe(0);
+      expect(await repo.calls()).toContain(typecheck);
+    },
+  );
 
   it("checks a commit that only deletes a file", async () => {
     const repo = await createRepo();
