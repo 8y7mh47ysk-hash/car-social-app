@@ -1520,9 +1520,10 @@ Keep entries brief. Details belong in code comments and the build log.
   and packages from the workspace folders, so a new package such as packages/ui is checked
   without a change to the tests.
 - Trade-offs: the strict flags are listed in the test, so changing them on purpose means changing
-  the test too. The check that every test file runs lives in the "tooling" project and cannot see
-  that project's own removal. Options are compared only for jsx-a11y, whose recommended set
-  differs from its strict set in options alone.
+  the test too. The check that every test file runs lives in the "tooling" project, so it cannot
+  see that project's own removal; scripts/tooling-project.test.ts, in the "scripts" project, checks
+  that the tooling project still runs it. Options are compared only for jsx-a11y, whose
+  recommended set differs from its strict set in options alone.
 
 ### Next.js compiles @apex/shared without transpilePackages
 
@@ -1540,3 +1541,22 @@ Keep entries brief. Details belong in code comments and the build log.
   `outputFileTracingRoot`, which no check covered either.
 - Trade-offs: one setting fewer that looked necessary and did nothing. A `node_modules` package
   that ships TypeScript, or a move to the Pages Router built with webpack, would need an entry.
+
+### The web tests compile the global stylesheet with Tailwind CSS
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Delta (wave w0 review, round 2)
+- Context: instruction 1 asks for a minimal Tailwind CSS 4 setup: `@import "tailwindcss"` in
+  apps/web/src/app/globals.css, the `@tailwindcss/postcss` plugin in apps/web/postcss.config.mjs,
+  and the root layout importing the stylesheet. Round 2 of the review removed each in turn, and
+  every check passed, CI's build and production start check included: Vitest turns CSS into empty
+  strings, and the start check only asks for the home page.
+- Decision: the web Vitest project compiles globals.css (`css.include`), so Vite runs it through
+  postcss.config.mjs and Tailwind CSS, as Next.js does. `globals.test.ts` imports it with Vite's
+  `?inline` query and checks Tailwind's banner and a plain, a responsive and a dark-mode utility
+  that the pages use; `layout.test.tsx` checks that the layout loads it. PostCSS configs are rerun
+  triggers for the pre-commit hook, because Vite reads them outside the module graph.
+- Trade-offs: no new dependency, and the compile takes about 40 ms. The test checks the stylesheet
+  that Vite builds, not Next.js's output; checking the CSS of the page that CI's start check
+  fetches would cover both, but only after a build. The `?inline` specifier is held in a variable,
+  so that TypeScript, which does not know Vite's queries, does not look it up; Zod checks what the
+  import returns.
