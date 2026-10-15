@@ -125,7 +125,8 @@ Keep entries brief. Details belong in code comments and the build log.
   production loads only compiled JavaScript. `pnpm build` builds packages/shared first because
   pnpm runs recursive scripts in dependency order.
 - Trade-offs: the production API needs packages/shared built and the `--conditions` flag (future
-  Dockerfiles must pass it). Without packages/shared built, the start fails with
+  Dockerfiles must pass it, and since the wave w0 review `--no-strip-types` too, or run the API's
+  `start` script). Without packages/shared built, the start fails with
   `ERR_MODULE_NOT_FOUND`. Without the flag, Node.js falls back to the TypeScript source, strips
   its types and starts anyway, so a forgotten flag goes unnoticed (corrected in the wave w0
   review, which also made the start refuse that: see "The production API start refuses
