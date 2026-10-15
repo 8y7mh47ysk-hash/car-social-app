@@ -135,12 +135,14 @@ describe("loggableUrl", () => {
   });
 });
 
-describe("loggingServerOptions without pino-pretty installed", () => {
-  // Production installs leave out development dependencies such as pino-pretty.
-  async function loadWithoutPinoPretty() {
+// Whether pino-pretty is installed at all is decided by Node.js's module resolution, which only a
+// separate process can change: server.test.ts checks the entrypoint's message for a production
+// install, which leaves pino-pretty out. Here pino-pretty is installed but fails to load.
+describe("loggingServerOptions when pino-pretty fails to load", () => {
+  async function loadWithBrokenPinoPretty() {
     vi.resetModules();
     vi.doMock("pino-pretty", () => {
-      throw new Error("Cannot find package 'pino-pretty'");
+      throw new Error("pino-pretty failed to load");
     });
     return import("./logger.ts");
   }
@@ -150,21 +152,18 @@ describe("loggingServerOptions without pino-pretty installed", () => {
     vi.resetModules();
   });
 
-  it("explains what to do when pretty output is asked for", async () => {
-    const { loggingServerOptions, LogFormatUnavailableError } = await loadWithoutPinoPretty();
+  it("passes the failure on instead of blaming production installs", async () => {
+    const { loggingServerOptions, LogFormatUnavailableError } = await loadWithBrokenPinoPretty();
 
     const options = loggingServerOptions({ level: "info", format: "pretty" });
 
-    // The entrypoint recognises this error by its class and prints only its message.
-    await expect(options).rejects.toBeInstanceOf(LogFormatUnavailableError);
-    await expect(options).rejects.toThrow(
-      "LOG_FORMAT=pretty needs pino-pretty, a development dependency that production installs " +
-        "leave out. Use LOG_FORMAT=json.",
-    );
+    // The entrypoint prints only the message of a LogFormatUnavailableError and would hide this.
+    await expect(options).rejects.toThrow();
+    await expect(options).rejects.not.toBeInstanceOf(LogFormatUnavailableError);
   });
 
-  it("does not need it for JSON output", async () => {
-    const { loggingServerOptions } = await loadWithoutPinoPretty();
+  it("does not load it for JSON output", async () => {
+    const { loggingServerOptions } = await loadWithBrokenPinoPretty();
 
     await expect(loggingServerOptions({ level: "info", format: "json" })).resolves.toMatchObject({
       requestIdHeader: false,
