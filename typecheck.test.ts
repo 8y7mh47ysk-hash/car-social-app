@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import {
   chmod,
   copyFile,
@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { describe, expect, it, onTestFinished } from "vitest";
 import { z } from "zod";
@@ -202,5 +203,75 @@ describe("the web app's type check", { timeout: 60_000 }, () => {
     expect(result.code).not.toBe(0);
     expect(result.output).toContain("src/app/broken.ts(1,14): error TS2322");
     expect(result.output).not.toContain(".next/dev");
+  });
+});
+
+/** The compiler options that make type checking strict here; tsconfig.base.json sets them all. */
+const STRICT_OPTIONS = {
+  strict: true,
+  noUncheckedIndexedAccess: true,
+  exactOptionalPropertyTypes: true,
+  noImplicitOverride: true,
+  noImplicitReturns: true,
+  noFallthroughCasesInSwitch: true,
+  noPropertyAccessFromIndexSignature: true,
+  noUnusedLocals: true,
+  noUnusedParameters: true,
+  allowUnreachableCode: false,
+  allowUnusedLabels: false,
+  verbatimModuleSyntax: true,
+  isolatedModules: true,
+  erasableSyntaxOnly: true,
+  noUncheckedSideEffectImports: true,
+};
+
+const run = promisify(execFile);
+
+/** Every tsconfig file in the repository except the base, which only the others use. */
+const tsconfigs = (
+  await run("git", ["ls-files", "-z", "*tsconfig*.json"], { cwd: repoRoot })
+).stdout
+  .split("\0")
+  .filter((file) => file !== "" && file !== "tsconfig.base.json");
+
+const resolvedConfigSchema = z.object({
+  compilerOptions: z.looseObject({
+    lib: z.array(z.string()).optional(),
+    types: z.array(z.string()).optional(),
+  }),
+});
+
+/** The compiler options that `tsc` uses for a tsconfig file, after every `extends`. */
+async function compilerOptions(
+  tsconfig: string,
+): Promise<z.infer<typeof resolvedConfigSchema>["compilerOptions"]> {
+  const tsc = join(repoRoot, "node_modules", ".bin", "tsc");
+  const { stdout } = await run(tsc, ["--showConfig", "--project", tsconfig], { cwd: repoRoot });
+  return resolvedConfigSchema.parse(JSON.parse(stdout)).compilerOptions;
+}
+
+describe("the TypeScript settings", () => {
+  it("cover the root files and every package", () => {
+    expect(tsconfigs).toEqual(
+      expect.arrayContaining([
+        "tsconfig.json",
+        "apps/api/tsconfig.json",
+        "apps/web/tsconfig.json",
+        "packages/shared/tsconfig.json",
+      ]),
+    );
+  });
+
+  it.for(tsconfigs)("make %s check types strictly", async (tsconfig) => {
+    expect(await compilerOptions(tsconfig)).toMatchObject(STRICT_OPTIONS);
+  });
+
+  // Shared code also runs in browsers, so it may use neither Node.js's globals nor the DOM's.
+  it("give packages/shared no Node.js or DOM types", async () => {
+    const { lib, types } = await compilerOptions("packages/shared/tsconfig.json");
+
+    expect(types).toEqual([]);
+    expect(lib).toBeDefined();
+    expect(lib?.filter((name) => name.toLowerCase().startsWith("dom"))).toEqual([]);
   });
 });
