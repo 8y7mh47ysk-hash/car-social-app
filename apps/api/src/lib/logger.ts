@@ -138,15 +138,41 @@ function serializeRequest(request: FastifyRequest) {
 }
 
 /**
- * Fastify's 404 line repeats the raw URL in its message, where finishLogLine would hide the query
- * string but cut the path only at MAX_LOGGED_STRING_LENGTH characters. This line leaves the URL
- * out: the "incoming request" line with the same request ID already records the method and the
- * shortened URL.
+ * The codes of the errors with which Fastify's router rejects a URL (see sendFrameworkError), and
+ * the message logged for each instead of the error's own.
+ */
+const ROUTER_ERROR_MESSAGES: ReadonlyMap<string, string> = new Map([
+  ["FST_ERR_BAD_URL", "malformed URL"],
+  ["FST_ERR_MAX_PARAM_LENGTH", "route parameter too long"],
+]);
+
+/**
+ * Two of Fastify's lines repeat the raw URL, where finishLogLine would hide the query string but
+ * cut the path only at MAX_LOGGED_STRING_LENGTH characters: the 404 line ("Route GET:<url> not
+ * found") and the error line for a URL that the router rejects, which holds the path three times
+ * (the message, err.message and err.stack), about 25 KB for a malformed 16 KB URL. These versions
+ * leave the URL out: the "incoming request" line with the same request ID already records the
+ * method and the shortened URL. Every other error is logged as Fastify logs it.
  */
 class ApiLogController extends LogController {
   override routeNotFound(request: FastifyRequest): void {
     if (!this.isLogDisabled(request)) {
       request.log.info("route not found");
+    }
+  }
+
+  override defaultErrorLog(
+    error: Error,
+    request: FastifyRequest,
+    reply: FastifyReply,
+    metadata?: Record<string, unknown>,
+  ): void {
+    const code = "code" in error && typeof error.code === "string" ? error.code : "";
+    const message = ROUTER_ERROR_MESSAGES.get(code);
+    if (message === undefined) {
+      super.defaultErrorLog(error, request, reply, metadata);
+    } else if (!this.isLogDisabled(request)) {
+      reply.log.info({ res: reply, err: { type: error.name, code } }, message);
     }
   }
 }
@@ -155,7 +181,8 @@ class ApiLogController extends LogController {
  * Fastify's router rejects a malformed URL (400) or an over-long route parameter (414) before any
  * hook runs, so enterRequestContext never sees those requests. Fastify hands them here with a
  * request ID from genReqId, having logged "incoming request" under it; this sends the ID back and
- * replies with the error as usual, which Fastify's error handler logs under the same ID.
+ * replies with the error as usual, which Fastify's error handler logs under the same ID (without
+ * the URL: see ApiLogController).
  *
  * That error handler is always Fastify's default: these requests belong to a router context that
  * Fastify creates with the app, before `setErrorHandler` can run. The global error handler of

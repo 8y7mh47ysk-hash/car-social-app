@@ -244,11 +244,17 @@ describe("request IDs in the logs", () => {
 
   // Fastify's router answers these itself, before any hook runs.
   it.each([
-    ["a malformed URL", "/cars/%zz?token=query-secret", 400, "FST_ERR_BAD_URL"],
-    ["an over-long route parameter", `/cars/${"x".repeat(101)}`, 414, "FST_ERR_MAX_PARAM_LENGTH"],
+    ["a malformed URL", "/cars/%zz?token=query-secret", 400, "FST_ERR_BAD_URL", "malformed URL"],
+    [
+      "an over-long route parameter",
+      `/cars/${"x".repeat(101)}`,
+      414,
+      "FST_ERR_MAX_PARAM_LENGTH",
+      "route parameter too long",
+    ],
   ])(
     "sends the ID back and logs it when the router rejects %s",
-    async (_name, url, statusCode, code) => {
+    async (_name, url, statusCode, code, message) => {
       const { app, output, lines } = await buildLoggedApp();
       app.get("/cars/:id", () => ({ ok: true }));
 
@@ -260,10 +266,28 @@ describe("request IDs in the logs", () => {
       expect(requestId).toMatch(UUID_V4);
       expect(lines().map((line) => line.reqId)).toEqual([requestId, requestId]);
       expect(lines()[0]?.msg).toBe("incoming request");
-      expect(lines()[1]).toMatchObject({ err: { code } });
+      expect(lines()[1]).toMatchObject({ level: 30, msg: message, res: { statusCode } });
+      // The error's type and code only: its message and stack would repeat the path.
+      expect(lines()[1]?.["err"]).toEqual({ type: "FastifyError", code });
       expect(output()).not.toContain("query-secret");
     },
   );
+
+  // The router's own error line would hold the path three times, each cut only at 8192 characters.
+  it("logs a URL that the router rejects once, shortened like any other", async () => {
+    const { app, output, lines } = await buildLoggedApp();
+    app.get("/cars/:id", () => ({ ok: true }));
+    const url = `/cars/%zz${"x".repeat(5000)}`;
+
+    const response = await app.inject({ url });
+
+    expect(response.statusCode).toBe(400);
+    expect(lines()[0]).toMatchObject({
+      msg: "incoming request",
+      req: { url: `${url.slice(0, 256)}... (${String(url.length - 256)} more characters)` },
+    });
+    expect(output()).not.toContain("x".repeat(300));
+  });
 
   it("reuses a well-formed x-request-id when the router rejects the URL", async () => {
     const { app } = await buildLoggedApp();
