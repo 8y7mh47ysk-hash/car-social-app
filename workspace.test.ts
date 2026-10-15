@@ -44,8 +44,8 @@ function pnpmEnv(): NodeJS.ProcessEnv {
 /**
  * The pnpm store that this checkout's own install filled. pnpm keeps one store per file system,
  * and the temporary copies can be on another one: /tmp is a tmpfs on Ubuntu 26.04, the release of
- * the CI runner, and on Debian 13. There a copy would get the empty /tmp/.pnpm-store, and its
- * offline install would fail with ERR_PNPM_NO_OFFLINE_TARBALL.
+ * the CI runner. There a copy would get the empty /tmp/.pnpm-store, and its offline install would
+ * fail with ERR_PNPM_NO_OFFLINE_TARBALL.
  */
 const storeDir = z
   .string()
