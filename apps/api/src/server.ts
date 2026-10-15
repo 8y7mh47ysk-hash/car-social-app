@@ -62,7 +62,27 @@ process.on("uncaughtException", (error, origin) => {
   process.exit(1);
 });
 
-function shutDown(signal: NodeJS.Signals): void {
+/** When the first SIGINT or SIGTERM arrived (performance.now()); undefined until then. */
+let firstStopSignalAt: number | undefined;
+
+/**
+ * Runs the plugins' start-up work (Fastify's onReady hooks), then listens, unless a stop signal
+ * arrived meanwhile. Fastify cannot stop a start that is under way: closing the app during it let
+ * the server listen afterwards, and it never exited. So shutDown waits for this to finish, and then
+ * closes the app. Rejects with the reason the app could not start.
+ */
+async function start(): Promise<void> {
+  await app.ready();
+  if (firstStopSignalAt === undefined) {
+    await app.listen({ host: config.host, port: config.port });
+  }
+}
+
+// Node.js handles signals on the event loop, so the handlers registered below are in place before
+// any signal can interrupt the start.
+const started = start();
+
+async function shutDown(signal: NodeJS.Signals): Promise<void> {
   app.log.info({ signal }, "shutting down");
 
   const forceExit = setTimeout(() => {
@@ -71,37 +91,41 @@ function shutDown(signal: NodeJS.Signals): void {
   }, SHUTDOWN_TIMEOUT_MS);
   forceExit.unref();
 
-  // Once the server has closed, nothing keeps the event loop alive and Node exits with code 0.
-  app.close().then(
-    () => {
-      clearTimeout(forceExit);
-    },
-    (error: unknown) => {
-      app.log.error({ err: error }, "shutdown failed");
-      process.exit(1);
-    },
-  );
+  try {
+    await started;
+  } catch {
+    // The end of this file reports why the app could not start, and exits.
+    return;
+  }
+  try {
+    await app.close();
+  } catch (error) {
+    app.log.error({ err: error }, "shutdown failed");
+    process.exit(1);
+  }
+  // The app has closed, so nothing keeps the event loop alive and Node.js exits with code 0.
+  clearTimeout(forceExit);
 }
-
-/** When the first SIGINT or SIGTERM arrived (performance.now()); undefined until then. */
-let firstStopSignalAt: number | undefined;
 
 function onStopSignal(signal: NodeJS.Signals): void {
   const now = performance.now();
   if (firstStopSignalAt === undefined) {
     firstStopSignalAt = now;
-    shutDown(signal);
+    void shutDown(signal);
   } else if (now - firstStopSignalAt >= REPEATED_SIGNAL_WINDOW_MS) {
     app.log.warn({ signal }, "second signal; exiting without waiting for open requests");
     process.exit(1);
   }
 }
 
+// From here on, SIGINT and SIGTERM shut the app down. One that arrives earlier, while the modules
+// load and the app is built, ends the process at once, as Node.js does by default: nothing has
+// started yet.
 process.on("SIGINT", onStopSignal);
 process.on("SIGTERM", onStopSignal);
 
 try {
-  await app.listen({ host: config.host, port: config.port });
+  await started;
 } catch (error) {
   app.log.fatal({ err: error }, "failed to start");
   process.exit(1);

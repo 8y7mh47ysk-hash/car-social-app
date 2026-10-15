@@ -108,6 +108,61 @@ function failAfterRequest(kind: "throw" | "reject"): string[] {
   `);
 }
 
+/**
+ * Holds the app's start in an onReady hook, as a plugin that connects to a database at startup
+ * would, until the process gets SIGTERM, and prints "start held" once the hold begins. The
+ * entrypoint's own SIGTERM handler, registered earlier, runs first.
+ */
+const HOLD_START_UNTIL_SIGTERM = preload(`
+  import { subscribe } from "node:diagnostics_channel";
+  subscribe("fastify.initialization", ({ fastify }) => {
+    fastify.addHook("onReady", async () => {
+      const signalled = new Promise((resolve) => process.once("SIGTERM", resolve));
+      console.log("start held");
+      await signalled;
+    });
+  });
+`);
+
+/**
+ * Holds the first lookup of "localhost", which Node.js makes to open a port on that hostname,
+ * until the process gets SIGTERM, and prints "lookup held" once the hold begins. A timer keeps
+ * the process running meanwhile, as a real lookup does.
+ */
+const HOLD_LOCALHOST_LOOKUP_UNTIL_SIGTERM = preload(`
+  import dns from "node:dns";
+  const lookup = dns.lookup;
+  let held = false;
+  dns.lookup = (hostname, ...rest) => {
+    if (hostname === "localhost" && !held) {
+      held = true;
+      const pending = setInterval(() => {}, 1000);
+      process.once("SIGTERM", () => {
+        clearInterval(pending);
+        lookup(hostname, ...rest);
+      });
+      console.log("lookup held");
+      return;
+    }
+    lookup(hostname, ...rest);
+  };
+`);
+
+/** Makes closing the app fail, as a plugin whose connection cannot be closed would. */
+const FAIL_TO_CLOSE = preload(`
+  import { subscribe } from "node:diagnostics_channel";
+  subscribe("fastify.initialization", ({ fastify }) => {
+    fastify.addHook("onClose", async () => {
+      throw new Error("the connection would not close");
+    });
+  });
+`);
+
+/** Resolves with how the process exited, or with "still running" if it has not within `ms`. */
+function exitWithin(server: ServerProcess, ms: number): Promise<Exit | "still running"> {
+  return Promise.race([server.exited, sleep(ms).then(() => "still running" as const)]);
+}
+
 /** Resolves with the first match of `pattern` in the server's output, waiting for it if needed. */
 function outputMatching(server: ServerProcess, pattern: RegExp): Promise<RegExpExecArray> {
   return new Promise((resolve, reject) => {
@@ -209,18 +264,72 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
   );
 
   // In `pnpm dev`, Ctrl+C reaches both `node --watch` and the server, and `node --watch` then
-  // sends the server the same signal again, once the server has started shutting down.
-  it("lets an open request finish when the stop signal arrives a second time at once", async () => {
+  // sends the server the same signal again, once the server has started shutting down. It does
+  // the same with a SIGTERM sent to the whole process group.
+  it.each(["SIGINT", "SIGTERM"] as const)(
+    "lets an open request finish when %s arrives a second time at once",
+    async (signal) => {
+      const server = startServer();
+      const url = await listeningUrl(server);
+      const request = await openRequest(server, url);
+
+      server.child.kill(signal);
+      await outputMatching(server, /"msg":"shutting down"/);
+      server.child.kill(signal);
+
+      expect(await request.finish()).toMatch(/^HTTP\/1\.1 404 /);
+      expect(await server.exited).toEqual({ code: 0, signal: null });
+    },
+  );
+
+  // A plugin that does work as the app starts, such as connecting to a database, leaves time for
+  // a stop signal to arrive before the server listens.
+  it("shuts down without ever listening when a stop signal arrives while it starts", async () => {
+    const server = startServer({}, HOLD_START_UNTIL_SIGTERM);
+    await outputMatching(server, /^start held$/m);
+
+    server.child.kill("SIGTERM");
+
+    // Closing the app at once used to leave a server that listened afterwards and never exited.
+    expect(await exitWithin(server, 5000), server.output()).toEqual({ code: 0, signal: null });
+    expect(server.output()).toContain('"msg":"shutting down"');
+    expect(server.output()).not.toContain("Server listening");
+  });
+
+  // Opening a port on a hostname waits for its address, so the signal can arrive after the start
+  // has decided to listen. The shutdown then waits for the port to open, and closes it.
+  it("shuts down cleanly when a stop signal arrives while it opens its port", async () => {
+    const server = startServer({ API_HOST: "localhost" }, HOLD_LOCALHOST_LOOKUP_UNTIL_SIGTERM);
+    await outputMatching(server, /^lookup held$/m);
+
+    server.child.kill("SIGTERM");
+
+    expect(await exitWithin(server, 5000), server.output()).toEqual({ code: 0, signal: null });
+    expect(server.output()).toContain('"msg":"shutting down"');
+  });
+
+  it("gives up with code 1 when an open request keeps it from closing for 10 seconds", async () => {
     const server = startServer();
     const url = await listeningUrl(server);
-    const request = await openRequest(server, url);
+    await openRequest(server, url);
 
-    server.child.kill("SIGINT");
-    await outputMatching(server, /"msg":"shutting down"/);
-    server.child.kill("SIGINT");
+    const signalledAt = performance.now();
+    server.child.kill("SIGTERM");
 
-    expect(await request.finish()).toMatch(/^HTTP\/1\.1 404 /);
-    expect(await server.exited).toEqual({ code: 0, signal: null });
+    expect(await server.exited).toEqual({ code: 1, signal: null });
+    expect(performance.now() - signalledAt).toBeGreaterThanOrEqual(9500);
+    expect(server.output()).toContain('"msg":"shutdown timed out; exiting"');
+  });
+
+  it("exits with code 1 when closing the app fails", async () => {
+    const server = startServer({}, FAIL_TO_CLOSE);
+    await listeningUrl(server);
+
+    server.child.kill("SIGTERM");
+
+    expect(await server.exited).toEqual({ code: 1, signal: null });
+    expect(server.output()).toContain('"msg":"shutdown failed"');
+    expect(server.output()).toContain("the connection would not close");
   });
 
   it("stops without waiting for open requests on a second signal a second later", async () => {
