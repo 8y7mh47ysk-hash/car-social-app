@@ -43,6 +43,9 @@ export default defineConfig({
       `${root}**/.gitignore`,
       `${root}.github/workflows/*`,
       `${root}eslint.config.*`,
+      // Env files, which git ignores: only `git add --force` stages one, and env-files.test.ts,
+      // which lists what git tracks, then fails the commit.
+      `${root}**/{.env,.env.*,*.env,.envrc}`,
     ],
   },
 });
