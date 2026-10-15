@@ -9,6 +9,7 @@ import {
   readFile,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -857,7 +858,7 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
   });
 });
 
-describe("the pre-commit hook's test step in this repository", { timeout: 60_000 }, () => {
+describe("the pre-commit hook's test step", { timeout: 60_000 }, () => {
   /**
    * Runs `vitest related` on one file of this repository as the hook does, but only for the
    * shared package's tests (a single quick test file) and listing each test that ran.
@@ -916,4 +917,38 @@ describe("the pre-commit hook's test step in this repository", { timeout: 60_000
       expect(result.output).not.toContain("src/health.test.ts");
     },
   );
+
+  // The triggers are globs that start with the checkout's own path, so the characters that globs
+  // treat specially must be escaped in it: unescaped, the parentheses and brackets of a folder such
+  // as "apex (copy) [1]" match other names, and then no trigger matches anything in that checkout.
+  it("runs every test when package.json is staged in a checkout whose path holds glob characters", async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "apex-glob-path-")));
+    onTestFinished(() => rm(dir, { recursive: true, force: true }));
+    const root = join(dir, "apex (copy) [1]");
+    // This checkout's Vitest config and the project configs that it names by path, a test file
+    // for its "tooling" project, and Vitest itself.
+    for (const file of ["vitest.config.ts", "infra/vitest.config.ts", "scripts/vitest.config.ts"]) {
+      await mkdir(dirname(join(root, file)), { recursive: true });
+      await copyFile(join(repoRoot, file), join(root, file));
+    }
+    await writeFile(join(root, "package.json"), '{ "private": true, "type": "module" }\n');
+    await writeFile(
+      join(root, "probe.test.ts"),
+      'import { it } from "vitest";\n\nit("runs", () => undefined);\n',
+    );
+    await mkdir(join(root, "node_modules"));
+    await symlink(join(repoRoot, "node_modules", "vitest"), join(root, "node_modules", "vitest"));
+
+    const args = ["related", "--run", "--passWithNoTests", "--reporter", "verbose"];
+
+    const result = await run(
+      join(rootBin, "vitest"),
+      [...args, join(root, "package.json")],
+      root,
+      hookEnv([rootBin]),
+    );
+
+    expect(result.code, result.output).toBe(0);
+    expect(result.output).toContain("|tooling| probe.test.ts");
+  });
 });
