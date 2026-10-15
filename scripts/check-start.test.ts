@@ -14,14 +14,24 @@ import { checkStart } from "./check-start.ts";
  * The stand-in. It writes its process ID to the file in its second argument, then, by its first:
  * "ok" serves {"status":"ok"} on API_PORT's /health and an HTML page on WEB_PORT; "bad-health"
  * answers /health with another status; "no-web" serves only the API; "exit" prints an error and
- * exits with code 3; "stubborn" serves both but ignores SIGTERM.
+ * exits with code 3; "stubborn" serves both but ignores SIGTERM. It ends by itself once the process
+ * whose ID is its third argument, the test runner, has ended: a test run that is killed midway
+ * cannot leave it running. It does not watch the check, so a check that ends without stopping it
+ * is still caught.
  */
 const STAND_IN = `
 import { createServer } from "node:http";
 import { writeFileSync } from "node:fs";
 
-const [mode, pidFile] = process.argv.slice(2);
+const [mode, pidFile, runner] = process.argv.slice(2);
 writeFileSync(pidFile, String(process.pid));
+setInterval(() => {
+  try {
+    process.kill(Number(runner), 0);
+  } catch {
+    process.exit(1);
+  }
+}, 200).unref();
 if (mode === "exit") {
   console.error("apps/api start: the API failed to start");
   process.exit(3);
@@ -43,33 +53,51 @@ if (mode !== "no-web") {
 console.log("stand-in started");
 `;
 
+/** Whether the process `pid` is running. */
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Makes a temporary directory for a stand-in that writes its process ID to `<dir>/pid`. When the
+ * current test finishes, however it ends (a failed assertion, a time-out), the stand-in is killed
+ * and the directory removed, so no test leaves a process running.
+ */
+function standInDirectory(): { dir: string; pidFile: string } {
+  const dir = mkdtempSync(join(tmpdir(), "apex-check-start-"));
+  const pidFile = join(dir, "pid");
+  onTestFinished(() => {
+    try {
+      process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL");
+    } catch {
+      // It never started, or it has ended.
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+  return { dir, pidFile };
+}
+
 /**
  * Runs the check against the stand-in in `mode`, with short time limits. Returns the result and
  * whether the stand-in's process was still running afterwards.
  */
 async function checkStandIn(mode: string) {
-  const dir = mkdtempSync(join(tmpdir(), "apex-check-start-"));
-  onTestFinished(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
+  const { dir, pidFile } = standInDirectory();
   const script = join(dir, "stand-in.mjs");
-  const pidFile = join(dir, "pid");
   writeFileSync(script, STAND_IN);
 
   const result = await checkStart({
-    command: [process.execPath, script, mode, pidFile],
+    command: [process.execPath, script, mode, pidFile, String(process.pid)],
     timeoutMs: 2_000,
     stopTimeoutMs: 1_000,
   });
 
-  const pid = Number(readFileSync(pidFile, "utf8"));
-  let running = true;
-  try {
-    process.kill(pid, 0);
-  } catch {
-    running = false;
-  }
-  return { result, running };
+  return { result, running: isRunning(Number(readFileSync(pidFile, "utf8"))) };
 }
 
 describe("checkStart", { timeout: 20_000 }, () => {
