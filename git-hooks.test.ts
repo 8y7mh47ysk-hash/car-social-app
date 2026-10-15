@@ -15,6 +15,7 @@ import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
+import { z } from "zod";
 
 // These tests run the real hook scripts in .husky/ the way husky runs them, `sh -e .husky/<hook>`
 // with node_modules/.bin on PATH: commit-msg against this repository's commitlint config, and
@@ -23,6 +24,11 @@ import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "v
 
 const repoRoot = fileURLToPath(new URL(".", import.meta.url));
 const rootBin = join(repoRoot, "node_modules", ".bin");
+
+/** The root package.json's scripts. */
+const rootScripts = z
+  .object({ scripts: z.record(z.string(), z.string()) })
+  .parse(JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8"))).scripts;
 
 interface Result {
   readonly code: number | null;
@@ -244,7 +250,8 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
     readonly startPreCommit: (block: string) => { group: number; result: Promise<Result> };
     /**
      * Commits copies of this repository's pre-commit and pre-merge-commit hooks and installs them
-     * with the real husky, as `pnpm install` does, so that git itself runs them from then on.
+     * with the root package.json's `prepare` script, as `pnpm install` does, so that git itself
+     * runs them from then on.
      */
     readonly installHooks: () => Promise<void>;
     /**
@@ -346,9 +353,13 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
         }
         await git("add", ".husky");
         await git("commit", "--quiet", "--message", "chore: add the git hooks");
-        const installed = await run(join(rootBin, "husky"), [], root, env);
+        const prepare = rootScripts["prepare"];
+        if (prepare === undefined) {
+          throw new Error("package.json has no prepare script, so pnpm install installs no hooks");
+        }
+        const installed = await run("sh", ["-c", prepare], root, env);
         if (installed.code !== 0) {
-          throw new Error(`husky failed:\n${installed.output}`);
+          throw new Error(`the prepare script failed:\n${installed.output}`);
         }
       },
       merge: (branch, { fail = "" } = {}) =>
