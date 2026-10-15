@@ -77,28 +77,33 @@ function runScript(
 }
 
 /**
- * Creates a pnpm workspace with two packages whose `typecheck` scripts stand in for type checks
- * that fail: "first" fails at once, "second" a second later. Each writes its name to checks.log
- * before it fails, so the log shows which checks got that far. A stand-in `tsc` in its bin folder
- * passes the root files' check.
+ * Creates a pnpm workspace with two packages whose `typecheck` scripts stand in for type checks.
+ * With `failingPackages`, "first" fails at once and "second" a second later; otherwise both pass.
+ * Each writes its name to checks.log first, so the log shows which checks got that far. A
+ * stand-in `tsc` in its bin folder checks the root files: it writes its arguments to checks.log
+ * and passes, or fails with `failingRoot`.
  */
-async function failingWorkspace(): Promise<{ dir: string; bin: string }> {
+async function stubWorkspace({ failingPackages = false, failingRoot = false } = {}): Promise<{
+  dir: string;
+  bin: string;
+}> {
   const dir = await realpath(await mkdtemp(join(tmpdir(), "apex-typecheck-root-")));
   onTestFinished(() => rm(dir, { recursive: true, force: true }));
+  const exit = (fails: boolean): string => `exit ${fails ? "2" : "0"}`;
   const files = {
     "pnpm-workspace.yaml": "packages:\n  - packages/*\n",
     "package.json": `${JSON.stringify({ name: "workspace", private: true })}\n`,
     "packages/first/package.json": `${JSON.stringify({
       name: "first",
       private: true,
-      scripts: { typecheck: "echo first >> ../../checks.log; exit 2" },
+      scripts: { typecheck: `echo first >> ../../checks.log; ${exit(failingPackages)}` },
     })}\n`,
     "packages/second/package.json": `${JSON.stringify({
       name: "second",
       private: true,
-      scripts: { typecheck: "sleep 1; echo second >> ../../checks.log; exit 2" },
+      scripts: { typecheck: `sleep 1; echo second >> ../../checks.log; ${exit(failingPackages)}` },
     })}\n`,
-    "bin/tsc": "#!/bin/sh\nexit 0\n",
+    "bin/tsc": `#!/bin/sh\necho "tsc $*" >> checks.log\n${exit(failingRoot)}\n`,
   };
   for (const [path, content] of Object.entries(files)) {
     await mkdir(dirname(join(dir, path)), { recursive: true });
@@ -112,14 +117,26 @@ describe("the root type check", { timeout: 60_000 }, () => {
   // `pnpm --recursive` stops the other packages' checks when one fails, unless it runs with
   // --no-bail, and the hook and CI would then show only the first package's errors.
   it("runs every package's check when one fails, so one run shows all their errors", async () => {
-    const workspace = await failingWorkspace();
+    const workspace = await stubWorkspace({ failingPackages: true });
 
     const result = await runScript(rootScripts.typecheck, workspace.dir, [workspace.bin]);
 
     expect(result.code, result.output).not.toBe(0);
     const log = await readFile(join(workspace.dir, "checks.log"), "utf8");
-    const finished = log.split("\n").filter((line) => line !== "");
+    const finished = log.split("\n").filter((line) => line !== "" && !line.startsWith("tsc "));
     expect(finished.sort()).toEqual(["first", "second"]);
+  });
+
+  // The root project holds the files that are in no package: the root tests and tool configs,
+  // infra/ and scripts/ (tsconfig.json).
+  it("also checks the files outside the packages, and fails when they have errors", async () => {
+    const workspace = await stubWorkspace({ failingRoot: true });
+
+    const result = await runScript(rootScripts.typecheck, workspace.dir, [workspace.bin]);
+
+    expect(result.code, result.output).not.toBe(0);
+    const log = await readFile(join(workspace.dir, "checks.log"), "utf8");
+    expect(log).toContain("tsc --project tsconfig.json\n");
   });
 });
 
