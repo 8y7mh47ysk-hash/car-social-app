@@ -1420,11 +1420,15 @@ Keep entries brief. Details belong in code comments and the build log.
   come much later.
 - Decision: a CI step after the build-warning check, "Start the production build", runs
   `node scripts/check-start.ts`. It starts the apps with the `pnpm start` that developers run, on
-  free loopback ports (`WEB_PORT`, `API_PORT`) and in a process group of its own; requires GET
-  /health to answer `{"status":"ok"}` (checked with Zod) and the home page to be a 200 HTML page
-  within a minute; then stops the group with SIGTERM and fails if the apps have not stopped ten
-  seconds later. The README's pre-push commands include it.
-- Trade-offs: a few seconds of CI time. It shows only that the apps start, answer and stop, not
-  what they serve; #68's Playwright tests cover pages and flows. Once the web app has a required
-  server variable (Phase 2), this step needs a throwaway value for it, as the Compose step has
-  for the passwords. The time limits are generous, so a slow runner does not fail it.
+  free ports of 127.0.0.1 (`WEB_HOST`, `WEB_PORT`, `API_HOST`, `API_PORT`) and in a process group
+  of its own; requires GET /health to answer `{"status":"ok"}` (checked with Zod) and the home
+  page to be a 200 HTML page within a minute; then sends SIGTERM to the group and fails if the
+  apps have not stopped ten seconds later. The README's pre-push commands include it.
+- Trade-offs: a few seconds of CI time. It shows only that the apps start and answer, not what
+  they serve; #68's Playwright tests cover pages and flows. Nor does it show that each app shuts
+  down cleanly, as this entry first said (corrected in the wave w0 round 2 review): pnpm 12
+  passes SIGTERM on to both apps but kills the other one with SIGKILL as soon as one has ended,
+  so the step fails only if neither stops, and an API that ignored SIGTERM passed. The API's own
+  tests check its shutdown. Once the web app has a required server variable (Phase 2), this step
+  needs a throwaway value for it, as the Compose step has for the passwords. The time limits are
+  generous, so a slow runner does not fail it.

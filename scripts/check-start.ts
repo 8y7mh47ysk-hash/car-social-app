@@ -2,7 +2,10 @@
 // apps start: `next start` checks the web server's environment variables only as it starts, and the
 // API's production start runs compiled code with flags of its own. This starts both production
 // builds with `pnpm start`, as a developer would, on free ports of 127.0.0.1; waits until the API
-// answers GET /health and the web app serves its home page; then stops them with SIGTERM.
+// answers GET /health and the web app serves its home page; then stops them by sending SIGTERM to
+// pnpm. pnpm passes it on to both apps, but kills the other app as soon as one has ended, so the
+// check shows that the apps start and answer, not that each one shuts down cleanly (the API's own
+// tests, apps/api/src/server.test.ts and production.test.ts, check its shutdown).
 //
 // Usage, from the repository root, after `pnpm build`: node scripts/check-start.ts
 // Exit status: 0 when both apps answered and then stopped, 1 otherwise. On failure it says what
@@ -126,7 +129,7 @@ async function isPage(response: Response): Promise<boolean> {
   return response.status === 200 && html && (await response.text()).includes("</html>");
 }
 
-/** A duration in whole seconds, for messages. */
+/** A duration in seconds, for messages: "60" for 60 000 ms, "0.5" for 500 ms. */
 const seconds = (ms: number): string => String(ms / 1000);
 
 /**
@@ -154,8 +157,9 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
 
   // `detached` gives the command a process group of its own, which the stop signals below go to.
   // A plain command's child processes stay in that group. pnpm 12 instead starts each script in a
-  // process group of its own, and once pnpm exits, for any reason, a helper shell of pnpm's kills
-  // those groups with SIGKILL: so signalling pnpm's group stops the apps as well.
+  // process group of its own. On SIGTERM it passes the signal on to them and ends as soon as one
+  // script has ended; whenever pnpm exits, even by SIGKILL, a helper shell of pnpm's kills the
+  // groups still running with SIGKILL. So signalling pnpm's group stops the apps as well.
   const child = spawn(command, args, {
     detached: true,
     env: {
