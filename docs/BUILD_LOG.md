@@ -1142,8 +1142,9 @@ Charlie reviewed this instruction and changed:
 - `docs/ARCHITECTURE.md`: the list of responses that carry no `x-request-id` left out two that
   Node.js sends itself (instruction 8's notes below give the list). The document now also says
   that the API logs a 404, or a URL that its router rejects, without the raw URL, and that
-  writing to `process.stdout` or `process.stderr` directly would skip the logger. All six
-  diagrams still render with the command above.
+  writing to `process.stdout` or `process.stderr` directly would skip the logger. Its
+  deployment notes named only one of the two start flags that a Dockerfile must keep; they
+  name `--no-strip-types` too. All six diagrams still render with the command above.
 
 ## #7 - Developer scripts
 

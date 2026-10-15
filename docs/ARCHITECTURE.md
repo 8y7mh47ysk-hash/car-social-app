@@ -343,8 +343,10 @@ flowchart TB
   (#104).
 - The host updates itself, denies inbound traffic by default, allows SSH only over Tailscale, and
   runs the services as a separate non-admin user (#105).
-- The production API runs compiled JavaScript with `node --conditions=@apex/dist`, which its
-  future Dockerfile must keep (see "Workspace packages are consumed as TypeScript source" in
+- The production API runs compiled JavaScript, and its future Dockerfile must keep two flags
+  of its start script: `--conditions=@apex/dist` loads the compiled packages/shared, and
+  `--no-strip-types` makes a start without that condition fail instead of running the
+  TypeScript source (see "The production API start refuses TypeScript source" in
   [DECISIONS.md](DECISIONS.md)).
 - CI runs on GitHub Actions for every push to main and every pull request (built #5): a
   frozen-lockfile install, then peer dependency, formatting, lint, type and test checks, the
