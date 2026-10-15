@@ -890,16 +890,35 @@ node scripts/check-build-warnings.ts build.log    # lists the line and exits wit
 rm build.log
 ```
 
-To see the check catch real Next.js output (worth repeating after upgrading Next.js, Node.js or
-pnpm), add a page that logs an error while it is prerendered:
+To see the check catch real build output (worth repeating after upgrading Next.js, Node.js or
+pnpm), add a page that provokes three kinds of problem the build does not stop for: a Turbopack
+compile warning (a file path built at run time), a Next.js warning (`themeColor` in `metadata`,
+where Next.js wants it in `viewport`) and an error that the page logs while it is prerendered:
 
 ```sh
 mkdir apps/web/src/app/probe
-printf 'export default function Page() {\n  console.error(new Error("probe"));\n  return null;\n}\n' > apps/web/src/app/probe/page.tsx
+cat > apps/web/src/app/probe/page.tsx <<'EOF'
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+export const metadata = { themeColor: "#000000" };
+
+export default function Page() {
+  console.error(new Error("probe"));
+  const file = join(process.cwd(), process.env["PROBE_FILE"] ?? "package.json");
+  return <p>{readFileSync(file, "utf8").length}</p>;
+}
+EOF
 pnpm build 2>&1 | tee build.log                   # still ends with "Done": the build succeeds
-node scripts/check-build-warnings.ts build.log    # lists "apps/web build: Error: probe", status 1
+node scripts/check-build-warnings.ts build.log    # lists 5 lines (below) and exits with status 1
 rm -r apps/web/src/app/probe build.log
 ```
+
+The check lists `Error: probe`, `⚠ Unsupported metadata themeColor is configured in metadata
+export in /probe. ...`, `Turbopack build encountered 2 warnings:` and two `Warning: Dynamic
+filesystem access causes tracing of the whole project` lines, each after `apps/web build:`. If the
+build prints one of these but the check does not list it, its wording has changed: add the new
+form to `scripts/check-build-warnings.ts` and to its tests.
 
 With [actionlint](https://github.com/rhysd/actionlint) installed, `actionlint` in the repository
 root prints nothing and exits with status 0. With [zizmor](https://docs.zizmor.sh) installed,
