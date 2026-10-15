@@ -586,9 +586,10 @@ hook's message file and each team rule in `commitlint.config.mjs`.
 
 `git-hooks.test.ts` now has 72 tests (64 before), so the counts of the commands above that run it
 are updated. It is the longest test file and its pre-commit tests run one after another, so a
-commit that runs every test now takes about 25 s instead of about 19 s (measured three times in a
-fresh clone, with 598 tests; a documentation change still takes about 0.8 s and a source change
-with related tests 4.4 to 4.5 s). How to verify, from the repository root:
+commit that runs every test now takes about 27 s instead of about 19 s (measured three times in a
+fresh clone of this round's final branch, with 610 tests, at a load average of 3 to 4: 26.3 to
+27.1 s; a documentation change still takes 0.8 to 0.9 s and a source change with related tests
+4.7 to 5.1 s). How to verify, from the repository root:
 
 ```sh
 pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  6 passed | 66 skipped (72)"
