@@ -149,4 +149,15 @@ describe("the pnpm workspace", { timeout: 60_000 }, () => {
 
     expect(result.code, result.output).toBe(0);
   });
+
+  // nvm and CI's setup-node read .nvmrc; fnm, nodenv, mise and others read .node-version. Both
+  // name a major version, whose newest release they install.
+  it.for([".nvmrc", ".node-version"])(
+    "names in %s the major version that package.json's engines asks for",
+    async (file) => {
+      const major = oldestAllowed(manifest.engines.node).split(".")[0];
+
+      expect((await readFile(join(repoRoot, file), "utf8")).trim()).toBe(major);
+    },
+  );
 });
