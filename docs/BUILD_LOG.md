@@ -1058,6 +1058,65 @@ LOG_LEVEL=loud node scripts/check-start.ts          # "`pnpm start` exited with 
                                                     # both apps answered.", then the API's error
 ```
 
+**Review fixes (wave w0, round 2)**
+
+Bravo reviewed instructions 5 and 7, took them over and re-checked them by running them: the "How
+to verify" steps above in a fresh clone; actionlint 1.7.12 with shellcheck 0.11.0 and zizmor
+1.30.1 (checksum-verified), without findings; each action's SHA against the GitHub API (still its
+latest release, on its default branch); a frozen install of the lockfile for Linux x64, the
+runner's platform, which met no install script outside `allowBuilds`; and a simulation of every
+step of `ci.yml` (GitHub's shell command, the workflow's `if:` conditions and environment,
+`CI=true`, no git identity) on fresh clones with an empty pnpm store, on macOS and in an Ubuntu
+26.04 VM (Lima 2.2.1; Ubuntu 26.04 is the release of the `ubuntu-26.04` runner; Node.js 24.21.0,
+pnpm 12.11.2, Docker Engine 29.9.1 and Compose 5.1.3, the runner image's version). Fixes:
+
+- In the VM, CI's Test step failed: `workspace.test.ts` (instruction 1) installs copies of the
+  workspace offline in /tmp, which Ubuntu 26.04 mounts as a tmpfs, and pnpm, which keeps one store
+  per file system, looked for the packages in an empty /tmp/.pnpm-store
+  (`ERR_PNPM_NO_OFFLINE_TARBALL`). The test now gives those installs the checkout's own store
+  (see "Workspace copies in tests use the checkout's pnpm store" in docs/DECISIONS.md). In the VM
+  it then passed, and failed again with the store moved away. Every other step passed in the VM
+  and on macOS.
+- Interrupted by Ctrl+C, `kill` or a closed terminal, the start check ended at once and left
+  `pnpm start`, both apps and pnpm's helpers running, 9 processes each time, and a start check
+  test that failed or timed out left its stand-in app running (w0.V1.Echo.2). The check now stops
+  the apps first, prints "Interrupted by SIGINT: stopped the apps." (or the signal it got) and
+  ends by the same signal; each test kills its stand-in however it ends. Against the real build,
+  on macOS and in the VM, no process was left after SIGINT to the check's process group at
+  several moments, SIGTERM or SIGHUP, nor after tests that timed out or a killed test run.
+- Three more defects of the start check, each now with a test: with `WEB_HOST=0.0.0.0` in the
+  shell the production web app listened on every interface during the check, and with
+  `API_HOST=::1` the check failed after its full minute (both apps now get 127.0.0.1); without
+  `pnpm` on `PATH` it said "`pnpm start` exited with code -2" above an empty section of output
+  (now "could not be started (spawn pnpm ENOENT)" and "The apps printed nothing."); and after
+  SIGKILL it waited without limit for a process outside the command's process group that held
+  the output (now ten seconds at most, after which it says so).
+- The start check's comments and its decision said that it fails when the apps do not stop after
+  SIGTERM. pnpm 12 passes SIGTERM on to both apps but kills the other one with SIGKILL as soon as
+  one has ended: with the compiled API changed to ignore SIGTERM, the check passed, on macOS and
+  in the VM. They now say that it shows that the apps start and answer, and that the API's own
+  tests check its shutdown.
+- The recipe above for provoking real build output made a page log an Error only, although
+  docs/DECISIONS.md points to it for provoking a warning (w0.V1.Echo.1). The probe page now also
+  provokes a Turbopack compile warning and a Next.js "⚠" warning; run as written, the check
+  listed all five lines.
+- The test counts in "How to verify" above and in instruction 7 were out of date.
+
+How to verify, from the repository root:
+
+```sh
+pnpm exec vitest run scripts/check-start.test.ts workspace.test.ts   # "Tests  16 passed (16)"
+pnpm build
+node scripts/check-start.ts & sleep 0.2; kill -INT $!; wait $!; echo "status $?"
+# "Interrupted by SIGINT: stopped the apps." and "status 130"; if it says "Both apps started",
+# it finished before the signal arrived: run the line again
+pgrep -fl 'next-server|dist/server.js' || echo "no app left"     # "no app left"
+```
+
+The start check's tests named "stops the apps, then ends by SIGINT" (and SIGTERM, SIGHUP) start
+it as a terminal does, with a stand-in for `pnpm`, and interrupt it. The workspace test's failure
+shows only where /tmp is on another file system than pnpm's store, as on Ubuntu 26.04.
+
 ## #6 - Architecture and decision docs
 
 **What changed**
@@ -1262,6 +1321,17 @@ How to verify, from the repository root:
 ```sh
 pnpm exec vitest run scripts/check-docker.test.ts   # "Tests  21 passed (21)"
 ```
+
+**Review fixes (wave w0, round 2)**
+
+Bravo took this instruction over with instruction 5 (see there). The scripts needed no change; the
+test count in "How to verify" above was out of date. They ran again against a real engine, in the
+Ubuntu 26.04 VM of instruction 5's review (Docker Engine 29.9.1, Compose 5.1.3, `/bin/sh` is
+dash), as a developer runs them: `pnpm docker:up` returned once both services were healthy (20 s
+with the image pulls); `pnpm docker:logs redis` ended on Ctrl+C with no Compose process left;
+`pnpm docker:down` removed both containers and the network and kept both volumes; and with the
+`docker` command moved away, then with the engine stopped, `pnpm docker:up` printed the message
+for that case and exited with status 1.
 
 ## #8 - Structured logging with request IDs
 
