@@ -881,7 +881,7 @@ from the repository root:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm exec vitest run --project scripts            # "Test Files  4 passed (4)", "Tests  59 passed (59)"
+pnpm exec vitest run --project scripts            # "Test Files  5 passed (5)", "Tests  86 passed (86)"
 pnpm peers check                                  # "No peer dependency issues found"
 pnpm build 2>&1 | tee build.log                   # the route table, then "Done"
 node scripts/check-build-warnings.ts build.log    # "Found no warning or error lines ...", status 0
@@ -992,9 +992,10 @@ in `docs/DEPENDENCIES.md`.
   `scripts/ci-workflow.test.ts` reads the workflows. Since Phase 0 was merged,
   `` `${root}.github/workflows/*` `` is in `forceRerunTriggers` in `vitest.config.ts`, so a commit
   that changes only a workflow runs every test. CI runs them either way.
-- `scripts/check-build-warnings.ts` and `scripts/check-docker.ts` need Node.js 24.2 or later
-  (`import.meta.main`). CI and `.nvmrc` install the latest Node.js 24; on an older one the tests
-  fail, so the checks cannot pass quietly. `engines` still allows 24.0 (see docs/DECISIONS.md).
+- `scripts/check-build-warnings.ts`, `scripts/check-docker.ts` and `scripts/check-start.ts` need
+  Node.js 24.2 or later (`import.meta.main`). CI and `.nvmrc` install the latest Node.js 24; on
+  an older one the tests fail, so the checks cannot pass quietly. `engines` still allows 24.0
+  (see docs/DECISIONS.md).
   (Since the wave w0 review, `engines` requires 24.15 and `pnpm install` enforces it.)
 - The action SHAs do not update themselves; Dependabot arrives with instruction 106.
 
@@ -1051,7 +1052,7 @@ scripts, each failing a test. Fixes, each with a test where it changed code or a
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run scripts/check-start.test.ts   # "Tests  5 passed (5)"
+pnpm exec vitest run scripts/check-start.test.ts   # "Tests  14 passed (14)" since wave w0 round 2
 pnpm build && node scripts/check-start.ts           # "Both apps started: the API answered ..."
 LOG_LEVEL=loud node scripts/check-start.ts          # "`pnpm start` exited with code 1 before
                                                     # both apps answered.", then the API's error
@@ -1172,7 +1173,7 @@ Delta reviewed this instruction and changed:
 pnpm run                              # lists db:migrate, db:seed, docker:up, docker:down, docker:logs
 pnpm db:migrate; echo "status $?"     # db:migrate: not available yet. ... instruction 26. ... status 1
 pnpm db:seed; echo "status $?"        # db:seed: not available yet. ... instruction 26. ... status 1
-pnpm exec vitest run --project scripts  # "Tests  59 passed (59)"
+pnpm exec vitest run --project scripts  # "Tests  86 passed (86)"
 ```
 
 Without Docker, `pnpm docker:up` prints "Docker is not installed, or the `docker` command is not
