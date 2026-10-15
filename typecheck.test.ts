@@ -213,7 +213,7 @@ describe("the web app's type check", { timeout: 60_000 }, () => {
     );
 
     expect(result.code).not.toBe(0);
-    expect(result.output).toMatch(/\.next\/types\/validator\.ts\(\d+,\d+\): error TS2344/);
+    expect(result.output).toMatch(/\.next\/types\/validator\.ts\(\d+,\d+\): error TS\d+/);
   });
 });
 

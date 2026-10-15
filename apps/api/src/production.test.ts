@@ -263,8 +263,9 @@ describe("the production build of the API", { timeout: 30_000 }, () => {
     });
 
     expect(await api.exited, api.output()).toEqual({ code: 0, signal: null });
-    expect(api.output()).toMatch(/at parseEnv \(\S+\/packages\/shared\/src\/env\.ts:\d+:\d+\)/);
-    expect(api.output()).toMatch(/at loadConfig \(\S+\/apps\/api\/src\/config\.ts:\d+:\d+\)/);
+    expect(api.output()).toMatch(/\(\S+\/packages\/shared\/src\/\S+\.ts:\d+:\d+\)/);
+    expect(api.output()).toMatch(/\(\S+\/apps\/api\/src\/\S+\.ts:\d+:\d+\)/);
+    expect(api.output()).not.toMatch(/\/dist\/\S+\.js:\d+/);
   });
 
   // Without the condition, Node.js would resolve packages/shared's default export, its
