@@ -881,6 +881,7 @@ describe("the pre-commit hook's test step", { timeout: 60_000 }, () => {
     "apps/web/tsconfig.json",
     "apps/web/vitest.config.ts",
     "apps/web/vitest.setup.ts",
+    "apps/web/postcss.config.mjs",
     // Started as a separate process by its tests, so no test imports it.
     "apps/api/src/server.ts",
     ".husky/pre-commit",

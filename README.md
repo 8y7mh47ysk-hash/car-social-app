@@ -188,7 +188,7 @@ are not checked.
   commit; any ESLint warning fails), `pnpm typecheck` for the whole repository when a staged file
   is TypeScript, JSON or a pnpm workspace file, and `vitest related` for the unit tests that
   import a staged file. Staging a `package.json`, a pnpm lockfile or workspace file, a tsconfig,
-  a Vitest config or setup file, a git hook or its config, the API's entrypoint
+  a Vitest config or setup file, a PostCSS config, a git hook or its config, the API's entrypoint
   (`apps/api/src/server.ts`, which its tests start as a separate process) or a file that tests
   read instead of importing (`docker-compose.yml`, an `.env.example` template, a `.gitignore`, a
   CI workflow or `eslint.config.mjs`) runs every test instead. Deleted files count as staged, so

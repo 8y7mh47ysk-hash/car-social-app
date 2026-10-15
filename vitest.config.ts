@@ -31,6 +31,8 @@ export default defineConfig({
       `${root}**/tsconfig*.json`,
       `${root}**/{vite,vitest}.config.*`,
       `${root}**/vitest.setup.*`,
+      // Vite reads it to compile the web app's stylesheet in apps/web/src/app/globals.test.ts.
+      `${root}**/postcss.config.*`,
       // The API's entrypoint: apps/api/src/server.test.ts starts it as a separate process.
       `${root}apps/api/src/server.ts`,
       `${root}.husky/*`,
