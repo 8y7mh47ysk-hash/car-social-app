@@ -132,14 +132,15 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
   };
   child.stdout.setEncoding("utf8").on("data", collect);
   child.stderr.setEncoding("utf8").on("data", collect);
+  // How the command ended, as first reported: a command that could not be started also closes.
   let exit: string | undefined;
   const exited = new Promise<void>((resolve) => {
     child.once("error", (error) => {
-      exit = `could not be started (${error.message})`;
+      exit ??= `could not be started (${error.message})`;
       resolve();
     });
     child.once("close", (code, signal) => {
-      exit = signal === null ? `exited with code ${String(code)}` : `was stopped by ${signal}`;
+      exit ??= signal === null ? `exited with code ${String(code)}` : `was stopped by ${signal}`;
       resolve();
     });
   });
@@ -205,7 +206,11 @@ if (import.meta.main) {
         `the web app its home page on port ${String(result.ports.web)}, and both stopped.`,
     );
   } else {
-    console.error(`${result.problem}\nWhat the apps printed:\n${result.output}`);
+    const printed =
+      result.output === ""
+        ? "The apps printed nothing."
+        : `What the apps printed:\n${result.output}`;
+    console.error(`${result.problem}\n${printed}`);
     process.exitCode = 1;
   }
 }

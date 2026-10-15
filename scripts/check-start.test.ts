@@ -1,6 +1,8 @@
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, onTestFinished } from "vitest";
 
@@ -149,5 +151,42 @@ describe("checkStart", { timeout: 20_000 }, () => {
 
     expect(result.problem).toBe("The apps did not stop within 1 s of SIGTERM.");
     expect(running).toBe(false);
+  });
+
+  it("fails at once, saying why, when the command cannot be started", async () => {
+    const result = await checkStart({
+      command: ["apex-no-such-command"],
+      timeoutMs: 2_000,
+      stopTimeoutMs: 1_000,
+    });
+
+    expect(result.problem).toBe(
+      "`apex-no-such-command` could not be started (spawn apex-no-such-command ENOENT) " +
+        "before both apps answered.",
+    );
+    expect(result.output).toBe("");
+  });
+});
+
+describe("check-start command", { timeout: 20_000 }, () => {
+  const script = fileURLToPath(new URL("check-start.ts", import.meta.url));
+
+  it("fails with status 1 and says so when pnpm is not on PATH", () => {
+    const emptyDir = mkdtempSync(join(tmpdir(), "apex-check-start-path-"));
+    onTestFinished(() => {
+      rmSync(emptyDir, { recursive: true, force: true });
+    });
+
+    const result = spawnSync(process.execPath, [script], {
+      env: { PATH: emptyDir },
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(
+      "`pnpm start` could not be started (spawn pnpm ENOENT) before both apps answered.\n" +
+        "The apps printed nothing.\n",
+    );
   });
 });
