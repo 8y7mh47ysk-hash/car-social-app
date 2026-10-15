@@ -1071,14 +1071,18 @@ a ✅ line for each diagram and one for `/tmp/architecture.md`, and exits with c
 GitHub renders the diagrams too, once the repository is there.
 
 Check that the decisions log kept every earlier entry (472e750 is the last commit on main before
-the Phase 0 work started):
+the Phase 0 work started), in bash or zsh:
 
 ```sh
-git diff 472e750 -- docs/DECISIONS.md | grep -v '^---' | grep '^-'
+diff <(git show 472e750:docs/DECISIONS.md | grep '^### ') \
+  <(grep '^### ' docs/DECISIONS.md | head -n 18) && echo "every earlier entry is still there"
 ```
 
-It prints only lines of the old header (its introduction, `Rules:` and `Entry template:`), never a
-line of an entry.
+It prints `every earlier entry is still there`: the first 18 headings are still the template's
+`### <title>` and the titles of the 17 entries that 472e750 had, in the same order, so no entry was
+removed, renamed or moved, and every newer entry comes after them. The rules let a merged entry's
+facts be corrected, and some were: each correction says so in the entry, such as "(corrected in the
+wave w0 review, ...)". `git diff 472e750 -- docs/DECISIONS.md` shows every change.
 
 ```sh
 pnpm format:check   # "All matched files use Prettier code style!"
