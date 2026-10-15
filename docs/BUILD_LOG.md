@@ -218,7 +218,8 @@ starts both, see instruction 5's integration note).
   `forceRerunTriggers` so that staging dependency, tsconfig, Vitest, hook or hook-config files
   runs every test. Since Phase 0 was merged, so does staging a file that other instructions'
   tests read instead of importing: `docker-compose.yml`, an `.env.example` template, a
-  `.gitignore`, a CI workflow or (since the wave w0 review) `eslint.config.mjs`.
+  `.gitignore`, a CI workflow or (since the wave w0 review) `eslint.config.mjs`. Since the
+  round-2 review of instruction 4, so does an env file staged with `git add --force`.
 - `git-hooks.test.ts` (54 tests): 28 commit messages through the real commit-msg hook and
   commitlint config; 10 pre-commit scenarios that run the real lint-staged with this
   repository's config in scratch git repositories, with stand-ins for ESLint, Prettier, pnpm and
@@ -234,7 +235,7 @@ Run from the repository root:
 ```sh
 pnpm install --frozen-lockfile          # a fresh install prints ". prepare$ husky"
 git config --get core.hooksPath         # prints .husky/_
-pnpm exec vitest run git-hooks.test.ts  # "Tests  64 passed (64)" since the wave w0 review
+pnpm exec vitest run git-hooks.test.ts  # "Tests  68 passed (68)" since the wave w0 round-2 review
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
@@ -359,7 +360,7 @@ instruction 4 and two merge tests from the round's integration (see below). How 
 the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts   # "Tests  64 passed (64)"
+pnpm exec vitest run git-hooks.test.ts   # "Tests  64 passed (64)"; 68 since the round-2 review
 ```
 
 To see a merge stopped by the checks, in a scratch clone (a branch committed with `--no-verify`

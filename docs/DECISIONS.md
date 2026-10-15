@@ -1473,3 +1473,20 @@ Keep entries brief. Details belong in code comments and the build log.
   that has to run the check (an `instrumentation.ts`, if instruction 102 needs one) goes in the
   block's `ignores`. `server-schema.ts` still cannot import `server-only`, because
   `next.config.ts` loads it outside React Server Components.
+
+### A staged env file makes the pre-commit hook run every test
+
+- Date: 2026-10-11 · Instruction: #2, #4 · Author: Alpha (wave w0 review, round 2)
+- Context: found in the round-2 review. `env-files.test.ts` fails when git tracks an env file,
+  but the pre-commit hook's `vitest related` picks tests by their imports, so a commit of
+  `apps/api/.env` staged with `git add --force` ran no tests and went through. Only a later
+  `pnpm test`, or CI after a push, failed, once the file was in the history.
+- Decision: env files (`.env`, `.env.*`, `*.env` and `.envrc`, in any folder) join the root
+  `forceRerunTriggers`, as in "Files that tests read from disk also make the pre-commit hook run
+  every test": staging one runs every test, and `env-files.test.ts` stops the commit.
+  `git-hooks.test.ts` checks four such names.
+- Trade-offs: such a commit fails only after the whole suite has run (about 20 seconds). A
+  lint-staged task that rejects env files at once would fail faster, but would be another list
+  of env-file names to keep in step with `.gitignore` and the test. In watch mode, saving an env
+  file reruns every test. `git commit --no-verify` still skips the hook, and CI still runs the
+  test.
