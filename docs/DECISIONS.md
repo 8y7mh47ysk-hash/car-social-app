@@ -839,7 +839,7 @@ Keep entries brief. Details belong in code comments and the build log.
   but add parts. Production images should install production dependencies only (#102), so pretty
   output cannot be switched on there by mistake.
 
-### Request IDs: a validated x-request-id or a new UUID, sent back on every response
+### Request IDs: a validated x-request-id or a new UUID, sent back in the response
 
 - Date: 2026-10-11 · Instruction: #8 · Author: Echo
 - Context: every log line of a request needs its ID. Reusing the ID of an upstream hop (later the
@@ -854,10 +854,14 @@ Keep entries brief. Details belong in code comments and the build log.
   top-level `requestIdLogLabel` option is deprecated in Fastify 5.12.
 - Trade-offs: a client can send any well-formed ID, even one another request used, so an ID is a
   label for finding log lines, never a basis for authorisation, rate limits or idempotency (#36
-  needs its own keys). Some responses still go out without the header, all sent by Fastify before
-  any hook can run: the 400, 431 and 408 it writes straight to the connection for a request it
-  could not read (bytes that are not HTTP, headers over 16 KB, headers too slow), and the 503 for a
-  request that arrives on an open connection during shutdown (its log line has the ID).
+  needs its own keys). Some responses still go out without the header, all sent before any hook
+  can run: the 400, 431 and 408 that Fastify writes straight to the connection for a request
+  Node.js could not read (bytes that are not HTTP, headers over 16 KB, headers too slow), the 503
+  Fastify sends for a request that arrives on an open connection during shutdown (its log line
+  has the ID), and the 400 and 417 that Node.js sends itself, without calling Fastify or logging
+  anything, for an HTTP/1.1 request without a Host header and for an Expect header other than
+  100-continue. (Corrected in round 2 of the wave w0 review: the title said "on every
+  response", and this list said Fastify sent them all.)
 
 ### Request context: a small AsyncLocalStorage module, not @fastify/request-context
 

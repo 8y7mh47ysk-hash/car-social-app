@@ -367,11 +367,15 @@ flowchart TB
   the request is handled carries it as `reqId`, including lines from code that is never handed
   the request (an AsyncLocalStorage context, in `apps/api/src/lib/request-context.ts`). Clients
   choose their own IDs, so an ID is only a label for finding log lines, never something to trust.
-  Responses that Fastify sends before any hook runs carry no ID: those it writes straight to the
-  connection for a request it could not read (400 for bytes that are not valid HTTP, 431 for
-  headers over Node.js's 16 KB limit, 408 for headers that arrive too slowly), which it logs at
-  trace level without an ID, and the 503 for a request that arrives on an open connection while
-  the server shuts down (its log line has the ID).
+  A few responses go out before any hook can add the header, so they carry no ID. Fastify writes
+  three straight to the connection when Node.js cannot read a request, and logs them at trace
+  level without an ID: 400 for bytes that are not valid HTTP, 431 for headers over Node.js's 16 KB
+  limit and 408 for headers that arrive too slowly. It answers a request that arrives on an open
+  connection while the server shuts down with a 503, whose log line has the ID. Node.js itself
+  answers two kinds of request without ever calling Fastify, so nothing is logged at any level:
+  an HTTP/1.1 request without a `Host` header (400) and an `Expect` header other than
+  `100-continue` (417); it also closes the connection of a `CONNECT` request without answering.
+  `apps/api/src/logging.test.ts` checks the 400s, the 431 and the 417.
   A route that writes its response to `reply.raw` itself, as a Server-Sent Events stream might
   (#72), sends only the headers it writes there, so it must include `reply.getHeaders()`.
 - **Redaction.** Before a line is written, the values of sensitive keys (passwords, tokens,

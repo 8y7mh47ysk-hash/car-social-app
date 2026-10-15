@@ -1255,9 +1255,9 @@ pnpm exec vitest run scripts/check-docker.test.ts   # "Tests  21 passed (21)"
   one JSON object per line with an ISO 8601 time. `LOG_FORMAT=pretty` prints readable lines for a
   terminal instead, through pino-pretty (a development dependency).
 - Request IDs (`apps/api/src/lib/request-id.ts`): a well-formed incoming `x-request-id` (8 to 64
-  letters, digits, `-` or `_`) is reused and anything else is replaced by a new UUID. Every
-  response sends the ID back in `x-request-id`, including the 400 and 414 responses that
-  Fastify's router sends for malformed URLs.
+  letters, digits, `-` or `_`) is reused and anything else is replaced by a new UUID. Responses
+  send the ID back in `x-request-id`, including the 400 and 414 responses that Fastify's router
+  sends for malformed URLs; the notes below list the few that go out before the ID can be added.
 - Request context (`apps/api/src/lib/request-context.ts`): an AsyncLocalStorage context entered in
   the app's first `onRequest` hook, so every line logged while a request is handled carries its
   ID as `reqId`, including lines from code that is never handed the request.
@@ -1343,11 +1343,13 @@ None.
 - `LOG_LEVEL` (instruction 4's environment loader) sets the level; the default is `info`.
 - Clients choose their request IDs when well formed, so an ID is a label for finding log lines,
   never something to trust.
-- Responses that Fastify sends before any hook runs carry no `x-request-id`: the 400, 431 and 408
-  it writes straight to the connection for a request it could not read (bytes that are not valid
-  HTTP, headers over Node.js's 16 KB limit, headers that arrive too slowly), logged at trace level
-  without an ID, and the 503 for a request arriving on an open connection during shutdown (its
-  log line has the ID).
+- Responses sent before any hook runs carry no `x-request-id`. Fastify writes a 400, 431 or 408
+  straight to the connection when Node.js cannot read a request (bytes that are not valid HTTP,
+  headers over Node.js's 16 KB limit, headers that arrive too slowly) and logs it at trace level
+  without an ID, and sends a 503 for a request arriving on an open connection during shutdown
+  (its log line has the ID). Node.js itself answers an HTTP/1.1 request without a `Host` header
+  (400) and an `Expect` header other than `100-continue` (417) without calling Fastify, so
+  nothing is logged, and closes the connection of a `CONNECT` request without answering.
 - Redaction works on key names and URL parts. A secret written into a message's text cannot be
   recognised, so never put one there.
 - Request lines record the client's IP address, which is personal data under UK GDPR; the privacy
@@ -1378,7 +1380,8 @@ Delta reviewed this instruction and changed:
 - The docs named two responses without `x-request-id`, one of them "the bare 400 that Node.js
   sends". Fastify writes that 400 itself, and also a 431 for headers over 16 KB (a very long URL
   is enough) and a 408 for headers that arrive too slowly. The notes above, `docs/ARCHITECTURE.md`
-  and the request ID decision now list them all.
+  and the request ID decision now list them (round 2 found two more, which Node.js sends itself:
+  see the notes above).
 - Written down, in the code and in `docs/ARCHITECTURE.md` ("Observability"), for the
   instructions that will need it:
   - a timer, socket or connection created while a request is handled keeps that request's

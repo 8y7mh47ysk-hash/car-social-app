@@ -3,7 +3,7 @@ import type { IncomingHttpHeaders } from "node:http";
 
 import { z } from "zod";
 
-/** The header that carries a request's ID: read from requests and set on every response. */
+/** The header that carries a request's ID: read from requests and sent back in responses. */
 export const REQUEST_ID_HEADER = "x-request-id";
 
 /**
