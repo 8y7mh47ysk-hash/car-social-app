@@ -1,8 +1,15 @@
 import { APP_NAME } from "@apex/shared";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import RootLayout, { metadata } from "./layout";
+
+/** Whether the layout loaded the global stylesheet, which globals.test.ts checks. */
+const stylesheet = vi.hoisted(() => ({ loaded: false }));
+vi.mock("./globals.css", () => {
+  stylesheet.loaded = true;
+  return {};
+});
 
 describe("RootLayout", () => {
   // WCAG 2.2 success criterion 3.1.1, Language of Page: screen readers and browsers choose their
@@ -21,5 +28,10 @@ describe("RootLayout", () => {
 
   it("titles every page with the product's name", () => {
     expect(metadata.title).toBe(APP_NAME);
+  });
+
+  // It brings in Tailwind CSS; without it, every page is unstyled.
+  it("loads the global stylesheet for every page", () => {
+    expect(stylesheet.loaded).toBe(true);
   });
 });
