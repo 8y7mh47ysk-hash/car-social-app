@@ -1164,7 +1164,10 @@ Keep entries brief. Details belong in code comments and the build log.
   every commit that staged TypeScript or JSON ("Cannot find module
   '../../../src/app/<route>/page.js'") until someone deleted `.next` or ran `next dev` again.
   `next build` filters `.next/dev/types` out of its own type check for this reason (a comment in
-  next/dist/lib/typescript/runTypeCheck.js says so).
+  next/dist/lib/typescript/runTypeCheck.js says so). (Corrected in round 2 of the wave w0 review:
+  that filter belongs to Next.js's TypeScript API checker, which 16.4 no longer uses by default,
+  so `pnpm build` still failed on the stale copy; see "next build type-checks with
+  tsconfig.typecheck.json".)
 - Decision: the web app's `typecheck` script runs `tsc --noEmit --project tsconfig.typecheck.json`.
   That file extends tsconfig.json and excludes `node_modules` and `.next/dev`. tsconfig.json is
   unchanged, so editors still see the route types of a running dev server: after the hook has run
@@ -1428,3 +1431,91 @@ Keep entries brief. Details belong in code comments and the build log.
   what they serve; #68's Playwright tests cover pages and flows. Once the web app has a required
   server variable (Phase 2), this step needs a throwaway value for it, as the Compose step has
   for the passwords. The time limits are generous, so a slow runner does not fail it.
+
+### next build type-checks with tsconfig.typecheck.json
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Delta (wave w0 review, round 2)
+- Context: "The web type check leaves out next dev's copy of the route types" made
+  `pnpm typecheck` skip `.next/dev`, on the belief that `next build` already did. Next.js 16.4
+  type-checks a build with the TypeScript CLI by default (`experimental.useTypeScriptCli`), which
+  runs `tsc --project <tsconfig> --noEmit` on everything the tsconfig includes; the filter in
+  runTypeCheck.js belongs to the older TypeScript API checker. Reported as w0.V1.Bravo.1 and
+  reproduced in a fresh clone: after a route served by `next dev` was deleted, `pnpm typecheck`
+  passed and `pnpm build` failed (TS2307 and TS2344 in `.next/dev/types/validator.ts`).
+- Decision: `typescript: { tsconfigPath: "tsconfig.typecheck.json" }` in apps/web/next.config.ts,
+  so that `next build` and `pnpm typecheck` check the same files. `next-config-settings.test.ts`
+  checks that the setting names the file that the `typecheck` script uses, and
+  `typecheck.test.ts` checks that file on a copy of the app with a stale dev validator.
+- Trade-offs: Next.js also reads that file for module resolution, which is unchanged because it
+  extends tsconfig.json, and it never rewrites a tsconfig that extends another
+  (writeConfigurationDefaults), so neither file changes when Next.js runs. Editors still read
+  tsconfig.json. The test pins the setting instead of running `next build`, which takes most of a
+  minute on a shared machine; the round-2 note in BUILD_LOG #1 records the real builds.
+
+### The API never listens after a stop signal that arrives while it starts
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Delta (wave w0 review, round 2)
+- Context: "API structure: app factory, plugin routes and a small entrypoint" closes the app on
+  SIGINT or SIGTERM. A signal that arrived while `app.listen()` was still running the plugins'
+  onReady hooks closed the app, but Fastify went on with the start: the server then listened,
+  answered with 503 or 200 and never exited (w0.V1.Bravo.3; four such servers from a reproduction
+  still answered four hours later). No plugin does work at start-up yet, so the window was about a
+  millisecond, but the database, Redis and job queue clients (#26, #35, #37) will add some.
+- Decision: apps/api/src/server.ts runs `app.ready()` (the onReady hooks) and then `app.listen()`
+  only if no stop signal has arrived meanwhile. The shutdown waits for that start to finish
+  before it closes the app, which also covers a signal while the port is opened on a hostname,
+  whose address lookup takes time. A signal before the handlers are registered, while the modules
+  load and the app is built, still ends the process as Node.js does by default: nothing has
+  started. Tests: a signal during an onReady hook (code 0, never listening), one during the lookup
+  of `localhost`, a repeated SIGTERM, a close that fails (code 1) and the 10-second limit with a
+  request that never finishes (code 1).
+- Trade-offs: a stop during start-up waits for the plugins' start-up work to finish, so their
+  clean-up runs; Fastify's own `pluginTimeout` (10 s) bounds a start that hangs, which then exits
+  with "failed to start" and code 1. Fastify's `listen({ signal })` also skips listening after an
+  abort, but it closes the app itself and ignores a close that fails; the entrypoint keeps the
+  shutdown, its time limit and its error handling in one place.
+
+### The steps after a stopped hook keep a merge, and the tests run them from the README
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Delta (wave w0 review, round 2)
+- Context: "A stopped pre-commit hook is recovered by hand, with tested steps" gave the steps that
+  lint-staged takes after a failed check, but not all of them: lint-staged also writes back the
+  merge state (`MERGE_HEAD`, `MERGE_MSG` and `MERGE_MODE`) and deletes its working folder
+  `.git/lint-staged/<id>` (lib/gitWorkflow.js). Reported as w0.V1.Bravo.2: after a stopped commit
+  that was finishing a merge, `git reset --hard` and `git stash apply --index` each delete
+  `MERGE_HEAD`, so the next commit had one parent. When `git merge` itself is stopped during
+  pre-merge-commit, git never records the merge. The tests ran their own copy of the steps, so the
+  README could drift from what was tested.
+- Decision: the README section "Git hooks" gives three sets of steps: after a stopped commit (now
+  also deleting lint-staged's working folder); the same with the merge state copied aside and
+  back, for a commit that was finishing a merge; and `git reset --merge` followed by the merge
+  again, for a stopped `git merge` (git refuses to merge with staged changes, so every staged
+  change came from the merge). `git-hooks.test.ts` takes the code blocks from README.md, fills in
+  `stash@{n}`, `<id>` and `<branch>`, and runs them in scratch repositories.
+- Trade-offs: recovery is still manual, now with three variants. The tests depend on the README's
+  layout (a `sh` code block in the section "Git hooks" that holds the commands), which is what
+  keeps the documented steps tested. `git reset --merge` drops the merge's changes but keeps
+  unstaged changes and untracked files, which `git merge` refuses to overwrite.
+
+### Tests check the resolved settings that decide what CI and the hook check
+
+- Date: 2026-10-11 · Instruction: #1, #2 · Author: Delta (wave w0 review, round 2)
+- Context: round 2 of the wave w0 review broke the stream's settings and code on purpose, one
+  change at a time: 32 of 45 plausible changes passed every check. Among them: a Vitest project
+  left out of the root config (`pnpm test` then ran 289 of 558 tests), lint-staged patterns that
+  stopped linting `.tsx` files or type-checking JSON changes, strict compiler flags removed, ESLint
+  rule sets weakened or narrowed, and the `prepare` script removed.
+- Decision: tests read what the tools resolve rather than the configs' text. `vitest list` must
+  list every test file that git tracks or would add (test-suite.test.ts). `tsc --showConfig` must
+  show the strict flags for every tsconfig in the repository (typecheck.test.ts). ESLint's
+  `calculateConfigForFile` must give a file in every package and at the root every rule that
+  typescript-eslint's strict and stylistic sets turn on, every package that depends on React the
+  React Hooks rules and jsx-a11y's strict settings, the Next.js app every rule of Next.js's set,
+  and the API `no-console` (eslint-config.test.ts). The hook tests stage every kind of file and
+  install the hooks with the `prepare` script. Expected rules come from the rule sets themselves
+  and packages from the workspace folders, so a new package such as packages/ui is checked
+  without a change to the tests.
+- Trade-offs: the strict flags are listed in the test, so changing them on purpose means changing
+  the test too. The check that every test file runs lives in the "tooling" project and cannot see
+  that project's own removal. Options are compared only for jsx-a11y, whose recommended set
+  differs from its strict set in options alone.
