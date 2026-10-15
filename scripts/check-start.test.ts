@@ -1,7 +1,8 @@
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, onTestFinished, vi } from "vitest";
@@ -114,19 +115,46 @@ function standInDirectory(): { dir: string; pidFile: string } {
 }
 
 /**
+ * Writes the stand-in to a new temporary directory (see standInDirectory) and returns the command
+ * that runs it in `mode`.
+ */
+function prepareStandIn(mode: string) {
+  const { dir, pidFile } = standInDirectory();
+  const script = join(dir, "stand-in.mjs");
+  writeFileSync(script, STAND_IN);
+  const command: [string, ...string[]] = [
+    process.execPath,
+    script,
+    mode,
+    pidFile,
+    String(process.pid),
+  ];
+  return { dir, pidFile, command };
+}
+
+/** Waits until the stand-in has written its process ID, and returns that ID. */
+async function standInPid(pidFile: string): Promise<number> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const [pid] = readPids(pidFile);
+    if (pid !== undefined) {
+      return pid;
+    }
+    if (Date.now() > deadline) {
+      throw new Error("the stand-in did not start within 10 s");
+    }
+    await sleep(20);
+  }
+}
+
+/**
  * Runs the check against the stand-in in `mode`, with short time limits. Returns the result and
  * whether the stand-in's process was still running afterwards.
  */
 async function checkStandIn(mode: string) {
-  const { dir, pidFile } = standInDirectory();
-  const script = join(dir, "stand-in.mjs");
-  writeFileSync(script, STAND_IN);
+  const { pidFile, command } = prepareStandIn(mode);
 
-  const result = await checkStart({
-    command: [process.execPath, script, mode, pidFile, String(process.pid)],
-    timeoutMs: 2_000,
-    stopTimeoutMs: 1_000,
-  });
+  const result = await checkStart({ command, timeoutMs: 2_000, stopTimeoutMs: 1_000 });
 
   const [pid] = readPids(pidFile);
   if (pid === undefined) {
@@ -217,6 +245,37 @@ describe("checkStart", { timeout: 20_000 }, () => {
     expect(Date.now() - started).toBeLessThan(10_000);
   });
 
+  it("stops the apps, and fails, once its signal is aborted while it waits", async () => {
+    const { pidFile, command } = prepareStandIn("no-web");
+    const controller = new AbortController();
+    const started = Date.now();
+
+    const checking = checkStart({
+      command,
+      timeoutMs: 10_000,
+      stopTimeoutMs: 1_000,
+      signal: controller.signal,
+    });
+    const pid = await standInPid(pidFile);
+    controller.abort();
+    const result = await checking;
+
+    expect(result.problem).toBe("The check was interrupted before both apps answered.");
+    expect(isRunning(pid)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it("starts nothing when its signal is already aborted", async () => {
+    const { command } = prepareStandIn("ok");
+
+    const result = await checkStart({ command, signal: AbortSignal.abort() });
+
+    expect(result.problem).toBe(
+      `The check was interrupted before \`${command.join(" ")}\` started.`,
+    );
+    expect(result.output).toBe("");
+  });
+
   it("fails at once, saying why, when the command cannot be started", async () => {
     const result = await checkStart({
       command: ["apex-no-such-command"],
@@ -232,8 +291,74 @@ describe("checkStart", { timeout: 20_000 }, () => {
   });
 });
 
+/** A stand-in for `pnpm` that runs the stand-in the environment describes, whatever its arguments. */
+const PNPM_STAND_IN = `#!/bin/sh
+exec "$STAND_IN_NODE" "$STAND_IN_SCRIPT" "$STAND_IN_MODE" "$STAND_IN_PID_FILE" "$STAND_IN_RUNNER"
+`;
+
 describe("check-start command", { timeout: 20_000 }, () => {
   const script = fileURLToPath(new URL("check-start.ts", import.meta.url));
+
+  /**
+   * Starts the program in a process group of its own, as a terminal starts a command, with a PATH
+   * whose `pnpm` runs the stand-in in `mode`. Kills the program's group when the test finishes.
+   */
+  function startProgram(mode: string) {
+    const { dir, pidFile, command } = prepareStandIn(mode);
+    const [node, standIn] = command;
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "pnpm"), PNPM_STAND_IN, { mode: 0o755 });
+
+    const program = spawn(process.execPath, [script], {
+      detached: true,
+      env: {
+        PATH: [bin, "/usr/bin", "/bin"].join(":"),
+        STAND_IN_NODE: node,
+        STAND_IN_SCRIPT: standIn,
+        STAND_IN_MODE: mode,
+        STAND_IN_PID_FILE: pidFile,
+        STAND_IN_RUNNER: String(process.pid),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const { pid } = program;
+    if (pid === undefined) {
+      throw new Error("could not start node scripts/check-start.ts");
+    }
+    onTestFinished(() => {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        // It has ended.
+      }
+    });
+    let stderr = "";
+    program.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    const ended = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+      program.once("close", (code, signal) => {
+        resolve({ code, signal });
+      });
+    });
+    return { pid, pidFile, ended, stderr: () => stderr };
+  }
+
+  it.each([
+    { signal: "SIGINT", how: "Ctrl+C: to the program's process group, as a terminal sends it" },
+    { signal: "SIGTERM", how: "to the program alone, as kill and timeout send it" },
+    { signal: "SIGHUP", how: "to the program's process group, as a closed terminal does" },
+  ] as const)("stops the apps, then ends by $signal ($how)", async ({ signal, how }) => {
+    const program = startProgram("no-web");
+    const standIn = await standInPid(program.pidFile);
+
+    process.kill(how.includes("group") ? -program.pid : program.pid, signal);
+
+    expect(await program.ended).toEqual({ code: null, signal });
+    expect(program.stderr()).toBe(`Interrupted by ${signal}: stopped the apps.\n`);
+    expect(isRunning(standIn)).toBe(false);
+  });
 
   it("fails with status 1 and says so when pnpm is not on PATH", () => {
     const emptyDir = mkdtempSync(join(tmpdir(), "apex-check-start-path-"));

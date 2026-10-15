@@ -6,7 +6,8 @@
 //
 // Usage, from the repository root, after `pnpm build`: node scripts/check-start.ts
 // Exit status: 0 when both apps answered and then stopped, 1 otherwise. On failure it says what
-// went wrong and prints everything the apps printed.
+// went wrong and prints everything the apps printed. Interrupted by SIGINT (Ctrl+C), SIGTERM or
+// SIGHUP, it stops the apps first and then ends by that signal.
 
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -36,6 +37,9 @@ const REQUEST_TIMEOUT_MS = 2_000;
 /** How long to wait between two rounds of requests. */
 const POLL_INTERVAL_MS = 250;
 
+/** What interrupts the check as a program: Ctrl+C, `kill` or `timeout`, a closed terminal. */
+const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const satisfies readonly NodeJS.Signals[];
+
 export interface StartCheckOptions {
   /** The command that starts both apps and the arguments it gets; `pnpm start` by default. */
   readonly command?: readonly [string, ...string[]];
@@ -46,6 +50,8 @@ export interface StartCheckOptions {
    * by default.
    */
   readonly stopTimeoutMs?: number;
+  /** Once aborted, the check stops waiting for the apps, stops them as usual and fails. */
+  readonly signal?: AbortSignal;
 }
 
 export interface StartCheckResult {
@@ -80,16 +86,18 @@ async function freePorts(): Promise<{ web: number; api: number }> {
 
 /**
  * Asks `url` once. Resolves with undefined when the answer passes `accept`, or with a description
- * of what came back (an unexpected answer, or no answer).
+ * of what came back (an unexpected answer, or no answer). `signal` cancels the request.
  */
 async function probe(
   url: string,
   accept: (response: Response) => Promise<boolean>,
+  signal: AbortSignal | undefined,
 ): Promise<string | undefined> {
   try {
+    const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     const response = await fetch(url, {
       headers: { connection: "close" },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: signal === undefined ? timeout : AbortSignal.any([timeout, signal]),
     });
     if (await accept(response)) {
       return undefined;
@@ -132,8 +140,22 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
   const commandLine = [command, ...args].join(" ");
   const timeoutMs = options.timeoutMs ?? START_TIMEOUT_MS;
   const stopTimeoutMs = options.stopTimeoutMs ?? STOP_TIMEOUT_MS;
+  const { signal } = options;
+  // A function, not a condition: TypeScript would keep a narrowed `signal.aborted` across awaits.
+  const interrupted = (): boolean => signal?.aborted === true;
   const ports = await freePorts();
+  if (interrupted()) {
+    return {
+      ports,
+      problem: `The check was interrupted before \`${commandLine}\` started.`,
+      output: "",
+    };
+  }
 
+  // `detached` gives the command a process group of its own, which the stop signals below go to.
+  // A plain command's child processes stay in that group. pnpm 12 instead starts each script in a
+  // process group of its own, and once pnpm exits, for any reason, a helper shell of pnpm's kills
+  // those groups with SIGKILL: so signalling pnpm's group stops the apps as well.
   const child = spawn(command, args, {
     detached: true,
     env: {
@@ -159,19 +181,24 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
       exit ??= `could not be started (${error.message})`;
       resolve();
     });
-    child.once("close", (code, signal) => {
-      exit ??= signal === null ? `exited with code ${String(code)}` : `was stopped by ${signal}`;
+    child.once("close", (code, endSignal) => {
+      exit ??=
+        endSignal === null ? `exited with code ${String(code)}` : `was stopped by ${endSignal}`;
       resolve();
     });
   });
 
   const api = { name: "the API", url: `http://${HOST}:${String(ports.api)}/health` };
   const web = { name: "the web app", url: `http://${HOST}:${String(ports.web)}/` };
-  let apiState = await probe(api.url, isHealthy);
-  let webState = await probe(web.url, isPage);
+  let apiState = await probe(api.url, isHealthy, signal);
+  let webState = await probe(web.url, isPage, signal);
   const problems: string[] = [];
   const deadline = Date.now() + timeoutMs;
   while (apiState !== undefined || webState !== undefined) {
+    if (interrupted()) {
+      problems.push("The check was interrupted before both apps answered.");
+      break;
+    }
     if (exit !== undefined) {
       problems.push(`\`${commandLine}\` ${exit} before both apps answered.`);
       break;
@@ -185,15 +212,14 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
       break;
     }
     await sleep(POLL_INTERVAL_MS);
-    apiState = apiState === undefined ? undefined : await probe(api.url, isHealthy);
-    webState = webState === undefined ? undefined : await probe(web.url, isPage);
+    apiState = apiState === undefined ? undefined : await probe(api.url, isHealthy, signal);
+    webState = webState === undefined ? undefined : await probe(web.url, isPage, signal);
   }
 
-  // The apps run in the group that `detached` gave the command, so this reaches every process.
-  const signalGroup = (signal: NodeJS.Signals): void => {
+  const signalGroup = (stop: NodeJS.Signals): void => {
     try {
       if (child.pid !== undefined) {
-        process.kill(-child.pid, signal);
+        process.kill(-child.pid, stop);
       }
     } catch {
       // Every process of the group has ended (ESRCH; macOS answers EPERM while the ended
@@ -227,9 +253,32 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
   return { ports, problem: problems.length === 0 ? undefined : problems.join(" "), output };
 }
 
-if (import.meta.main) {
-  const result = await checkStart();
-  if (result.problem === undefined) {
+/** Runs the check as a program: prints its result, or stops early on a stop signal. */
+async function main(): Promise<void> {
+  // A terminal's Ctrl+C, `kill` and a closed terminal reach only this process, not the process
+  // group the apps run in. Stop them first, then end by the same signal, as an interrupted
+  // program should, so that a calling shell script stops too.
+  const controller = new AbortController();
+  const received: NodeJS.Signals[] = [];
+  const interrupt = (stop: NodeJS.Signals): void => {
+    received.push(stop);
+    controller.abort();
+  };
+  for (const name of STOP_SIGNALS) {
+    process.on(name, interrupt);
+  }
+  const result = await checkStart({ signal: controller.signal });
+  for (const name of STOP_SIGNALS) {
+    process.off(name, interrupt);
+  }
+
+  const [stop] = received;
+  if (stop !== undefined) {
+    // Without a listener, Node.js no longer handles the signal, so it ends this process.
+    process.stderr.write(`Interrupted by ${stop}: stopped the apps.\n`, () => {
+      process.kill(process.pid, stop);
+    });
+  } else if (result.problem === undefined) {
     console.log(
       `Both apps started: the API answered GET /health on port ${String(result.ports.api)}, ` +
         `the web app its home page on port ${String(result.ports.web)}, and both stopped.`,
@@ -242,4 +291,8 @@ if (import.meta.main) {
     console.error(`${result.problem}\n${printed}`);
     process.exitCode = 1;
   }
+}
+
+if (import.meta.main) {
+  await main();
 }
