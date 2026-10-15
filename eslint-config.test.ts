@@ -1,10 +1,12 @@
-import { readdir, readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join } from "node:path";
 
 import { ESLint } from "eslint";
 import tseslint from "typescript-eslint";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { z } from "zod";
 
 // Instruction 1: one ESLint config for the whole repository, with typescript-eslint's
@@ -154,5 +156,41 @@ describe("the ESLint config", () => {
   // The API logs through its logger, which adds request IDs and redacts secrets (instruction 8).
   it("forbids console output in the API's code", async () => {
     expect(isOn((await rulesFor("apps/api/src/routes/example.ts"))["no-console"])).toBe(true);
+  });
+});
+
+/** The root package.json's `lint` script, which CI runs. */
+const lintScript = z
+  .object({ scripts: z.object({ lint: z.string() }) })
+  .parse(JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8"))).scripts.lint;
+
+describe("pnpm lint", () => {
+  // CI fails on any warning (instruction 5), and some rules only warn, such as Next.js's
+  // react-hooks/exhaustive-deps. The script runs here on a folder of its own, whose config turns
+  // one rule on as a warning, with this repository's ESLint first on PATH.
+  it("fails when ESLint reports only a warning", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "apex-lint-warning-"));
+    onTestFinished(() => rm(dir, { recursive: true, force: true }));
+    await writeFile(
+      join(dir, "eslint.config.mjs"),
+      'export default [{ rules: { "no-unused-vars": "warn" } }];\n',
+    );
+    await writeFile(join(dir, "unused.js"), "const unused = 1;\n");
+    const bins = [
+      join(repoRoot, "node_modules", ".bin"),
+      dirname(process.execPath),
+      "/usr/bin",
+      "/bin",
+    ];
+
+    const result = spawnSync("sh", ["-c", lintScript], {
+      cwd: dir,
+      env: { PATH: bins.join(delimiter) },
+      encoding: "utf8",
+    });
+
+    expect(result.status, result.stdout + result.stderr).toBe(1);
+    expect(result.stdout).toContain("no-unused-vars");
+    expect(result.stdout).toContain("(0 errors, 1 warning)");
   });
 });
