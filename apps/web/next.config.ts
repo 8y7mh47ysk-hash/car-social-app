@@ -14,6 +14,10 @@ const nextConfig: NextConfig = {
   // live in node_modules/next/dist/docs/.
   agentRules: false,
   poweredByHeader: false,
+  // `next build` type-checks with the same file as `pnpm typecheck`, which leaves out the route
+  // types that `next dev` keeps in .next/dev (see tsconfig.typecheck.json). Editors and the rest of
+  // Next.js still read tsconfig.json, which this file extends.
+  typescript: { tsconfigPath: "tsconfig.typecheck.json" },
   // Workspace packages are consumed as TypeScript source and compiled by Next.js.
   transpilePackages: ["@apex/shared"],
   outputFileTracingRoot: monorepoRoot,
