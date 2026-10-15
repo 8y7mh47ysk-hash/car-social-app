@@ -446,6 +446,46 @@ describe("request IDs over a real connection", () => {
       ["GR86", second.requestId],
     ]);
   });
+
+  // docs/ARCHITECTURE.md ("Observability") lists the responses that go out before any hook can
+  // add the header. Fastify writes the first two straight to the connection when Node.js's parser
+  // rejects the request, logging them at trace level without an ID; Node.js answers the last two
+  // itself, without calling Fastify, so nothing is logged at all.
+  it.each([
+    ["bytes that are not HTTP", "NOT HTTP\r\n\r\n", 400, ["client error"]],
+    [
+      "headers over Node.js's 16 KB limit",
+      `GET /health HTTP/1.1\r\nHost: x\r\nX-Big: ${"y".repeat(20_000)}\r\n\r\n`,
+      431,
+      ["client header_overflow"],
+    ],
+    [
+      "an HTTP/1.1 request without a Host header",
+      "GET /health HTTP/1.1\r\nConnection: close\r\n\r\n",
+      400,
+      [],
+    ],
+    [
+      "an Expect header other than 100-continue",
+      "GET /health HTTP/1.1\r\nHost: x\r\nExpect: tea\r\nConnection: close\r\n\r\n",
+      417,
+      [],
+    ],
+  ])("sends no ID with the response to %s", async (_name, bytes, statusCode, logged) => {
+    const { app, lines } = await buildLoggedApp();
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const linesBefore = lines().length;
+
+    const reply = await sendRaw(new URL(address), bytes);
+
+    expect(reply.slice(0, reply.indexOf("\r\n"))).toMatch(
+      new RegExp(`^HTTP/1\\.1 ${String(statusCode)} `),
+    );
+    expect(reply.toLowerCase()).not.toContain("x-request-id");
+    const written = lines().slice(linesBefore);
+    expect(written.map((line) => line.msg)).toEqual(logged);
+    expect(written.map((line) => line.reqId)).toEqual(logged.map(() => undefined));
+  });
 });
 
 describe("secrets in the logs", () => {
