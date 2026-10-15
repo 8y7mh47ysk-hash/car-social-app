@@ -897,7 +897,9 @@ Keep entries brief. Details belong in code comments and the build log.
   included, cuts strings to 8192 characters, and adds the running request's ID to a line that has
   none. A line that does not parse is replaced by an error line, so nothing unredacted is written.
   ESLint forbids `console` in `apps/api/src` (except `server.ts`, which may print before the
-  logger exists), so every line takes this path.
+  logger exists), so code cannot log around this path with it. (Corrected in round 2 of the wave
+  w0 review. This said every line takes this path, but writing to `process.stdout` or
+  `process.stderr` directly would not, and no rule catches that.)
 - Trade-offs: parsing and re-serialising each line costs about 3.3 µs instead of pino's 0.5 µs
   (measured on this Apple M5), about 5.5 µs per request for Fastify's two request lines: nothing
   next to a real route, but worth revisiting if profiling (#119) says otherwise. Free text cannot
@@ -1432,3 +1434,43 @@ Keep entries brief. Details belong in code comments and the build log.
   what they serve; #68's Playwright tests cover pages and flows. Once the web app has a required
   server variable (Phase 2), this step needs a throwaway value for it, as the Compose step has
   for the passwords. The time limits are generous, so a slow runner does not fail it.
+
+### Only a pino-pretty that cannot be found counts as not installed
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Charlie (wave w0 review, round 2)
+- Context: `LOG_FORMAT=pretty` without pino-pretty, as in a production install, must stop the API
+  with one line that says to use JSON (round 1 of the review). That fix turned every failure to
+  load pino-pretty into this advice and dropped the cause, so a broken install (one of
+  pino-pretty's own dependencies missing, an invalid package.json) printed the wrong advice and
+  nothing else.
+- Decision: `importPinoPretty` in `apps/api/src/lib/logger.ts` first asks Node.js to resolve
+  pino-pretty with `import.meta.resolve`. Only `ERR_MODULE_NOT_FOUND` there means it is not
+  installed and becomes `LogFormatUnavailableError`, whose message the entrypoint prints. Any other
+  failure, in resolving or in loading it, is thrown unchanged, and Node.js prints it with its
+  stack and exits with code 1. Entrypoint tests simulate each case with a module resolve hook.
+- Trade-offs: one extra lookup at startup, and only with `LOG_FORMAT=pretty`. Matching the text of
+  the import's error ("Cannot find package 'pino-pretty'") was rejected: the wording is Node.js's,
+  not an interface, and a missing dependency of pino-pretty fails with a similar message. Vitest
+  cannot make `import.meta.resolve` fail, so the not-installed message is tested only through the
+  entrypoint (`server.test.ts`), which the pre-commit hook does not run for a change to
+  `logger.ts`; CI runs every test.
+
+### The router's rejection lines leave the URL out
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Charlie (wave w0 review, round 2)
+- Context: Fastify logs a URL that its router rejects (400 `FST_ERR_BAD_URL`, 414
+  `FST_ERR_MAX_PARAM_LENGTH`) with the raw path in the message, in `err.message` and in
+  `err.stack`, each cut only at 8192 characters. A malformed 16 KB URL wrote a 24,940-byte line,
+  where the same URL as a 404 wrote under 900 bytes in all: a malformed URL got around the
+  256-character cap of "Request lines hold method, shortened path and client address, never the
+  query string".
+- Decision: `ApiLogController` in `apps/api/src/lib/logger.ts`, which already logs a 404 as "route
+  not found", overrides `defaultErrorLog` for those two codes: one info line with `res`,
+  `err: { type, code }` and the message "malformed URL" or "route parameter too long", under the
+  request ID. Every other error is logged by Fastify's own `defaultErrorLog`.
+- Trade-offs: the line no longer holds the error's message and stack, but the stack only ever
+  shows Fastify's router, and the "incoming request" line with the same ID holds the shortened
+  URL. The response body still repeats the path, as Fastify writes it, until #27 gives these
+  responses its format in `sendFrameworkError`. Other client errors keep Fastify's lines, whose
+  messages do not repeat client input at length (an unknown 15,000-character content type gave a
+  1,835-byte line); #27 decides how errors are logged.

@@ -381,7 +381,9 @@ flowchart TB
 - **Redaction.** Before a line is written, the values of sensitive keys (passwords, tokens,
   cookies, authorization headers, API keys and similar) are replaced with `[Redacted]` at any
   depth; URL credentials, query strings and fragments are hidden in every string; strings are cut
-  to 8192 characters and request URLs to 256. Never put a secret in a log message: inside free
+  to 8192 characters and request URLs to 256. Fastify's lines for a 404 and for a URL its router
+  rejects would repeat the raw URL, so the API logs them without it ("route not found",
+  "malformed URL", "route parameter too long"). Never put a secret in a log message: inside free
   text only URL parts can be recognised. For the same reason, log parsed objects rather than raw
   bodies as strings (a raw webhook body, #91, is free text to the logger), and never put a secret
   in a URL path, which is logged as it is: tokens in links (#39, #41) go in the query string.
@@ -399,7 +401,9 @@ flowchart TB
   dependencies only (#102), can log JSON only.
 - **Writing log lines.** Route handlers and hooks log with `request.log`. Code that has no request
   (services, jobs) gets `app.log`, or a child of it, when it is created; the request's ID is
-  still added to its lines. ESLint rejects `console` calls in API code. A timer, socket or
+  still added to its lines. ESLint rejects `console` calls in API code (`api-console.test.ts`
+  checks the rule). Writing to `process.stdout` or `process.stderr` directly would skip the
+  logger too, and no rule catches that, so API code must not do it. A timer, socket or
   connection created while a request is handled keeps that request's context for good, so its
   later lines carry that request's ID: create long-lived clients, pools and intervals at startup.
 - **Next steps for request IDs.** When the web app calls the API from the server it should pass
