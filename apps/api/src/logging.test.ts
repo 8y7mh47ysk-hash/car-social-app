@@ -242,6 +242,36 @@ describe("request IDs in the logs", () => {
     expect(output()).not.toContain("query-secret");
   });
 
+  // Fastify rejects these bodies before the route's later hooks (preValidation, preHandler) run, so
+  // the ID must be set in onRequest.
+  it.each([
+    ["is not valid JSON", "application/json", "{not json", 400, "FST_ERR_CTP_INVALID_JSON_BODY"],
+    ["has a type with no parser", "text/csv", "make,model", 415, "FST_ERR_CTP_INVALID_MEDIA_TYPE"],
+  ])(
+    "sends the ID back and logs it when the body %s",
+    async (_name, contentType, payload, statusCode, code) => {
+      const { app, lines } = await buildLoggedApp();
+      app.post("/cars", () => ({ saved: true }));
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/cars",
+        headers: { "content-type": contentType },
+        payload,
+      });
+
+      expect(response.statusCode).toBe(statusCode);
+      expect(response.json()).toMatchObject({ code });
+      const requestId = response.headers["x-request-id"];
+      expect(requestId).toMatch(UUID_V4);
+      expect(lines().map((line) => [line.msg, line.reqId])).toEqual([
+        ["incoming request", requestId],
+        [response.json<{ message: string }>().message, requestId],
+        ["request completed", requestId],
+      ]);
+    },
+  );
+
   // Fastify's router answers these itself, before any hook runs.
   it.each([
     ["a malformed URL", "/cars/%zz?token=query-secret", 400, "FST_ERR_BAD_URL", "malformed URL"],
