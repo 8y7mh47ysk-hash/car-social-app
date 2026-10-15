@@ -204,6 +204,17 @@ describe("the web app's type check", { timeout: 60_000 }, () => {
     expect(result.output).toContain("src/app/broken.ts(1,14): error TS2322");
     expect(result.output).not.toContain(".next/dev");
   });
+
+  // `next typegen`, which the script runs before tsc, writes .next/types/validator.ts, which checks
+  // every page's and layout's exports against Next.js's route types, as `next build` does.
+  it("checks each page's exports against Next.js's route types", async () => {
+    const result = await typecheck(
+      await copyWebApp({ "src/app/garage/page.tsx": 'export default "not a component";\n' }),
+    );
+
+    expect(result.code).not.toBe(0);
+    expect(result.output).toMatch(/\.next\/types\/validator\.ts\(\d+,\d+\): error TS2344/);
+  });
 });
 
 /** The compiler options that make type checking strict here; tsconfig.base.json sets them all. */
