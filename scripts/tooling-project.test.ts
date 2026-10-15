@@ -16,7 +16,7 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const vitest = join(repoRoot, "node_modules", ".bin", "vitest");
 const run = promisify(execFile);
 
-const listedFilesSchema = z.array(z.object({ file: z.string(), projectName: z.string() }));
+const listedFilesSchema = z.array(z.object({ file: z.string() }));
 
 describe("the tooling project", () => {
   it("runs test-suite.test.ts, which checks that every other test file runs", async () => {

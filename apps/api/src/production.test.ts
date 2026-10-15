@@ -222,13 +222,11 @@ describe("the production build of the API", { timeout: 30_000 }, () => {
     ] as const;
     for (const [root, entry] of builds) {
       const files = await readdir(join(root, "dist"), { recursive: true });
+      const compiledTests = files.filter((file) => file.includes(".test."));
 
       expect(files, root).toContain(entry);
       expect(files, root).not.toContain("removed.js");
-      expect(
-        files.filter((file) => file.includes(".test.")),
-        root,
-      ).toEqual([]);
+      expect(compiledTests, root).toEqual([]);
     }
   });
 

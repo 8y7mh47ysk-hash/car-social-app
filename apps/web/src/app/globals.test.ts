@@ -1,6 +1,6 @@
 // @vitest-environment node
 // The stylesheet is compiled in Node.js, as Next.js compiles it: through PostCSS with
-// postcss.config.mjs, which runs Tailwind CSS (vitest.config.ts turns that on for this file).
+// postcss.config.mjs, which runs Tailwind CSS (vitest.config.ts turns that on for this stylesheet).
 // Importing it here also lets `vitest related`, in the pre-commit hook, find this test when it
 // changes.
 import "./globals.css";
