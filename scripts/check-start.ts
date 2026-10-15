@@ -1,7 +1,7 @@
 // The CI step "Start the production build" (instruction 5). The build alone does not show that the
 // apps start: `next start` checks the web server's environment variables only as it starts, and the
 // API's production start runs compiled code with flags of its own. This starts both production
-// builds with `pnpm start`, as a developer would, on free loopback ports; waits until the API
+// builds with `pnpm start`, as a developer would, on free ports of 127.0.0.1; waits until the API
 // answers GET /health and the web app serves its home page; then stops them with SIGTERM.
 //
 // Usage, from the repository root, after `pnpm build`: node scripts/check-start.ts
@@ -17,6 +17,12 @@ import { z } from "zod";
 
 /** The API's GET /health body, as packages/shared's healthResponseSchema defines it. */
 const healthSchema = z.strictObject({ status: z.literal("ok") });
+
+/**
+ * The address both apps listen on, given as WEB_HOST and API_HOST, so that a wider address in the
+ * shell or in apps/api/.env never exposes them during the check.
+ */
+const HOST = "127.0.0.1";
 
 /** How long both apps may take to answer, from the moment the command starts. */
 const START_TIMEOUT_MS = 60_000;
@@ -52,7 +58,7 @@ export interface StartCheckResult {
 async function freePorts(): Promise<{ web: number; api: number }> {
   const listen = async (): Promise<Server> => {
     const server = createServer();
-    server.listen(0, "127.0.0.1");
+    server.listen(0, HOST);
     await once(server, "listening");
     return server;
   };
@@ -110,10 +116,10 @@ async function isPage(response: Response): Promise<boolean> {
 }
 
 /**
- * Starts the apps with `options.command` (by default `pnpm start`), with WEB_PORT and API_PORT
- * set to free ports, in a process group of its own. Waits until the API answers GET /health and
- * the web app its home page, then stops the group with SIGTERM, and kills it if it has not stopped
- * in time.
+ * Starts the apps with `options.command` (by default `pnpm start`), with WEB_HOST and API_HOST set
+ * to 127.0.0.1 and WEB_PORT and API_PORT to free ports, in a process group of its own. Waits until
+ * the API answers GET /health and the web app its home page, then stops the group with SIGTERM,
+ * and kills it if it has not stopped in time.
  */
 export async function checkStart(options: StartCheckOptions = {}): Promise<StartCheckResult> {
   const [command, ...args] = options.command ?? ["pnpm", "start"];
@@ -123,7 +129,13 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
 
   const child = spawn(command, args, {
     detached: true,
-    env: { ...process.env, WEB_PORT: String(ports.web), API_PORT: String(ports.api) },
+    env: {
+      ...process.env,
+      WEB_HOST: HOST,
+      WEB_PORT: String(ports.web),
+      API_HOST: HOST,
+      API_PORT: String(ports.api),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
@@ -145,8 +157,8 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
     });
   });
 
-  const api = { name: "the API", url: `http://127.0.0.1:${String(ports.api)}/health` };
-  const web = { name: "the web app", url: `http://127.0.0.1:${String(ports.web)}/` };
+  const api = { name: "the API", url: `http://${HOST}:${String(ports.api)}/health` };
+  const web = { name: "the web app", url: `http://${HOST}:${String(ports.web)}/` };
   let apiState = await probe(api.url, isHealthy);
   let webState = await probe(web.url, isPage);
   let problem: string | undefined;

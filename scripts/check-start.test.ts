@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { checkStart } from "./check-start.ts";
 
@@ -42,17 +42,19 @@ if (mode === "stubborn") {
   process.on("SIGTERM", () => {});
 }
 const status = mode === "bad-health" ? "starting" : "ok";
+const apiHost = process.env.API_HOST ?? "127.0.0.1";
+const webHost = process.env.WEB_HOST ?? "127.0.0.1";
 createServer((request, response) => {
   response.writeHead(200, { "content-type": "application/json" });
   response.end(JSON.stringify({ status }));
-}).listen(Number(process.env.API_PORT), "127.0.0.1");
+}).listen(Number(process.env.API_PORT), apiHost);
 if (mode !== "no-web") {
   createServer((request, response) => {
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     response.end("<!DOCTYPE html><html><body><h1>Apex Garage</h1></body></html>");
-  }).listen(Number(process.env.WEB_PORT), "127.0.0.1");
+  }).listen(Number(process.env.WEB_PORT), webHost);
 }
-console.log("stand-in started");
+console.log(\`stand-in started: the API on \${apiHost}, the web app on \${webHost}\`);
 `;
 
 /** Whether the process `pid` is running. */
@@ -110,6 +112,23 @@ describe("checkStart", { timeout: 20_000 }, () => {
     expect(result.ports.web).not.toBe(result.ports.api);
     expect(result.output).toContain("stand-in started");
     expect(running).toBe(false);
+  });
+
+  it("runs the apps on 127.0.0.1, whatever WEB_HOST and API_HOST say", async () => {
+    // A developer's shell or apps/api/.env may widen the address, for example to reach the app
+    // from a phone; the check must not expose the apps, nor wait for an address it does not ask.
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
+    vi.stubEnv("WEB_HOST", "0.0.0.0");
+    vi.stubEnv("API_HOST", "0.0.0.0");
+
+    const { result } = await checkStandIn("ok");
+
+    expect(result.problem, result.output).toBeUndefined();
+    expect(result.output).toContain(
+      "stand-in started: the API on 127.0.0.1, the web app on 127.0.0.1",
+    );
   });
 
   it("fails when the API's GET /health is not {status: ok}", async () => {
