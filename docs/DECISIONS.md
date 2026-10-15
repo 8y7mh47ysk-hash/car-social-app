@@ -1432,3 +1432,43 @@ Keep entries brief. Details belong in code comments and the build log.
   tests check its shutdown. Once the web app has a required server variable (Phase 2), this step
   needs a throwaway value for it, as the Compose step has for the passwords. The time limits are
   generous, so a slow runner does not fail it.
+
+### The start check stops the apps when it is interrupted
+
+- Date: 2026-10-11 · Instruction: #5 · Author: Bravo (wave w0, round 2)
+- Context: `scripts/check-start.ts` starts `pnpm start` in a process group of its own, so that its
+  stop signals reach the apps but not the check itself, and it stopped that group only on its
+  normal path. Ctrl+C, `kill` and a closed terminal reach only the check, so they ended it at once
+  and left pnpm, both apps and pnpm's helpers running: 9 processes each time (w0.V1.Echo.2). Tests
+  that failed or timed out left their stand-in apps running the same way.
+- Decision: as a program, the check handles SIGINT, SIGTERM and SIGHUP. It stops waiting
+  (`checkStart` takes an `AbortSignal`), stops the apps as on its normal path, prints
+  "Interrupted by <signal>: stopped the apps." and then ends by the same signal, so that a shell
+  or script that runs it sees an interrupted command (status 130 after Ctrl+C) and stops too.
+  Each test stand-in writes its process ID, which the test's clean-up kills however the test
+  ends, and ends by itself once the test runner has gone. On macOS and in an Ubuntu 26.04 VM, no
+  process was left after an interrupt at any moment of the check, after tests that timed out, or
+  after the whole test run was killed.
+- Trade-offs: SIGKILL, which no program can handle, still leaves the apps running, as does
+  Ctrl+\ (SIGQUIT); CI's runner removes leftover processes when a job ends. A command in the
+  check's own process group would get a terminal's Ctrl+C directly, but `kill` and `timeout`,
+  which signal only the check, would still leave it behind, and the check could no longer stop
+  the apps without stopping itself. A second Ctrl+C does not cut the stop short; with the real
+  apps it takes well under a second, and never more than twenty seconds (ten after SIGTERM, ten
+  after SIGKILL).
+
+### Workspace copies in tests use the checkout's pnpm store
+
+- Date: 2026-10-11 · Instruction: #1, #5 · Author: Bravo (wave w0, round 2)
+- Context: `workspace.test.ts` installs copies of the workspace offline from pnpm's store, in
+  temporary folders. pnpm keeps one store per file system. On Ubuntu 26.04, the release of CI's
+  runner, /tmp is a tmpfs, so for a copy there pnpm used the empty /tmp/.pnpm-store and the
+  install failed with `ERR_PNPM_NO_OFFLINE_TARBALL`. A simulation of every CI step in an Ubuntu
+  26.04 VM failed its Test step on this test alone; on macOS the temporary folders are on the same
+  volume as the store.
+- Decision: the test asks `pnpm store path` in the checkout once and passes that store to every
+  install of a copy (`--config.store-dir`); `--frozen-store` still keeps them from writing to it.
+- Trade-offs: one more pnpm command per run of the file, about 0.05 s. Rejected: copying the
+  workspace into the checkout instead, onto its file system, which would put temporary folders
+  inside the repository; and `TMPDIR` set to the runner's temporary folder in CI, which would
+  keep the failure for anyone whose /tmp is a tmpfs, such as a developer on Ubuntu 26.04.
