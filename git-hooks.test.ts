@@ -1,9 +1,11 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { existsSync } from "node:fs";
 import {
   chmod,
   copyFile,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   realpath,
   rm,
@@ -29,6 +31,19 @@ const rootBin = join(repoRoot, "node_modules", ".bin");
 const rootScripts = z
   .object({ scripts: z.record(z.string(), z.string()) })
   .parse(JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8"))).scripts;
+
+/** The README's section "Git hooks". */
+const readmeGitHooks = /^## Git hooks\n([\s\S]*?)^## /m.exec(
+  await readFile(join(repoRoot, "README.md"), "utf8"),
+)?.[1];
+if (readmeGitHooks === undefined) {
+  throw new Error('README.md has no section "Git hooks"');
+}
+
+/** The shell code blocks of the README's section "Git hooks", in order. */
+const gitHooksReadmeBlocks = [...readmeGitHooks.matchAll(/^```sh\n([\s\S]*?)^```$/gm)].map(
+  ([, block = ""]) => block,
+);
 
 interface Result {
   readonly code: number | null;
@@ -247,13 +262,21 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
      * with the stand-in for `block` running until it is killed. Returns the ID of that group and
      * the hook's result.
      */
-    readonly startPreCommit: (block: string) => { group: number; result: Promise<Result> };
+    readonly startPreCommit: (block: string) => Started;
+    /**
+     * Starts `git merge --no-ff --no-edit <branch>` in a process group of its own, as a terminal
+     * runs it, with the stand-in for `block` running until it is killed. Returns the ID of that
+     * group and the merge's result.
+     */
+    readonly startMerge: (branch: string, block: string) => Started;
     /**
      * Commits copies of this repository's pre-commit and pre-merge-commit hooks and installs them
      * with the root package.json's `prepare` script, as `pnpm install` does, so that git itself
      * runs them from then on.
      */
     readonly installHooks: () => Promise<void>;
+    /** Runs a shell script in the repository with `sh -e` and returns its result. */
+    readonly shell: (script: string) => Promise<Result>;
     /**
      * Runs `git merge --no-ff --no-edit <branch>` and returns its result. The options name a
      * stand-in that fails.
@@ -268,6 +291,12 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
     readonly calls: () => Promise<string[]>;
     /** `git status --porcelain` as lines. */
     readonly status: () => Promise<string[]>;
+  }
+
+  /** A command started in a process group of its own: the group's ID and the command's result. */
+  interface Started {
+    readonly group: number;
+    readonly result: Promise<Result>;
   }
 
   /**
@@ -300,6 +329,27 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       await writeFile(join(root, path), content);
     };
     const hook = join(repoRoot, ".husky", "pre-commit");
+    const startInGroup = (command: string, args: readonly string[], block: string): Started => {
+      const child = spawn(command, args, {
+        cwd: root,
+        env: { ...env, STUB_BLOCK: block },
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const group = child.pid;
+      if (group === undefined) {
+        throw new Error(`could not start ${command}`);
+      }
+      // If the test fails before it stops the command, the blocked stand-in must not outlive it.
+      onTestFinished(() => {
+        try {
+          process.kill(-group, "SIGKILL");
+        } catch {
+          // The group has already exited.
+        }
+      });
+      return { group, result: finished(child) };
+    };
 
     await mkdir(stubBin, { recursive: true });
     for (const tool of tools) {
@@ -323,27 +373,9 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       write,
       preCommit: ({ fix = "", fail = "" } = {}) =>
         run("sh", ["-e", hook], root, { ...env, STUB_FIX: fix, STUB_FAIL: fail }),
-      startPreCommit: (block) => {
-        const child = spawn("sh", ["-e", hook], {
-          cwd: root,
-          env: { ...env, STUB_BLOCK: block },
-          detached: true,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        const group = child.pid;
-        if (group === undefined) {
-          throw new Error("could not start the pre-commit hook");
-        }
-        // If the test fails before it stops the hook, the blocked stand-in must not outlive it.
-        onTestFinished(() => {
-          try {
-            process.kill(-group, "SIGKILL");
-          } catch {
-            // The group has already exited.
-          }
-        });
-        return { group, result: finished(child) };
-      },
+      startPreCommit: (block) => startInGroup("sh", ["-e", hook], block),
+      startMerge: (branch, block) =>
+        startInGroup("git", ["merge", "--no-ff", "--no-edit", branch], block),
       installHooks: async () => {
         for (const hookName of ["pre-commit", "pre-merge-commit"]) {
           await write(
@@ -362,6 +394,7 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
           throw new Error(`the prepare script failed:\n${installed.output}`);
         }
       },
+      shell: (script) => run("sh", ["-e", "-c", script], root, env),
       merge: (branch, { fail = "" } = {}) =>
         run("git", ["merge", "--no-ff", "--no-edit", branch], root, { ...env, STUB_FAIL: fail }),
       finishMerge: ({ fail = "" } = {}) =>
@@ -623,6 +656,55 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
     /** The working tree before each commit: a partly staged file, an edit and a new file. */
     const before = ["MM src/app.ts", " M src/util.ts", "?? notes.txt"];
 
+    /** Picks the README's code block with the steps after a stopped commit. */
+    const commitSteps = (block: string): boolean =>
+      block.includes("git stash apply --index") && !block.includes("MERGE_HEAD");
+    /** Picks the README's code block with the steps after a stopped commit that ends a merge. */
+    const mergeCommitSteps = (block: string): boolean => block.includes("MERGE_HEAD");
+    /** Picks the README's code block that runs a stopped `git merge` again. */
+    const mergeAgainSteps = (block: string): boolean => block.includes("git reset --merge");
+
+    /**
+     * Runs the steps in the README's code block that `which` picks, from its section "Git hooks",
+     * with the placeholders filled in: `stash@{n}` and `<id>` name the hook's backup, the
+     * repository's only stash entry, and `<branch>` the branch that was being merged.
+     */
+    async function runReadmeSteps(repo: Repo, which: (block: string) => boolean): Promise<void> {
+      const blocks = gitHooksReadmeBlocks.filter(which);
+      expect(blocks, "the README's code blocks that match").toHaveLength(1);
+      let script = blocks[0] ?? "";
+      if (script.includes("stash@{n}")) {
+        const id = /lint-staged automatic backup \((\w+)\)/.exec(
+          await repo.git("stash", "list"),
+        )?.[1];
+        expect(id, "the hook's backup in the stash").toBeDefined();
+        script = script.replaceAll("stash@{n}", "stash@{0}").replaceAll("<id>", id ?? "");
+      }
+      const result = await repo.shell(script.replaceAll("<branch>", "feature"));
+      expect(result.code, result.output).toBe(0);
+    }
+
+    /** lint-staged's working folders in the repository's git folder: one per unfinished run. */
+    async function workingFolders(repo: Repo): Promise<string[]> {
+      const folder = join(repo.root, ".git", "lint-staged");
+      return existsSync(folder) ? await readdir(folder) : [];
+    }
+
+    /** Sends `signal` to the process group `group` as soon as the type check runs. */
+    async function signalDuringTypeCheck(
+      repo: Repo,
+      group: number,
+      signal: NodeJS.Signals,
+    ): Promise<void> {
+      await vi.waitFor(
+        async () => {
+          expect(await repo.calls()).toContain(typecheck);
+        },
+        { timeout: 20_000, interval: 20 },
+      );
+      process.kill(-group, signal);
+    }
+
     /**
      * Prepares that working tree, starts the hook and sends `signal` to its process group, as
      * Ctrl+C in a terminal does for SIGINT, while the type check runs: lint-staged has set aside
@@ -638,13 +720,7 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       expect(await repo.status()).toEqual(before);
 
       const hook = repo.startPreCommit("pnpm");
-      await vi.waitFor(
-        async () => {
-          expect(await repo.calls()).toContain(typecheck);
-        },
-        { timeout: 20_000, interval: 20 },
-      );
-      process.kill(-hook.group, signal);
+      await signalDuringTypeCheck(repo, hook.group, signal);
       return { repo, result: await hook.result };
     }
 
@@ -665,6 +741,7 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
 
       expect(result.code, result.output).not.toBe(0);
       await expectAsBefore(repo);
+      expect(await workingFolders(repo)).toEqual([]);
     });
 
     // lint-staged handles only SIGINT. A closed terminal (SIGHUP), a tool or editor that cancels
@@ -679,14 +756,67 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
         expect(await repo.git("stash", "list")).toMatch(
           /^stash@\{0\}: On main: lint-staged automatic backup \(\w+\)\n$/,
         );
+        expect(await workingFolders(repo)).toHaveLength(1);
 
-        await repo.git("reset", "--hard");
-        await repo.git("stash", "apply", "--index", "stash@{0}");
-        await repo.git("stash", "drop", "stash@{0}");
+        await runReadmeSteps(repo, commitSteps);
 
         await expectAsBefore(repo);
+        expect(await workingFolders(repo)).toEqual([]);
       },
     );
+
+    // git reset --hard and git stash apply both end a merge in progress: without the README's
+    // merge steps, the commit after them has only one parent.
+    it("keeps a merge in progress when the README's merge steps restore the commit that ends it", async () => {
+      const repo = await prepareMerge({ conflict: true });
+      expect((await repo.merge("feature")).code).not.toBe(0);
+      await repo.write("README.md", "# Test\n\nMore, and from the feature.\n");
+      await repo.git("add", "README.md");
+      await repo.write("src/app.ts", "export const app = 2;\n");
+      await repo.write("notes.txt", "draft\n");
+      const merging = ["M  README.md", " M src/app.ts", "M  src/util.ts", "?? notes.txt"];
+      expect(await repo.status()).toEqual(merging);
+
+      // The hook that `git commit` runs to finish the merge, stopped as a closed terminal stops it.
+      const hook = repo.startPreCommit("pnpm");
+      await signalDuringTypeCheck(repo, hook.group, "SIGHUP");
+      await hook.result;
+      await runReadmeSteps(repo, mergeCommitSteps);
+
+      expect(await repo.status()).toEqual(merging);
+      await repo.git("rev-parse", "--quiet", "--verify", "MERGE_HEAD");
+      expect(await repo.git("stash", "list")).toBe("");
+      expect(await workingFolders(repo)).toEqual([]);
+      const result = await repo.finishMerge();
+      expect(result.code, result.output).toBe(0);
+      expect((await repo.git("log", "-1", "--format=%p")).trim().split(" ")).toHaveLength(2);
+      expect(await repo.status()).toEqual([" M src/app.ts", "?? notes.txt"]);
+    });
+
+    // Stopping `git merge` itself, as a closed terminal does, stops it before it records the merge.
+    it("merges again after git merge was stopped during its checks, as the README says", async () => {
+      const repo = await prepareMerge();
+      await repo.write("src/app.ts", "export const app = 2;\n");
+      await repo.write("notes.txt", "draft\n");
+      const head = await repo.git("rev-parse", "HEAD");
+
+      const merge = repo.startMerge("feature", "pnpm");
+      await signalDuringTypeCheck(repo, merge.group, "SIGHUP");
+      await merge.result;
+      expect(existsSync(join(repo.root, ".git", "MERGE_HEAD"))).toBe(false);
+      expect(await repo.git("rev-parse", "HEAD")).toBe(head);
+      await runReadmeSteps(repo, commitSteps);
+      // No merge is in progress, so its change is staged as if it were the user's own.
+      expect(await repo.status()).toEqual([" M src/app.ts", "M  src/util.ts", "?? notes.txt"]);
+
+      await runReadmeSteps(repo, mergeAgainSteps);
+
+      expect((await repo.git("log", "-1", "--format=%p")).trim().split(" ")).toHaveLength(2);
+      expect(await repo.git("show", "HEAD:src/util.ts")).toBe("export const util = 2;\n");
+      expect(await repo.status()).toEqual([" M src/app.ts", "?? notes.txt"]);
+      expect(await readFile(join(repo.root, "src/app.ts"), "utf8")).toBe("export const app = 2;\n");
+      expect(await repo.git("stash", "list")).toBe("");
+    });
   });
 });
 
