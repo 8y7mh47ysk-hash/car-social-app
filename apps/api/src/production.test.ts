@@ -1,9 +1,20 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import type { Readable } from "node:stream";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { healthResponseSchema } from "@apex/shared";
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
@@ -167,15 +178,20 @@ function listening(api: ScriptProcess): Promise<URL | undefined> {
 
 describe("the production build of the API", { timeout: 30_000 }, () => {
   let dir = "";
+  let sharedRoot = "";
   let apiRoot = "";
 
   // packages/shared first: the API's compiled code loads its dist/ output.
   beforeAll(async () => {
     dir = await realpath(await mkdtemp(join(tmpdir(), "apex-production-")));
-    const copies = await copyPackages(dir);
-    apiRoot = copies.apiRoot;
-    await build(copies.sharedRoot);
-    await build(copies.apiRoot);
+    ({ sharedRoot, apiRoot } = await copyPackages(dir));
+    // What an earlier build left of a source file that has since been deleted or renamed.
+    for (const root of [sharedRoot, apiRoot]) {
+      await mkdir(join(root, "dist"), { recursive: true });
+      await writeFile(join(root, "dist", "removed.js"), "export {};\n");
+    }
+    await build(sharedRoot);
+    await build(apiRoot);
   }, 120_000);
 
   afterAll(async () => {
@@ -197,6 +213,48 @@ describe("the production build of the API", { timeout: 30_000 }, () => {
     api.child.kill("SIGTERM");
     expect(await api.exited).toEqual({ code: 0, signal: null });
     expect(api.output()).toContain('"msg":"shutting down"');
+  });
+
+  it("builds each package into an empty dist/ folder, so nothing from an earlier build stays", () => {
+    expect(existsSync(join(sharedRoot, "dist", "removed.js"))).toBe(false);
+    expect(existsSync(join(apiRoot, "dist", "removed.js"))).toBe(false);
+  });
+
+  // The start script loads apps/api/.env (variables set in the environment win over it).
+  it("reads its settings from apps/api/.env", async () => {
+    await writeFile(join(apiRoot, ".env"), "LOG_FORMAT=yaml\n");
+    onTestFinished(() => rm(join(apiRoot, ".env"), { force: true }));
+    const api = runScript(apiRoot, `exec ${await script(apiRoot, "start")}`, { API_PORT: "0" });
+    onTestFinished(() => {
+      api.child.kill("SIGKILL");
+    });
+
+    expect(await listening(api), api.output()).toBeUndefined();
+    expect(await api.exited).toEqual({ code: 1, signal: null });
+    expect(api.output()).toContain("LOG_FORMAT: must be one of json, pretty");
+  });
+
+  // Stack traces in the production log point at the TypeScript source rather than the compiled
+  // JavaScript: the builds write source maps and the start script turns them on. A module that
+  // NODE_OPTIONS preloads into the start script's Node.js calls compiled code that throws, through
+  // both packages, and prints the stack trace.
+  it("maps stack traces from the compiled code to the TypeScript source", async () => {
+    const config = pathToFileURL(join(apiRoot, "dist", "config.js")).href;
+    const preload = [
+      `const { loadConfig } = await import(${JSON.stringify(config)});`,
+      'try { loadConfig({ API_PORT: "not a port" }); }',
+      "catch (error) { console.log(error.stack); process.exit(0); }",
+    ].join("\n");
+    const api = runScript(apiRoot, `exec ${await script(apiRoot, "start")}`, {
+      NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(preload)}`,
+    });
+    onTestFinished(() => {
+      api.child.kill("SIGKILL");
+    });
+
+    expect(await api.exited, api.output()).toEqual({ code: 0, signal: null });
+    expect(api.output()).toMatch(/at parseEnv \(\S+\/packages\/shared\/src\/env\.ts:\d+:\d+\)/);
+    expect(api.output()).toMatch(/at loadConfig \(\S+\/apps\/api\/src\/config\.ts:\d+:\d+\)/);
   });
 
   // Without the condition, Node.js would resolve packages/shared's default export, its
