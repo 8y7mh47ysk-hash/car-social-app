@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import {
   copyFile,
   mkdir,
@@ -10,8 +10,9 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { describe, expect, it, onTestFinished } from "vitest";
 import { z } from "zod";
@@ -28,6 +29,32 @@ const manifestSchema = z.looseObject({ engines: z.looseObject({ node: z.string()
 const manifest = manifestSchema.parse(
   JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8")),
 );
+
+/** The environment for pnpm, without the settings that an outer pnpm exports to its scripts. */
+function pnpmEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!/^(npm|pnpm)_config_/i.test(name)) {
+      env[name] = value;
+    }
+  }
+  return env;
+}
+
+/**
+ * The pnpm store that this checkout's own install filled. pnpm keeps one store per file system,
+ * and the temporary copies can be on another one: /tmp is a tmpfs on Ubuntu 26.04, the release of
+ * the CI runner, and on Debian 13. There a copy would get the empty /tmp/.pnpm-store, and its
+ * offline install would fail with ERR_PNPM_NO_OFFLINE_TARBALL.
+ */
+const storeDir = z
+  .string()
+  .trim()
+  .refine((path) => isAbsolute(path), "`pnpm store path` should print an absolute path")
+  .parse(
+    (await promisify(execFile)("pnpm", ["store", "path"], { cwd: repoRoot, env: pnpmEnv() }))
+      .stdout,
+  );
 
 /**
  * Copies the workspace's pnpm-workspace.yaml, lockfile and every package.json into a temporary
@@ -76,19 +103,13 @@ function logLines(output: string): z.infer<typeof logLineSchema>[] {
 /**
  * Runs `pnpm install` on the lockfile without the network, install scripts or any write to pnpm's
  * store (which would record the temporary folder there) or to its cache, with pnpm's log as JSON
- * lines (its usual output wraps long messages) and any `extraArgs`. Settings that an outer pnpm
- * exports to the scripts it runs are left out of the environment.
+ * lines (its usual output wraps long messages) and any `extraArgs`. It uses the checkout's store
+ * (see storeDir) and pnpmEnv's environment.
  */
 function install(
   cwd: string,
   extraArgs: readonly string[] = [],
 ): Promise<{ code: number | null; output: string }> {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [name, value] of Object.entries(process.env)) {
-    if (!/^(npm|pnpm)_config_/i.test(name)) {
-      env[name] = value;
-    }
-  }
   const args = [
     "install",
     "--frozen-lockfile",
@@ -103,10 +124,15 @@ function install(
     // own keeps pnpm's records of the temporary folder out of the machine's cache.
     "--config.minimum-release-age=0",
     `--config.cache-dir=${join(cwd, ".pnpm-cache")}`,
+    `--config.store-dir=${storeDir}`,
     ...extraArgs,
   ];
   return new Promise((resolve, reject) => {
-    const child = spawn("pnpm", args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("pnpm", args, {
+      cwd,
+      env: pnpmEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let output = "";
     const collect = (chunk: string): void => {
       output += chunk;
