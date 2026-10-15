@@ -11,7 +11,8 @@ import { z } from "zod";
 // A test file that no project includes never runs anywhere, and nothing else would say so: for
 // example the tests of a new package whose Vitest config has another name, or a .tsx test in a
 // package whose include pattern lists only .ts files. This file runs in the "tooling" project, so
-// it cannot notice that project itself being removed from the root config.
+// it cannot notice that project itself being removed from the root config;
+// scripts/tooling-project.test.ts checks that from another project.
 
 const repoRoot = fileURLToPath(new URL(".", import.meta.url));
 const vitest = join(repoRoot, "node_modules", ".bin", "vitest");
