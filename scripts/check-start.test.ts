@@ -16,14 +16,16 @@ import { checkStart } from "./check-start.ts";
  * The stand-in. It writes its process ID to the file in its second argument, then, by its first:
  * "ok" serves {"status":"ok"} on API_PORT's /health and an HTML page on WEB_PORT; "bad-health"
  * answers /health with another status; "no-web" serves only the API; "exit" prints an error and
- * exits with code 3; "stubborn" serves both but ignores SIGTERM. It ends by itself once the process
- * whose ID is its third argument, the test runner, has ended: a test run that is killed midway
- * cannot leave it running. It does not watch the check, so a check that ends without stopping it
- * is still caught.
+ * exits with code 3; "stubborn" serves both but ignores SIGTERM; "escaped" serves both and starts a
+ * helper that leaves the process group but keeps the output open for 30 s, and adds the helper's
+ * process ID to the file. It ends by itself once the process whose ID is its third argument, the
+ * test runner, has ended: a test run that is killed midway cannot leave it running. It does not
+ * watch the check, so a check that ends without stopping it is still caught.
  */
 const STAND_IN = `
+import { spawn } from "node:child_process";
+import { appendFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { writeFileSync } from "node:fs";
 
 const [mode, pidFile, runner] = process.argv.slice(2);
 writeFileSync(pidFile, String(process.pid));
@@ -40,6 +42,14 @@ if (mode === "exit") {
 }
 if (mode === "stubborn") {
   process.on("SIGTERM", () => {});
+}
+if (mode === "escaped") {
+  const helper = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30_000)"], {
+    detached: true,
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  appendFileSync(pidFile, "\\n" + String(helper.pid));
+  helper.unref();
 }
 const status = mode === "bad-health" ? "starting" : "ok";
 const apiHost = process.env.API_HOST ?? "127.0.0.1";
@@ -68,18 +78,35 @@ function isRunning(pid: number): boolean {
 }
 
 /**
+ * The process IDs in a stand-in's PID file, the stand-in's own first; none before it starts. Only
+ * positive numbers count: signalling 0 would reach this test runner's own process group.
+ */
+function readPids(pidFile: string): number[] {
+  try {
+    return readFileSync(pidFile, "utf8")
+      .split("\n")
+      .map(Number)
+      .filter((pid) => Number.isInteger(pid) && pid > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Makes a temporary directory for a stand-in that writes its process ID to `<dir>/pid`. When the
- * current test finishes, however it ends (a failed assertion, a time-out), the stand-in is killed
- * and the directory removed, so no test leaves a process running.
+ * current test finishes, however it ends (a failed assertion, a time-out), every process in that
+ * file is killed and the directory removed, so no test leaves a process running.
  */
 function standInDirectory(): { dir: string; pidFile: string } {
   const dir = mkdtempSync(join(tmpdir(), "apex-check-start-"));
   const pidFile = join(dir, "pid");
   onTestFinished(() => {
-    try {
-      process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL");
-    } catch {
-      // It never started, or it has ended.
+    for (const pid of readPids(pidFile)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // It has ended.
+      }
     }
     rmSync(dir, { recursive: true, force: true });
   });
@@ -101,7 +128,11 @@ async function checkStandIn(mode: string) {
     stopTimeoutMs: 1_000,
   });
 
-  return { result, running: isRunning(Number(readFileSync(pidFile, "utf8"))) };
+  const [pid] = readPids(pidFile);
+  if (pid === undefined) {
+    throw new Error(`the stand-in wrote no process ID; the check said: ${String(result.problem)}`);
+  }
+  return { result, running: isRunning(pid) };
 }
 
 describe("checkStart", { timeout: 20_000 }, () => {
@@ -170,6 +201,20 @@ describe("checkStart", { timeout: 20_000 }, () => {
 
     expect(result.problem).toBe("The apps did not stop within 1 s of SIGTERM.");
     expect(running).toBe(false);
+  });
+
+  it("stops waiting, and says why, when a process outside the group keeps the output open", async () => {
+    // SIGKILL reaches only the command's process group. A process that left it, but still holds
+    // the output, would otherwise keep the check waiting until it ended.
+    const started = Date.now();
+    const { result, running } = await checkStandIn("escaped");
+
+    expect(result.problem).toBe(
+      "The apps' output was still open 1 s after SIGKILL: a process outside the command's " +
+        "process group holds it, and may still be running.",
+    );
+    expect(running).toBe(false);
+    expect(Date.now() - started).toBeLessThan(10_000);
   });
 
   it("fails at once, saying why, when the command cannot be started", async () => {

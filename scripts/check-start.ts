@@ -27,7 +27,7 @@ const HOST = "127.0.0.1";
 /** How long both apps may take to answer, from the moment the command starts. */
 const START_TIMEOUT_MS = 60_000;
 
-/** How long the apps may take to stop after SIGTERM before they are killed. */
+/** How long the apps may take to stop after SIGTERM, and then to end after SIGKILL. */
 const STOP_TIMEOUT_MS = 10_000;
 
 /** How long one request may take. */
@@ -41,7 +41,10 @@ export interface StartCheckOptions {
   readonly command?: readonly [string, ...string[]];
   /** How long both apps may take to answer; one minute by default. */
   readonly timeoutMs?: number;
-  /** How long the apps may take to stop after SIGTERM; ten seconds by default. */
+  /**
+   * How long the apps may take to stop after SIGTERM, and then to end after SIGKILL; ten seconds
+   * by default.
+   */
   readonly stopTimeoutMs?: number;
 }
 
@@ -115,14 +118,18 @@ async function isPage(response: Response): Promise<boolean> {
   return response.status === 200 && html && (await response.text()).includes("</html>");
 }
 
+/** A duration in whole seconds, for messages. */
+const seconds = (ms: number): string => String(ms / 1000);
+
 /**
  * Starts the apps with `options.command` (by default `pnpm start`), with WEB_HOST and API_HOST set
  * to 127.0.0.1 and WEB_PORT and API_PORT to free ports, in a process group of its own. Waits until
  * the API answers GET /health and the web app its home page, then stops the group with SIGTERM,
- * and kills it if it has not stopped in time.
+ * and with SIGKILL if its output has not closed in time. Never waits longer than the time limits.
  */
 export async function checkStart(options: StartCheckOptions = {}): Promise<StartCheckResult> {
   const [command, ...args] = options.command ?? ["pnpm", "start"];
+  const commandLine = [command, ...args].join(" ");
   const timeoutMs = options.timeoutMs ?? START_TIMEOUT_MS;
   const stopTimeoutMs = options.stopTimeoutMs ?? STOP_TIMEOUT_MS;
   const ports = await freePorts();
@@ -146,7 +153,8 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
   child.stderr.setEncoding("utf8").on("data", collect);
   // How the command ended, as first reported: a command that could not be started also closes.
   let exit: string | undefined;
-  const exited = new Promise<void>((resolve) => {
+  /** Settles once the command has ended and every process holding its output has closed it. */
+  const closed = new Promise<void>((resolve) => {
     child.once("error", (error) => {
       exit ??= `could not be started (${error.message})`;
       resolve();
@@ -161,11 +169,11 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
   const web = { name: "the web app", url: `http://${HOST}:${String(ports.web)}/` };
   let apiState = await probe(api.url, isHealthy);
   let webState = await probe(web.url, isPage);
-  let problem: string | undefined;
+  const problems: string[] = [];
   const deadline = Date.now() + timeoutMs;
   while (apiState !== undefined || webState !== undefined) {
     if (exit !== undefined) {
-      problem = `\`${[command, ...args].join(" ")}\` ${exit} before both apps answered.`;
+      problems.push(`\`${commandLine}\` ${exit} before both apps answered.`);
       break;
     }
     if (Date.now() >= deadline) {
@@ -173,7 +181,7 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
         ...(apiState === undefined ? [] : [`${api.name} (GET ${api.url}) ${apiState}`]),
         ...(webState === undefined ? [] : [`${web.name} (GET ${web.url}) ${webState}`]),
       ];
-      problem = `After ${String(timeoutMs / 1000)} s, ${waiting.join(", and ")}.`;
+      problems.push(`After ${seconds(timeoutMs)} s, ${waiting.join(", and ")}.`);
       break;
     }
     await sleep(POLL_INTERVAL_MS);
@@ -188,26 +196,35 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
         process.kill(-child.pid, signal);
       }
     } catch {
-      // The group has already exited.
+      // Every process of the group has ended (ESRCH; macOS answers EPERM while the ended
+      // processes are not yet reaped). The waits below show whether the apps really stopped.
     }
   };
+  /** Whether the output closed within `ms`; an unreferenced timer, so it never keeps Node alive. */
+  const closedWithin = async (ms: number): Promise<boolean> =>
+    Promise.race([closed.then(() => true), sleep(ms, false, { ref: false })]);
+
   if (exit === undefined) {
     signalGroup("SIGTERM");
-    // An unreferenced timer, so that it does not keep this process alive once the apps stopped.
-    const stopped = await Promise.race([
-      exited.then(() => true),
-      sleep(stopTimeoutMs, false, { ref: false }),
-    ]);
-    if (!stopped) {
+    if (!(await closedWithin(stopTimeoutMs))) {
       signalGroup("SIGKILL");
-      await exited;
-      problem ??= `The apps did not stop within ${String(stopTimeoutMs / 1000)} s of SIGTERM.`;
+      if (await closedWithin(stopTimeoutMs)) {
+        problems.push(`The apps did not stop within ${seconds(stopTimeoutMs)} s of SIGTERM.`);
+      } else {
+        // SIGKILL ends every process of the group, so a process outside it holds the output.
+        child.stdout.destroy();
+        child.stderr.destroy();
+        problems.push(
+          `The apps' output was still open ${seconds(stopTimeoutMs)} s after SIGKILL: a process ` +
+            "outside the command's process group holds it, and may still be running.",
+        );
+      }
     }
   }
-  // Processes that outlived the command itself, if any.
+  // Processes of the group that outlived the command itself, if any.
   signalGroup("SIGKILL");
 
-  return { ports, problem, output };
+  return { ports, problem: problems.length === 0 ? undefined : problems.join(" "), output };
 }
 
 if (import.meta.main) {
