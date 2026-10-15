@@ -39,9 +39,10 @@ const URL_LIKE_TOKEN = /[^\s"'`<>]+/g;
 /**
  * Hides the parts of URLs that can carry secrets, wherever URLs appear in a piece of text:
  *
- * - the user information of a URL with "://": "postgres://apex:pw@db/apex" becomes
+ * - the user information of every URL with "://": "postgres://apex:pw@db/apex" becomes
  *   "postgres://[Redacted]@db/apex". Everything up to the last "@" before the first "/" counts,
- *   so a password that contains "@", "?" or "#" is hidden too;
+ *   so a password that contains "@", "?" or "#" is hidden too. URLs joined without spaces, as in
+ *   "redis://:pw@a:6379,redis://:pw@b:6379", each get their own;
  * - everything after the first "?" or "#" of a URL or path, so query strings and fragments never
  *   reach the logs: "/reset?token=abc" becomes "/reset?[Redacted]". That covers reset links,
  *   signed storage URLs ("X-Amz-Signature=...") and OAuth redirects ("#access_token=...").
@@ -57,18 +58,33 @@ export function redactUrls(text: string): string {
   return text.replace(URL_LIKE_TOKEN, redactUrlToken);
 }
 
-function redactUrlToken(token: string): string {
-  let result = token;
-
-  const schemeEnd = token.indexOf("://");
-  if (schemeEnd !== -1) {
+/**
+ * Replaces the user information of every URL with "://" in a run of text. A URL's authority runs
+ * from its "://" to the next "/", or to the end of the text, so authorities never overlap and each
+ * character is looked at a fixed number of times.
+ */
+function redactUserInfo(token: string): string {
+  let result = "";
+  let copied = 0;
+  let schemeEnd = token.indexOf("://");
+  while (schemeEnd !== -1) {
     const authorityStart = schemeEnd + 3;
-    const pathStart = token.indexOf("/", authorityStart);
-    const at = token.lastIndexOf("@", pathStart === -1 ? token.length : pathStart);
-    if (at >= authorityStart) {
-      result = `${token.slice(0, authorityStart)}${REDACTED}${token.slice(at)}`;
+    const slash = token.indexOf("/", authorityStart);
+    const authorityEnd = slash === -1 ? token.length : slash;
+    const at = token.slice(authorityStart, authorityEnd).lastIndexOf("@");
+    if (at !== -1) {
+      result += `${token.slice(copied, authorityStart)}${REDACTED}`;
+      copied = authorityStart + at;
     }
+    // A "://" contains a "/", so the next one starts no earlier than just before this slash, as
+    // in "...:6379,redis://", and there is none if this authority runs to the end.
+    schemeEnd = slash === -1 ? -1 : token.indexOf("://", slash - 1);
   }
+  return `${result}${token.slice(copied)}`;
+}
+
+function redactUrlToken(token: string): string {
+  let result = redactUserInfo(token);
 
   const queryStart = result.search(/[?#]/);
   if (

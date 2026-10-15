@@ -109,6 +109,21 @@ describe("redactUrls", () => {
       `a password with a ?: postgres://${REDACTED}@db/apex`,
     ],
     ["(postgres://apex:pw@db)", `(postgres://${REDACTED}@db)`],
+    // Several URLs joined without spaces, as in lists of Redis or PostgreSQL servers.
+    [
+      "redis://:pw1@a:6379,redis://:pw2@b:6379",
+      `redis://${REDACTED}@a:6379,redis://${REDACTED}@b:6379`,
+    ],
+    [
+      "postgres://u:p1@a/db,postgres://u:p2@b/db",
+      `postgres://${REDACTED}@a/db,postgres://${REDACTED}@b/db`,
+    ],
+    ["redis://a:6379,redis://:pw2@b:6379", `redis://a:6379,redis://${REDACTED}@b:6379`],
+    ["https://x/a|https://u:p@y", `https://x/a|https://${REDACTED}@y`],
+    [
+      "nodes=[redis://:pw1@a;redis://:pw2@b]",
+      `nodes=[redis://${REDACTED}@a;redis://${REDACTED}@b]`,
+    ],
   ])("hides the user information in %j", (text, expected) => {
     expect(redactUrls(text)).toBe(expected);
   });
@@ -156,15 +171,22 @@ describe("redactUrls", () => {
     expect(redactUrls(once)).toBe(once);
   });
 
-  // A regular expression that backtracks would take minutes on these inputs (quadratic time);
-  // the token scan takes milliseconds, well inside the test timeout. Each input contains "@",
-  // "?" or "#", so none of them skips the scan.
+  // A regular expression that backtracks would take minutes on these inputs (quadratic time), and
+  // so would a scan that searches back to the start of the text for each of a million URLs; the
+  // token scan takes milliseconds, well inside the test timeout. Each input contains "@", "?" or
+  // "#", so none of them skips the scan.
   it.each([
     ["a scheme-like run with no @ or ?", `a://${"x.".repeat(200_000)}#`],
-    ["many schemes", `${"a://".repeat(100_000)}@`],
+    ["many schemes", `${"a://".repeat(1_000_000)}@`],
     ["many @ signs", `x://${"@".repeat(200_000)}/`],
     ["many slashes and question marks", "/?".repeat(200_000)],
   ])("handles %s in linear time", (_name, text) => {
     expect(redactUrls(text).length).toBeLessThanOrEqual(text.length + REDACTED.length);
+  });
+
+  it("hides the user information of many URLs in one run of text in linear time", () => {
+    const text = "a://u:p@h,".repeat(100_000);
+
+    expect(redactUrls(text)).toBe(`a://${REDACTED}@h,`.repeat(100_000));
   });
 });
