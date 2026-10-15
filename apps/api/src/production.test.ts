@@ -1,5 +1,4 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { existsSync } from "node:fs";
 import {
   cp,
   mkdir,
@@ -215,9 +214,22 @@ describe("the production build of the API", { timeout: 30_000 }, () => {
     expect(api.output()).toContain('"msg":"shutting down"');
   });
 
-  it("builds each package into an empty dist/ folder, so nothing from an earlier build stays", () => {
-    expect(existsSync(join(sharedRoot, "dist", "removed.js"))).toBe(false);
-    expect(existsSync(join(apiRoot, "dist", "removed.js"))).toBe(false);
+  // Nothing from an earlier build stays, and the tests are not compiled.
+  it("builds each package into an empty dist/ folder, from its source files only", async () => {
+    const builds = [
+      [sharedRoot, "index.js"],
+      [apiRoot, "server.js"],
+    ] as const;
+    for (const [root, entry] of builds) {
+      const files = await readdir(join(root, "dist"), { recursive: true });
+
+      expect(files, root).toContain(entry);
+      expect(files, root).not.toContain("removed.js");
+      expect(
+        files.filter((file) => file.includes(".test.")),
+        root,
+      ).toEqual([]);
+    }
   });
 
   // The start script loads apps/api/.env (variables set in the environment win over it).
