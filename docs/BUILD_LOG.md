@@ -855,12 +855,18 @@ Not changed: `WEB_HOST` and `WEB_PORT` stay shell variables that our loader does
 
 **Review fixes (wave w0, round 2)**
 
-Alpha reviewed this instruction as a new developer meets it: in a fresh clone, the README and
-every "How to verify" step above, run as written (on ports 3010 and 4010), including the manual
-build check with a temporary `SESSION_SECRET` and the recovery of `pnpm dev` from a bad
-`apps/api/.env`; all of them behaved as described. Then the two open items from the round-1
-verification, each reproduced first with real `pnpm exec eslint` runs and a real `next build`.
-Each code fix has a test that fails without it:
+Alpha reviewed this instruction as a new developer meets it. In fresh clones of `main` and of the
+review branch, the README's quick start and configuration steps and every "How to verify" step
+above ran as written (on ports 3010 and 4010) and gave the results they describe, apart from the
+totals of `pnpm test`, which grow with later instructions (see the note at the top of this log).
+So did the manual build check with a temporary `SESSION_SECRET`, the recovery of `pnpm dev` from
+a bad `apps/api/.env` (also from a file created while it runs), a temporary required
+`NEXT_PUBLIC_` variable (`next build` stops without it and, with it in `apps/web/.env`, copies it
+into `.next/static`) and CI's start check. In the root `pnpm dev`, a web env error stops both
+apps, because pnpm stops the API when Next.js exits, while an API env error leaves the web app
+running and the API waiting for a fixed file. The two open items from the round-1 verification
+were reproduced first, with real `pnpm exec eslint` runs and a real `next build`. Each code fix
+has a test that fails without it:
 
 - `import()` of `process` or `node:process` got past the env lint rules, because
   `no-restricted-imports` does not check `import()`, while the config's comment said that the
@@ -871,25 +877,37 @@ Each code fix has a test that fails without it:
   and the tests passed, and `next build` put the server schema's names and rules into
   `.next/static`. ESLint now rejects importing either through an `env` folder, statically or
   with `import()`, anywhere in `apps/web/src`.
+- The pre-commit hook let an env file into a commit: after `git add --force apps/api/.env`,
+  `git commit` went through, because `vitest related` found no test that imports the file, and
+  only a later `pnpm test` failed `env-files.test.ts`. Env files are now rerun triggers, so the
+  hook runs every test and that test stops the commit; `git-hooks.test.ts` checks four names.
 - The error for a bad variable said to set it in `apps/api/.env` "or in the environment", but a
   variable exported by the shell wins over the file: with `LOG_LEVEL=DEBUG` in the shell,
   `LOG_LEVEL=debug` in `apps/api/.env` changed nothing and the same message came back. Both apps'
   messages now end "or in the environment, which overrides the file" (the web app's: "the .env
-  files"), and the README says how to spot a shell value. The README also said that the command
-  stops, but in `pnpm dev` the API waits for a fixed file.
+  files"), and the README shows how to find a value that the shell exports (`printenv`).
 - Nothing tested that the API's `dev` and `start` scripts read `apps/api/.env`, or that the shell
-  wins over it: with `--env-file-if-exists=.env` removed from both scripts, all 586 tests passed.
-  `apps/api/src/env-file.test.ts` runs each real script in a scratch folder with a stand-in
-  entrypoint that prints what it received, with and without the file and with a shell variable.
+  wins over it: with `--env-file-if-exists=.env` removed from both scripts, all 555 tests on
+  `main` passed. `apps/api/src/env-file.test.ts` runs each real script in a scratch folder with
+  a stand-in entrypoint that prints what it received, with and without the file and with a
+  shell variable.
 - The templates' copy commands left `apps/api/.env` and `apps/web/.env` readable by every
   account on the machine, although server secrets belong in `apps/web/.env` and the root `.env`
   already gets `chmod 600`. The templates, the README and the step above now add `chmod 600`.
+- Docs: `apps/web/.env.example` and the README said that `pnpm build` and `pnpm start` stop on
+  any missing or invalid variable, but `pnpm build` checks only the `NEXT_PUBLIC_` ones (the
+  manual build check above succeeds without the server's secret) and `pnpm start` only the
+  server ones; both now say which command checks what. The README said that the command stops,
+  but in `pnpm dev` the API waits for a fixed file; it now says so and explains Node.js's ".env
+  not found" notice. The step above that shows the API reading `apps/api/.env` overwrote and
+  then deleted a developer's own `apps/api/.env`; it now moves the file aside and back.
 
 How to verify the fixes:
 
 ```sh
 pnpm exec vitest run env-access.test.ts               # "Tests  64 passed (64)"
 pnpm exec vitest run apps/api/src/env-file.test.ts    # "Tests  6 passed (6)"
+pnpm exec vitest run git-hooks.test.ts -t "runs every test when"  # "Tests  19 passed | 49 skipped (68)"
 mkdir -p apps/web/src/app/probe
 printf '"use client";\n\nexport { serverEnvSchema } from "../../env/server-schema";\n' \
   > apps/web/src/app/probe/leak.tsx
@@ -898,6 +916,15 @@ rm -r apps/web/src/app/probe
 printf 'export const { env } = await import("node:process");\n' > apps/api/src/probe.ts
 pnpm exec eslint apps/api/src/probe.ts    # 1 error: "Use the global process. ..." (no-restricted-syntax)
 rm apps/api/src/probe.ts
+```
+
+The hook refusing an env file (the commit fails, so nothing else you have staged is committed;
+it takes as long as `pnpm test`):
+
+```sh
+printf 'SECRET=x\n' > infra/probe.env && git add --force infra/probe.env
+git commit -m "chore: try to commit an env file"   # fails: env-files.test.ts, "are never committed"
+git rm --cached --quiet infra/probe.env && rm infra/probe.env
 ```
 
 ## #5 - GitHub Actions CI
