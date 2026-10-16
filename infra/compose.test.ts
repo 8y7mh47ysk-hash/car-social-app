@@ -8,14 +8,16 @@ import { z } from "zod";
 // Static checks of docker-compose.yml and the root .env.example (instruction 3). They read the
 // files, so they need no Docker. They guard what must not regress: a plain `docker compose up`
 // starts only the infrastructure, nothing is published beyond 127.0.0.1, no password has a
-// default, and every variable the compose file reads is documented in .env.example.
+// default or goes on a command line, and .env.example documents exactly the variables the
+// compose file reads.
 
 const repoRoot = join(import.meta.dirname, "..");
 const composeText = readFileSync(join(repoRoot, "docker-compose.yml"), "utf8");
 const envExampleText = readFileSync(join(repoRoot, ".env.example"), "utf8");
 
 // Only the parts of the Compose format these checks rely on. They expect the map form of
-// `environment` and the short "source:target" form of `volumes`; ports may use either form.
+// `environment`, the short "source:target" form of `volumes` and the long form of a service's
+// `configs`; ports may use either form.
 const portSchema = z.union([z.string(), z.looseObject({ host_ip: z.string().optional() })]);
 const serviceSchema = z.looseObject({
   image: z.string(),
@@ -27,6 +29,7 @@ const serviceSchema = z.looseObject({
   environment: z.record(z.string(), z.string()).optional(),
   ports: z.array(portSchema).optional(),
   volumes: z.array(z.string()).optional(),
+  configs: z.array(z.looseObject({ source: z.string(), target: z.string().optional() })).optional(),
   network_mode: z.string().optional(),
   entrypoint: z.unknown().optional(),
   // Every health check sets all of its timings. start_period is also required by Compose
@@ -48,6 +51,7 @@ const composeSchema = z.looseObject({
   name: z.string(),
   services: z.record(z.string(), serviceSchema),
   volumes: z.record(z.string(), z.unknown()),
+  configs: z.record(z.string(), z.looseObject({ content: z.string().optional() })).optional(),
 });
 
 type Port = z.infer<typeof portSchema>;
@@ -109,6 +113,22 @@ function stringsIn(value: unknown): string[] {
   return [];
 }
 
+/**
+ * The directives in a Redis config file, each with every value it is given, in order. Names are
+ * lowercased, because Redis ignores their case; lines that start with "#" are comments.
+ */
+function redisDirectives(text: string): Map<string, string[]> {
+  const directives = new Map<string, string[]>();
+  for (const line of text.split("\n")) {
+    const match = /^\s*([^#\s]\S*)\s+(.*?)\s*$/.exec(line);
+    if (match?.[1] !== undefined && match[2] !== undefined) {
+      const name = match[1].toLowerCase();
+      directives.set(name, [...(directives.get(name) ?? []), match[2]]);
+    }
+  }
+  return directives;
+}
+
 /** NAME=value lines in an env file, including commented-out ones such as "# NAME=value". */
 function envEntries(text: string): Map<string, { value: string; commented: boolean }> {
   const entries = new Map<string, { value: string; commented: boolean }>();
@@ -123,7 +143,9 @@ function envEntries(text: string): Map<string, { value: string; commented: boole
 
 const composeStrings = stringsIn(rawCompose);
 const composeInterpolations = composeStrings.flatMap(interpolations);
+const redisSettings = redisDirectives(compose.configs?.["redis-config"]?.content ?? "");
 const requiredForm = (name: string) => new RegExp(`^\\$\\{${name}:\\?[^}]+\\}$`);
+const isSecretName = (name: string) => /PASSWORD|SECRET|TOKEN/.test(name);
 
 describe("docker-compose.yml", () => {
   it("starts only postgres and redis without a profile; the app placeholders need 'app'", () => {
@@ -151,22 +173,38 @@ describe("docker-compose.yml", () => {
     const postgres = service("postgres");
     expect(postgres.environment?.["POSTGRES_PASSWORD"]).toMatch(requiredForm("POSTGRES_PASSWORD"));
 
-    const redis = service("redis");
-    const command = redis.command ?? [];
-    const passwordArgument = command[command.indexOf("--requirepass") + 1];
-    expect(command).toContain("--requirepass");
-    expect(passwordArgument).toMatch(requiredForm("REDIS_PASSWORD"));
-    expect(redis.environment?.["REDISCLI_AUTH"]).toMatch(requiredForm("REDIS_PASSWORD"));
+    const requirepass = redisSettings.get("requirepass") ?? [];
+    expect(requirepass).toHaveLength(1);
+    expect(requirepass[0]).toMatch(requiredForm("REDIS_PASSWORD"));
+    expect(service("redis").environment?.["REDISCLI_AUTH"]).toMatch(requiredForm("REDIS_PASSWORD"));
 
-    const secrets = composeInterpolations.filter(({ name }) => /PASSWORD|SECRET|TOKEN/.test(name));
+    const secrets = composeInterpolations.filter(({ name }) => isSecretName(name));
     expect(secrets.length).toBeGreaterThan(0);
     for (const { name, operator } of secrets) {
       expect(operator, `${name} must use the required form \${${name}:?message}`).toBe(":?");
     }
   });
 
-  it("keeps redis-server as the first word, so the image drops root privileges", () => {
-    expect(service("redis").command?.[0]).toBe("redis-server");
+  it("starts redis-server with only its config file, which Compose writes", () => {
+    const redis = service("redis");
+    expect(redis.configs).toEqual([
+      { source: "redis-config", target: "/usr/local/etc/redis/redis.conf" },
+    ]);
+    // redis-server first, because the image drops root privileges only when it starts
+    // redis-server; nothing after the file, because Redis applies later arguments on top of it
+    // (`--requirepass ""`, for example).
+    expect(redis.command).toEqual(["redis-server", "/usr/local/etc/redis/redis.conf"]);
+  });
+
+  it("keeps every secret off command lines", () => {
+    // On a Linux host every user can read any process's command line, and an image's entrypoint
+    // runs with the container's full command line each time the container starts (Redis hides its
+    // own arguments only later). Secrets go in through the environment or a config file instead.
+    for (const [serviceName, definition] of Object.entries(compose.services)) {
+      const words = [...(definition.command ?? []), ...(definition.healthcheck?.test ?? [])];
+      const secrets = words.flatMap(interpolations).filter(({ name }) => isSecretName(name));
+      expect(secrets, serviceName).toEqual([]);
+    }
   });
 
   it("keeps every image's own entrypoint", () => {
@@ -179,8 +217,8 @@ describe("docker-compose.yml", () => {
 
   it("turns on Redis's append-only file", () => {
     // Without it, Redis keeps only its default snapshots and a crash can lose an hour of writes.
-    const command = service("redis").command ?? [];
-    expect(command[command.indexOf("--appendonly") + 1]).toBe("yes");
+    // Set once only: a later "appendonly no" would turn it off again.
+    expect(redisSettings.get("appendonly")).toEqual(["yes"]);
   });
 
   it("runs PostgreSQL from the pgvector image, with exact releases of both", () => {
@@ -305,7 +343,7 @@ describe(".env.example", () => {
     expect(entries.get("POSTGRES_PASSWORD")).toEqual({ value: "", commented: false });
     expect(entries.get("REDIS_PASSWORD")).toEqual({ value: "", commented: false });
     for (const [name, { value }] of entries) {
-      if (/PASSWORD|SECRET|TOKEN/.test(name)) {
+      if (isSecretName(name)) {
         expect(value, name).toBe("");
       }
     }
@@ -355,6 +393,16 @@ describe("the helpers these checks use", () => {
       ["A", { value: "1", commented: false }],
       ["B", { value: "", commented: true }],
       ["C", { value: "", commented: false }],
+    ]);
+  });
+
+  it("read every value of each Redis directive, whatever its case, but not comments", () => {
+    const parsed = redisDirectives(
+      "requirepass ${P:?set it}\n# appendonly no\n\nAPPENDONLY yes\n  appendonly   no  \nsave\n",
+    );
+    expect([...parsed]).toEqual([
+      ["requirepass", ["${P:?set it}"]],
+      ["appendonly", ["yes", "no"]],
     ]);
   });
 });
