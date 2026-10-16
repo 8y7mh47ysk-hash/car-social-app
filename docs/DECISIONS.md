@@ -425,7 +425,10 @@ Keep entries brief. Details belong in code comments and the build log.
   planned: queues (BullMQ, instruction 37, documents a Valkey client adapter), rate limits,
   sessions, caching (instruction 35) and sorted-set leaderboards (instruction 147). If the code
   sticks to core commands and avoids Redis-only modules (the Query Engine, JSON, time series),
-  switching stays a one-line image change plus a test run. Redis's default `maxmemory-policy` of
+  switching stays small: the image, `valkey-server` as the first word of the command (Valkey's
+  entrypoint drops root privileges only for that name) and the tests that pin both, plus a test
+  run. (Corrected in the wave w0 round-2 review, which ran Valkey on a real engine: this said "a
+  one-line image change", but then the server ran as root.) Redis's default `maxmemory-policy` of
   `noeviction` is kept on purpose: BullMQ's production guide says it is the only setting that
   keeps queues correct, so a cache that needs eviction should get its own Redis instance.
 

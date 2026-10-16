@@ -547,8 +547,9 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
   (or `pnpm docker:up`, from instruction 7) and check that `docker compose ps` shows both
   services healthy. The commands under "How to verify" check the rest.
 - Confirm the Redis licence choice: Redis 8 under its AGPLv3 option, used unmodified, or switch
-  to Valkey (BSD-3-Clause), which is a one-line image change. The reasoning is in
-  `docs/DECISIONS.md`; it is not legal advice.
+  to Valkey (BSD-3-Clause), which changes the image, the first word of the `redis` service's
+  command (`valkey-server`, or the server runs as root) and the tests that pin both. The reasoning
+  is in `docs/DECISIONS.md`; it is not legal advice.
 
 **Notes & limitations**
 
