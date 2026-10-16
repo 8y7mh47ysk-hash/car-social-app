@@ -1,8 +1,11 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { checkStart } from "./check-start.ts";
 
@@ -14,14 +17,26 @@ import { checkStart } from "./check-start.ts";
  * The stand-in. It writes its process ID to the file in its second argument, then, by its first:
  * "ok" serves {"status":"ok"} on API_PORT's /health and an HTML page on WEB_PORT; "bad-health"
  * answers /health with another status; "no-web" serves only the API; "exit" prints an error and
- * exits with code 3; "stubborn" serves both but ignores SIGTERM.
+ * exits with code 3; "stubborn" serves both but ignores SIGTERM; "escaped" serves both and starts a
+ * helper that leaves the process group but keeps the output open for 30 s, and adds the helper's
+ * process ID to the file. It ends by itself once the process whose ID is its third argument, the
+ * test runner, has ended: a test run that is killed midway cannot leave it running. It does not
+ * watch the check, so a check that ends without stopping it is still caught.
  */
 const STAND_IN = `
+import { spawn } from "node:child_process";
+import { appendFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { writeFileSync } from "node:fs";
 
-const [mode, pidFile] = process.argv.slice(2);
+const [mode, pidFile, runner] = process.argv.slice(2);
 writeFileSync(pidFile, String(process.pid));
+setInterval(() => {
+  try {
+    process.kill(Number(runner), 0);
+  } catch {
+    process.exit(1);
+  }
+}, 200).unref();
 if (mode === "exit") {
   console.error("apps/api start: the API failed to start");
   process.exit(3);
@@ -29,47 +44,123 @@ if (mode === "exit") {
 if (mode === "stubborn") {
   process.on("SIGTERM", () => {});
 }
+if (mode === "escaped") {
+  const helper = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30_000)"], {
+    detached: true,
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  appendFileSync(pidFile, "\\n" + String(helper.pid));
+  helper.unref();
+}
 const status = mode === "bad-health" ? "starting" : "ok";
+const apiHost = process.env.API_HOST ?? "127.0.0.1";
+const webHost = process.env.WEB_HOST ?? "127.0.0.1";
 createServer((request, response) => {
   response.writeHead(200, { "content-type": "application/json" });
   response.end(JSON.stringify({ status }));
-}).listen(Number(process.env.API_PORT), "127.0.0.1");
+}).listen(Number(process.env.API_PORT), apiHost);
 if (mode !== "no-web") {
   createServer((request, response) => {
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     response.end("<!DOCTYPE html><html><body><h1>Apex Garage</h1></body></html>");
-  }).listen(Number(process.env.WEB_PORT), "127.0.0.1");
+  }).listen(Number(process.env.WEB_PORT), webHost);
 }
-console.log("stand-in started");
+console.log(\`stand-in started: the API on \${apiHost}, the web app on \${webHost}\`);
 `;
+
+/** Whether the process `pid` is running. */
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The process IDs in a stand-in's PID file, the stand-in's own first; none before it starts. Only
+ * positive numbers count: signalling 0 would reach this test runner's own process group.
+ */
+function readPids(pidFile: string): number[] {
+  try {
+    return readFileSync(pidFile, "utf8")
+      .split("\n")
+      .map(Number)
+      .filter((pid) => Number.isInteger(pid) && pid > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Makes a temporary directory for a stand-in that writes its process ID to `<dir>/pid`. When the
+ * current test finishes, however it ends (a failed assertion, a time-out), every process in that
+ * file is killed and the directory removed, so no test leaves a process running.
+ */
+function standInDirectory(): { dir: string; pidFile: string } {
+  const dir = mkdtempSync(join(tmpdir(), "apex-check-start-"));
+  const pidFile = join(dir, "pid");
+  onTestFinished(() => {
+    for (const pid of readPids(pidFile)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // It has ended.
+      }
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+  return { dir, pidFile };
+}
+
+/**
+ * Writes the stand-in to a new temporary directory (see standInDirectory) and returns the command
+ * that runs it in `mode`.
+ */
+function prepareStandIn(mode: string) {
+  const { dir, pidFile } = standInDirectory();
+  const script = join(dir, "stand-in.mjs");
+  writeFileSync(script, STAND_IN);
+  const command: [string, ...string[]] = [
+    process.execPath,
+    script,
+    mode,
+    pidFile,
+    String(process.pid),
+  ];
+  return { dir, pidFile, command };
+}
+
+/** Waits until the stand-in has written its process ID, and returns that ID. */
+async function standInPid(pidFile: string): Promise<number> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const [pid] = readPids(pidFile);
+    if (pid !== undefined) {
+      return pid;
+    }
+    if (Date.now() > deadline) {
+      throw new Error("the stand-in did not start within 10 s");
+    }
+    await sleep(20);
+  }
+}
 
 /**
  * Runs the check against the stand-in in `mode`, with short time limits. Returns the result and
  * whether the stand-in's process was still running afterwards.
  */
 async function checkStandIn(mode: string) {
-  const dir = mkdtempSync(join(tmpdir(), "apex-check-start-"));
-  onTestFinished(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-  const script = join(dir, "stand-in.mjs");
-  const pidFile = join(dir, "pid");
-  writeFileSync(script, STAND_IN);
+  const { pidFile, command } = prepareStandIn(mode);
 
-  const result = await checkStart({
-    command: [process.execPath, script, mode, pidFile],
-    timeoutMs: 2_000,
-    stopTimeoutMs: 1_000,
-  });
+  const result = await checkStart({ command, timeoutMs: 2_000, stopTimeoutMs: 1_000 });
 
-  const pid = Number(readFileSync(pidFile, "utf8"));
-  let running = true;
-  try {
-    process.kill(pid, 0);
-  } catch {
-    running = false;
+  const [pid] = readPids(pidFile);
+  if (pid === undefined) {
+    throw new Error(`the stand-in wrote no process ID; the check said: ${String(result.problem)}`);
   }
-  return { result, running };
+  return { result, running: isRunning(pid) };
 }
 
 describe("checkStart", { timeout: 20_000 }, () => {
@@ -80,6 +171,23 @@ describe("checkStart", { timeout: 20_000 }, () => {
     expect(result.ports.web).not.toBe(result.ports.api);
     expect(result.output).toContain("stand-in started");
     expect(running).toBe(false);
+  });
+
+  it("runs the apps on 127.0.0.1, whatever WEB_HOST and API_HOST say", async () => {
+    // A developer's shell or apps/api/.env may widen the address, for example to reach the app
+    // from a phone; the check must not expose the apps, nor wait for an address it does not ask.
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
+    vi.stubEnv("WEB_HOST", "0.0.0.0");
+    vi.stubEnv("API_HOST", "0.0.0.0");
+
+    const { result } = await checkStandIn("ok");
+
+    expect(result.problem, result.output).toBeUndefined();
+    expect(result.output).toContain(
+      "stand-in started: the API on 127.0.0.1, the web app on 127.0.0.1",
+    );
   });
 
   it("fails when the API's GET /health is not {status: ok}", async () => {
@@ -121,5 +229,153 @@ describe("checkStart", { timeout: 20_000 }, () => {
 
     expect(result.problem).toBe("The apps did not stop within 1 s of SIGTERM.");
     expect(running).toBe(false);
+  });
+
+  it("stops waiting, and says why, when a process outside the group keeps the output open", async () => {
+    // SIGKILL reaches only the command's process group. A process that left it, but still holds
+    // the output, would otherwise keep the check waiting until it ended.
+    const started = Date.now();
+    const { result, running } = await checkStandIn("escaped");
+
+    expect(result.problem).toBe(
+      "The apps' output was still open 1 s after SIGKILL: a process outside the command's " +
+        "process group holds it, and may still be running.",
+    );
+    expect(running).toBe(false);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it("stops the apps, and fails, once its signal is aborted while it waits", async () => {
+    const { pidFile, command } = prepareStandIn("no-web");
+    const controller = new AbortController();
+    const started = Date.now();
+
+    const checking = checkStart({
+      command,
+      timeoutMs: 10_000,
+      stopTimeoutMs: 1_000,
+      signal: controller.signal,
+    });
+    const pid = await standInPid(pidFile);
+    controller.abort();
+    const result = await checking;
+
+    expect(result.problem).toBe("The check was interrupted before both apps answered.");
+    expect(isRunning(pid)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it("starts nothing when its signal is already aborted", async () => {
+    const { command } = prepareStandIn("ok");
+
+    const result = await checkStart({ command, signal: AbortSignal.abort() });
+
+    expect(result.problem).toBe(
+      `The check was interrupted before \`${command.join(" ")}\` started.`,
+    );
+    expect(result.output).toBe("");
+  });
+
+  it("fails at once, saying why, when the command cannot be started", async () => {
+    const result = await checkStart({
+      command: ["apex-no-such-command"],
+      timeoutMs: 2_000,
+      stopTimeoutMs: 1_000,
+    });
+
+    expect(result.problem).toBe(
+      "`apex-no-such-command` could not be started (spawn apex-no-such-command ENOENT) " +
+        "before both apps answered.",
+    );
+    expect(result.output).toBe("");
+  });
+});
+
+/** A stand-in for `pnpm` that runs the stand-in the environment describes, whatever its arguments. */
+const PNPM_STAND_IN = `#!/bin/sh
+exec "$STAND_IN_NODE" "$STAND_IN_SCRIPT" "$STAND_IN_MODE" "$STAND_IN_PID_FILE" "$STAND_IN_RUNNER"
+`;
+
+describe("check-start command", { timeout: 20_000 }, () => {
+  const script = fileURLToPath(new URL("check-start.ts", import.meta.url));
+
+  /**
+   * Starts the program in a process group of its own, as a terminal starts a command, with a PATH
+   * whose `pnpm` runs the stand-in in `mode`. Kills the program's group when the test finishes.
+   */
+  function startProgram(mode: string) {
+    const { dir, pidFile, command } = prepareStandIn(mode);
+    const [node, standIn] = command;
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "pnpm"), PNPM_STAND_IN, { mode: 0o755 });
+
+    const program = spawn(process.execPath, [script], {
+      detached: true,
+      env: {
+        PATH: [bin, "/usr/bin", "/bin"].join(":"),
+        STAND_IN_NODE: node,
+        STAND_IN_SCRIPT: standIn,
+        STAND_IN_MODE: mode,
+        STAND_IN_PID_FILE: pidFile,
+        STAND_IN_RUNNER: String(process.pid),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const { pid } = program;
+    if (pid === undefined) {
+      throw new Error("could not start node scripts/check-start.ts");
+    }
+    onTestFinished(() => {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        // It has ended.
+      }
+    });
+    let stderr = "";
+    program.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    const ended = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+      program.once("close", (code, signal) => {
+        resolve({ code, signal });
+      });
+    });
+    return { pid, pidFile, ended, stderr: () => stderr };
+  }
+
+  it.each([
+    { signal: "SIGINT", how: "Ctrl+C: to the program's process group, as a terminal sends it" },
+    { signal: "SIGTERM", how: "to the program alone, as kill and timeout send it" },
+    { signal: "SIGHUP", how: "to the program's process group, as a closed terminal does" },
+  ] as const)("stops the apps, then ends by $signal ($how)", async ({ signal, how }) => {
+    const program = startProgram("no-web");
+    const standIn = await standInPid(program.pidFile);
+
+    process.kill(how.includes("group") ? -program.pid : program.pid, signal);
+
+    expect(await program.ended).toEqual({ code: null, signal });
+    expect(program.stderr()).toBe(`Interrupted by ${signal}: stopped the apps.\n`);
+    expect(isRunning(standIn)).toBe(false);
+  });
+
+  it("fails with status 1 and says so when pnpm is not on PATH", () => {
+    const emptyDir = mkdtempSync(join(tmpdir(), "apex-check-start-path-"));
+    onTestFinished(() => {
+      rmSync(emptyDir, { recursive: true, force: true });
+    });
+
+    const result = spawnSync(process.execPath, [script], {
+      env: { PATH: emptyDir },
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(
+      "`pnpm start` could not be started (spawn pnpm ENOENT) before both apps answered.\n" +
+        "The apps printed nothing.\n",
+    );
   });
 });

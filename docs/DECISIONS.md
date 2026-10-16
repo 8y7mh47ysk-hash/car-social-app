@@ -1420,14 +1420,18 @@ Keep entries brief. Details belong in code comments and the build log.
   come much later.
 - Decision: a CI step after the build-warning check, "Start the production build", runs
   `node scripts/check-start.ts`. It starts the apps with the `pnpm start` that developers run, on
-  free loopback ports (`WEB_PORT`, `API_PORT`) and in a process group of its own; requires GET
-  /health to answer `{"status":"ok"}` (checked with Zod) and the home page to be a 200 HTML page
-  within a minute; then stops the group with SIGTERM and fails if the apps have not stopped ten
-  seconds later. The README's pre-push commands include it.
-- Trade-offs: a few seconds of CI time. It shows only that the apps start, answer and stop, not
-  what they serve; #68's Playwright tests cover pages and flows. Once the web app has a required
-  server variable (Phase 2), this step needs a throwaway value for it, as the Compose step has
-  for the passwords. The time limits are generous, so a slow runner does not fail it.
+  free ports of 127.0.0.1 (`WEB_HOST`, `WEB_PORT`, `API_HOST`, `API_PORT`) and in a process group
+  of its own; requires GET /health to answer `{"status":"ok"}` (checked with Zod) and the home
+  page to be a 200 HTML page within a minute; then sends SIGTERM to the group and fails if the
+  apps have not stopped ten seconds later. The README's pre-push commands include it.
+- Trade-offs: a few seconds of CI time. It shows only that the apps start and answer, not what
+  they serve; #68's Playwright tests cover pages and flows. Nor does it show that each app shuts
+  down cleanly, as this entry first said (corrected in the wave w0 round 2 review): pnpm 12
+  passes SIGTERM on to both apps but kills the other one with SIGKILL as soon as one has ended,
+  so the step fails only if neither stops, and an API that ignored SIGTERM passed. The API's own
+  tests check its shutdown. Once the web app has a required server variable (Phase 2), this step
+  needs a throwaway value for it, as the Compose step has for the passwords. The time limits are
+  generous, so a slow runner does not fail it.
 
 ### The env lint rules also ban import() of process; process passed as a value is left to review
 
@@ -1490,3 +1494,43 @@ Keep entries brief. Details belong in code comments and the build log.
   of env-file names to keep in step with `.gitignore` and the test. In watch mode, saving an env
   file reruns every test. `git commit --no-verify` still skips the hook, and CI still runs the
   test.
+
+### The start check stops the apps when it is interrupted
+
+- Date: 2026-10-11 · Instruction: #5 · Author: Bravo (wave w0, round 2)
+- Context: `scripts/check-start.ts` starts `pnpm start` in a process group of its own, so that its
+  stop signals reach the apps but not the check itself, and it stopped that group only on its
+  normal path. Ctrl+C, `kill` and a closed terminal reach only the check, so they ended it at once
+  and left pnpm, both apps and pnpm's helpers running: 9 processes each time (w0.V1.Echo.2). Tests
+  that failed or timed out left their stand-in apps running the same way.
+- Decision: as a program, the check handles SIGINT, SIGTERM and SIGHUP. It stops waiting
+  (`checkStart` takes an `AbortSignal`), stops the apps as on its normal path, prints
+  "Interrupted by <signal>: stopped the apps." and then ends by the same signal, so that a shell
+  or script that runs it sees an interrupted command (status 130 after Ctrl+C) and stops too.
+  Each test stand-in writes its process ID, which the test's clean-up kills however the test
+  ends, and ends by itself once the test runner has gone. On macOS and in an Ubuntu 26.04 VM, no
+  process was left after an interrupt at any moment of the check, after tests that timed out, or
+  after the whole test run was killed.
+- Trade-offs: SIGKILL, which no program can handle, still leaves the apps running, as does
+  Ctrl+\ (SIGQUIT); CI's runner removes leftover processes when a job ends. A command in the
+  check's own process group would get a terminal's Ctrl+C directly, but `kill` and `timeout`,
+  which signal only the check, would still leave it behind, and the check could no longer stop
+  the apps without stopping itself. A second Ctrl+C does not cut the stop short; with the real
+  apps it takes well under a second, and never more than twenty seconds (ten after SIGTERM, ten
+  after SIGKILL).
+
+### Workspace copies in tests use the checkout's pnpm store
+
+- Date: 2026-10-11 · Instruction: #1, #5 · Author: Bravo (wave w0, round 2)
+- Context: `workspace.test.ts` installs copies of the workspace offline from pnpm's store, in
+  temporary folders. pnpm keeps one store per file system. On Ubuntu 26.04, the release of CI's
+  runner, /tmp is a tmpfs, so for a copy there pnpm used the empty /tmp/.pnpm-store and the
+  install failed with `ERR_PNPM_NO_OFFLINE_TARBALL`. A simulation of every CI step in an Ubuntu
+  26.04 VM failed its Test step on this test alone; on macOS the temporary folders are on the same
+  volume as the store.
+- Decision: the test asks `pnpm store path` in the checkout once and passes that store to every
+  install of a copy (`--config.store-dir`); `--frozen-store` still keeps them from writing to it.
+- Trade-offs: one more pnpm command per run of the file, about 0.05 s. Rejected: copying the
+  workspace into the checkout instead, onto its file system, which would put temporary folders
+  inside the repository; and `TMPDIR` set to the runner's temporary folder in CI, which would
+  keep the failure for anyone whose /tmp is a tmpfs, such as a developer on Ubuntu 26.04.
