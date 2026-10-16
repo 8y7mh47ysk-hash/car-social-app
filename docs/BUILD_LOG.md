@@ -926,8 +926,8 @@ file, and the password and the append-only file still apply.
   reported it (w0.V1.Bravo.4), but not this copy. It now also names `--no-strip-types`, which
   makes a start without the condition fail instead of running packages/shared's TypeScript
   source. Documentation only.
-- The `docker:*` scripts now refuse a Compose older than 2.23.1, which this file needs since the
-  round-2 review (see instruction 7's integration note).
+- The `docker:*` scripts now refuse a Compose older than 2.23.1, which `docker-compose.yml` needs
+  since the round-2 review (see instruction 7's integration note).
 
 ## #4 - Typed environment loader
 

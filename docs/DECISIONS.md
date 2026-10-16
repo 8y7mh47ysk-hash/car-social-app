@@ -684,15 +684,15 @@ Keep entries brief. Details belong in code comments and the build log.
   of its own, "Not enforced", until the wave w0 round-2 integration moved it here unchanged, to
   match the entry form.) The build-log check matches the formats of Next.js 16.4, Node.js 24 and
   pnpm 12; a warning worded differently would slip through, so re-check after major upgrades by
-  provoking one (docs/BUILD_LOG.md, instruction 5, shows how). A line that merely contains "Warning:" or
-  "Error:" fails the build, which errs on the safe side; a clean build prints neither. A check
-  that fails on anything a package writes to stderr was considered. pnpm's ndjson reporter
+  provoking one (docs/BUILD_LOG.md, instruction 5, shows how). A line that merely contains
+  "Warning:" or "Error:" fails the build, which errs on the safe side; a clean build prints neither.
+  A check that fails on anything a package writes to stderr was considered. pnpm's ndjson reporter
   reports each line as JSON with the stream it came from, the environment variable
-  `pnpm_config_reporter=ndjson` reaches the `pnpm --recursive build` inside `pnpm build` (tested
-  in a scratch workspace), and a clean build of this repository writes nothing to stderr (tested).
-  It would also catch the bare `console.warn` above, but the Build step's log would then be JSON
-  unless a script reformatted it, and the check would depend on pnpm's internal log format,
-  which pnpm does not document. Revisit it if such warnings start to matter.
+  `pnpm_config_reporter=ndjson` reaches the `pnpm --recursive build` inside `pnpm build` (tested in
+  a scratch workspace), and a clean build of this repository writes nothing to stderr (tested). It
+  would also catch the bare `console.warn` above, but the Build step's log would then be JSON unless
+  a script reformatted it, and the check would depend on pnpm's internal log format, which pnpm does
+  not document. Revisit it if such warnings start to matter.
 
 ### CI supply-chain and token safety
 
