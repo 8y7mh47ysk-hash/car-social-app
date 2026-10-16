@@ -672,18 +672,19 @@ Keep entries brief. Details belong in code comments and the build log.
     Compose reports an unset variable as a warning and exits with status 0 (tested).
     `--profile '*'` also validates the services in the `app` profile: without it, a broken
     `depends_on` there passes (tested).
-- Not enforced: plain text that code logs while Next.js prerenders a page, with `console.warn`,
-  `console.log` or `console.error` (only a logged `Error` object prints "Error:"), which Next.js
-  prints as the bare message (tested), and the few Next.js warnings written the
-  same way (most are for features this app does not use, such as the Pages Router, i18n and the
-  edge runtime); console output or Node.js warnings printed while tests, lint or the type check
-  pass (no signal that works across tools; tests should assert on the logs they expect); pnpm's
-  deprecation notices, which appear only when the lockfile is resolved, never during CI's frozen
-  install (the ESLint 9 one is expected, see the ESLint pin); and warnings that GitHub shows
-  about the runner or the actions, which a step cannot read.
-- Trade-offs: the build-log check matches the formats of Next.js 16.4, Node.js 24 and pnpm 12; a
-  warning worded differently would slip through, so re-check after major upgrades by provoking
-  one (docs/BUILD_LOG.md, instruction 5, shows how). A line that merely contains "Warning:" or
+- Trade-offs: CI does not fail on plain text that code logs while Next.js prerenders a page, with
+  `console.warn`, `console.log` or `console.error` (only a logged `Error` object prints
+  "Error:"), which Next.js prints as the bare message (tested), and the few Next.js warnings
+  written the same way (most are for features this app does not use, such as the Pages Router,
+  i18n and the edge runtime); console output or Node.js warnings printed while tests, lint or the
+  type check pass (no signal that works across tools; tests should assert on the logs they
+  expect); pnpm's deprecation notices, which appear only when the lockfile is resolved, never
+  during CI's frozen install (the ESLint 9 one is expected, see the ESLint pin); and warnings that
+  GitHub shows about the runner or the actions, which a step cannot read. (This list was a field
+  of its own, "Not enforced", until the wave w0 round-2 integration moved it here unchanged, to
+  match the entry form.) The build-log check matches the formats of Next.js 16.4, Node.js 24 and
+  pnpm 12; a warning worded differently would slip through, so re-check after major upgrades by
+  provoking one (docs/BUILD_LOG.md, instruction 5, shows how). A line that merely contains "Warning:" or
   "Error:" fails the build, which errs on the safe side; a clean build prints neither. A check
   that fails on anything a package writes to stderr was considered. pnpm's ndjson reporter
   reports each line as JSON with the stream it came from, the environment variable
