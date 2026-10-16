@@ -453,6 +453,7 @@ Keep entries brief. Details belong in code comments and the build log.
   The API will connect as the PostgreSQL superuser until the migrations (instruction 26) add a
   least-privilege role. Other containers on the Compose network can still reach both services;
   instruction 103 moves them to an internal network.
+- Superseded by: Redis reads its password from a config file that Compose writes
 
 ### Health checks that mean "ready": pg_isready over TCP and redis-cli -e
 
@@ -1431,3 +1432,30 @@ Keep entries brief. Details belong in code comments and the build log.
   what they serve; #68's Playwright tests cover pages and flows. Once the web app has a required
   server variable (Phase 2), this step needs a throwaway value for it, as the Compose step has
   for the passwords. The time limits are generous, so a slow runner does not fail it.
+
+### Redis reads its password from a config file that Compose writes
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Echo
+- Context: replaces "Compose secure defaults: required passwords, loopback ports, pinned images",
+  which gave Redis its password as `--requirepass` on the command line. On a Linux host every user
+  can read any process's command line, and the Redis image's entrypoint (a shell, its subshells
+  and setpriv) runs with the container's full command line before redis-server hides its
+  arguments. In the wave w0 round-2 review, a watcher running as `nobody` in a Debian 13 VM
+  (Docker Engine 29.9.1) read the password from 36 command lines during 9 starts of the
+  container. At steady state no command line held it, which is why earlier checks missed it.
+- Decision: Redis reads `requirepass` and `appendonly` from a config file that Compose writes into
+  the container: the top-level `configs` entry `redis-config`, whose inline `content` Compose
+  fills in from `.env`, mounted at `/usr/local/etc/redis/redis.conf` (mode 0444). The command is
+  exactly `redis-server` and that file. redis-cli still reads the password from `REDISCLI_AUTH`.
+  The rest of the replaced entry still holds: both passwords use the required form, with no
+  default and blank in the template; ports are published on 127.0.0.1 only; every image is
+  pinned to a tag and its multi-platform digest; PostgreSQL and Redis use the `local` log driver.
+  `infra/compose.test.ts` keeps every secret off command lines and health checks.
+- Trade-offs: inline config content needs Compose 2.23.1 or later, which current Docker Desktop,
+  OrbStack and Docker's own packages meet (Debian 13's `docker-compose` is 2.26.1). The password
+  must be one word in Redis's config syntax; the `openssl rand -hex 32` that the template
+  recommends is. `docker inspect` (through `REDISCLI_AUTH`) and `docker compose config` still show
+  it, as before; the replaced entry's trade-offs still hold, and Docker secrets come with
+  instruction 104. Rejected: a shell that expands the password inside the container (the command
+  would no longer start with redis-server, so the image would not drop root privileges) and a
+  config file kept on the host (a second file holding the password, beside `.env`).
