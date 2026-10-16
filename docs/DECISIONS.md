@@ -1743,3 +1743,23 @@ Keep entries brief. Details belong in code comments and the build log.
   instruction 104. Rejected: a shell that expands the password inside the container (the command
   would no longer start with redis-server, so the image would not drop root privileges) and a
   config file kept on the host (a second file holding the password, beside `.env`).
+
+### The docker scripts refuse Docker Compose before 2.23.1
+
+- Date: 2026-10-11 · Instruction: #3, #7 · Author: Integrator (wave w0, round 2)
+- Context: "Redis reads its password from a config file that Compose writes" made
+  docker-compose.yml need Compose 2.23.1 or later, for a `configs` entry with inline `content`.
+  An older Compose fails every command with a message about the file, not the version: the 2.23.0
+  release prints "configs.redis-config Additional property content is not allowed" and exits
+  with status 15 (checked with the 2.23.0 and 2.23.1 release binaries, whose SHA-256 digests
+  match the releases' checksums). Echo's hand-off from round 2 of the wave w0 review suggested a
+  version check next to the engine's.
+- Decision: `scripts/check-docker.ts` reads the version from the `docker compose version` call it
+  already makes ("Docker Compose version v2.23.1"; a suffix such as `-desktop.1` and a missing
+  "v" are allowed) and, on every system, stops the `docker:*` scripts with an explanation and a
+  link to Docker's install guide when it is earlier than 2.23.1. Tests cover old, new and
+  unreadable versions on both systems, and the scripts with a stand-in `docker`.
+- Trade-offs: as for the engine, output without a release number is let through. Plain
+  `docker compose` commands are not checked and fail with Compose's own message; infra/README.md
+  gives the minimum. Current Docker Desktop, OrbStack and Docker's own Linux packages are far
+  newer, so the check is for old distribution packages.

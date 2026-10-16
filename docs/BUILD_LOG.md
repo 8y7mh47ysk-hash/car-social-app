@@ -1682,6 +1682,37 @@ with the image pulls); `pnpm docker:logs redis` ended on Ctrl+C with no Compose 
 `docker` command moved away, then with the engine stopped, `pnpm docker:up` printed the message
 for that case and exited with status 1.
 
+**Integration fixes (wave w0, round 2)**
+
+From Echo's hand-off from the round-2 review of instruction 3:
+
+- Since that review, `docker-compose.yml` gives Redis its settings in a `configs` entry with
+  inline `content`, which needs Compose 2.23.1 or later. An older Compose fails every command
+  with a message about the file, not the version (2.23.0: "configs.redis-config Additional
+  property content is not allowed", status 15). The Docker check now reads Compose's version from
+  the `docker compose version` call it already made and, on every system, stops the `docker:*`
+  scripts when it is earlier than 2.23.1 ("Docker Compose is older than version 2.23.1, ...").
+  Output without a release number is let through, as for the engine. Tests:
+  `scripts/check-docker.test.ts` (old, new and unreadable versions, on both systems) and
+  `scripts/package-scripts.test.ts` (`pnpm docker:up` with a stand-in `docker` that reports
+  2.23.0, then 2.23.1). Eight deliberate breakages (no check, a check on the major version only,
+  on Linux only, as text, without the "v"-less form, with minimums 2.23.0 and 2.24.0, and
+  unreadable output refused) each failed a test; a ninth, `<=` for `<` in the comparison, cannot
+  change the result, because it runs only where the two numbers differ. With the real 2.23.0,
+  2.23.1 and 5.1.3 release binaries behind a stand-in `docker` (SHA-256 digests checked against
+  the releases' checksums), `node scripts/check-docker.ts` refused 2.23.0 with that message and
+  passed the other two, and only 2.23.0 refused the compose file. No real Docker ran it: this
+  machine has none.
+- The README's prerequisites and its note on the `docker:*` scripts, and infra/README.md, name
+  the Compose minimum.
+
+How to verify, from the repository root:
+
+```sh
+pnpm exec vitest run scripts/check-docker.test.ts scripts/package-scripts.test.ts
+# "Test Files  2 passed (2)" and "Tests  46 passed (46)"
+```
+
 ## #8 - Structured logging with request IDs
 
 **What changed**

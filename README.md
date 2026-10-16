@@ -61,9 +61,9 @@ docs/         Playbook, architecture, build log, decisions, dependency register 
 - pnpm 12. The exact version is pinned in `package.json` (`packageManager`). Run
   `corepack enable` once (Corepack ships with Node.js 24), or install pnpm 12 any other way;
   either picks up the pinned version.
-- Docker with Compose (Docker Desktop or OrbStack on macOS, Docker Engine 28 or later on Linux) to
-  run PostgreSQL and Redis; see [Local services](#local-services). The apps do not use them yet,
-  so `pnpm dev` works without it.
+- Docker with Compose 2.23.1 or later (Docker Desktop or OrbStack on macOS, Docker Engine 28 or
+  later on Linux) to run PostgreSQL and Redis; see [Local services](#local-services). The apps do
+  not use them yet, so `pnpm dev` works without it.
 
 ## Quick start
 
@@ -113,10 +113,10 @@ Run these from the repository root.
 | `pnpm db:seed`                  | Not available yet (instruction 26): prints a notice and fails.          |
 | `pnpm --filter <package> <cmd>` | Runs one package's script, for example `pnpm --filter @apex/api test`.  |
 
-The `docker:*` scripts first check that Docker, its Compose plugin and its engine are ready (on
-Linux, Docker Engine 28 or later), and say what to do if one is not. Docker Compose reads its
-passwords from the root `.env` file (see [infra/README.md](infra/README.md)). `pnpm run` with no
-arguments lists every script.
+The `docker:*` scripts first check that Docker, its Compose plugin (2.23.1 or later) and its engine
+are ready (on Linux, Docker Engine 28 or later), and say what to do if one is not. Docker Compose
+reads its passwords from the root `.env` file (see [infra/README.md](infra/README.md)).
+`pnpm run` with no arguments lists every script.
 
 ## Configuration
 

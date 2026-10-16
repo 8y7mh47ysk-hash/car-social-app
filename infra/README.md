@@ -24,8 +24,8 @@ own text (`configs` with `content`), which needs Compose 2.23.1 or later; any cu
 or OrbStack is newer than all of these. On Linux, use Docker Engine 28 or later, from Docker's own
 packages: with older engines, machines on the same local network can reach ports published on
 `127.0.0.1` (Docker's port-publishing documentation says so), and a distribution's own package can
-be older (Debian 13's `docker.io` is version 26.1). On Linux, the `pnpm docker:*` scripts refuse to
-run with an older engine.
+be older (Debian 13's `docker.io` is version 26.1). The `pnpm docker:*` scripts refuse to run with
+a Compose older than 2.23.1 and, on Linux, with an older engine.
 
 ### First run
 
