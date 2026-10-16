@@ -148,7 +148,7 @@ How to verify, from the repository root:
 ```sh
 pnpm exec vitest run typecheck.test.ts workspace.test.ts apps/api/src/production.test.ts \
   apps/api/src/server.test.ts
-# "Test Files  4 passed (4)" and "Tests  44 passed (44)" since round 2 of the review
+# "Test Files  4 passed (4)" and "Tests  46 passed (46)" since round 2 of the review
 pnpm --filter @apex/shared build && pnpm --filter @apex/api build
 cd apps/api && node --no-strip-types dist/server.js; cd ../..
 # exits at once: ERR_UNKNOWN_FILE_EXTENSION for packages/shared/src/index.ts (no condition)
@@ -276,7 +276,7 @@ How to verify, from the repository root:
 
 ```sh
 pnpm exec vitest run typecheck.test.ts workspace.test.ts apps/api/src/production.test.ts \
-  apps/api/src/server.test.ts                  # "Test Files  4 passed (4)", "Tests  44 passed (44)"
+  apps/api/src/server.test.ts                  # "Test Files  4 passed (4)", "Tests  46 passed (46)"
 pnpm exec vitest run test-suite.test.ts eslint-config.test.ts scripts/tooling-project.test.ts
                                                # "Test Files  3 passed (3)", "Tests  13 passed (13)"
 pnpm --filter @apex/web test                   # "Tests  47 passed (47)"
@@ -327,6 +327,19 @@ No owner actions. Left without tests, because they show at once: removing `.next
 from `.gitignore` passes CI's checks in a fresh checkout, but `git status` then lists the build
 output; and a dev script without `--watch` stops restarting on a change.
 
+**Integration fixes (wave w0, round 2)**
+
+- Two branches of the round changed `workspace.test.ts`, and the merge keeps both: Delta's checks
+  of `.nvmrc` and `.node-version` above, and Bravo's change from the review of instruction 5. The
+  copies of the workspace now install from the checkout's own pnpm store (`pnpm store path`,
+  passed as `--config.store-dir`; `--frozen-store` still keeps them from writing to it). Without
+  it the test failed in an Ubuntu 26.04 VM, the release of CI's runner, whose `/tmp` is a tmpfs,
+  so the copies there looked in an empty store (instruction 5's round-2 note, and
+  docs/DECISIONS.md, "Workspace copies in tests use the checkout's pnpm store").
+- With the two entrypoint tests from the round-2 review of instruction 8, the first command of
+  the round-1 note above and of the round-2 note report 46 tests (44 on Delta's branch). The other
+  counts that Delta's note lists are updated in their entries, with the other branches' tests.
+
 ## #2 - Git hooks and conventional commits
 
 **What changed**
@@ -350,7 +363,8 @@ output; and a dev script without `--watch` stops restarting on a change.
   runs every test. Since Phase 0 was merged, so does staging a file that other instructions'
   tests read instead of importing: `docker-compose.yml`, an `.env.example` template, a
   `.gitignore`, a CI workflow or (since the wave w0 review) `eslint.config.mjs`. Since the
-  round-2 review of instruction 4, so does an env file staged with `git add --force`.
+  round-2 review of instruction 4, so does an env file staged with `git add --force`, and since
+  the round-2 review of this instruction, a PostCSS config.
 - `git-hooks.test.ts` (54 tests): 28 commit messages through the real commit-msg hook and
   commitlint config; 10 pre-commit scenarios that run the real lint-staged with this
   repository's config in scratch git repositories, with stand-ins for ESLint, Prettier, pnpm and
@@ -560,7 +574,7 @@ Found while merging the round's five branches, and from the reviewers' hand-offs
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  7 passed | 65 skipped (72)"
+pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  7 passed | 69 skipped (76)"
 pnpm exec vitest run typecheck.test.ts -t "root type check"  # "Tests  2 passed | 12 skipped (14)"
 ```
 
@@ -621,10 +635,18 @@ fresh clone of this round's final branch, with 610 tests, at a load average of 3
 4.7 to 5.1 s). How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  6 passed | 66 skipped (72)"
+pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  6 passed | 70 skipped (76)"
 ```
 
 No owner actions.
+
+**Integration fixes (wave w0, round 2)**
+
+- The merge brought together this round's two sets of new tests in `git-hooks.test.ts`: Delta's
+  eight above and Alpha's four env-file trigger cases (instruction 4's round-2 note). The file
+  has 76 tests (72 on Delta's branch and 68 on Alpha's), and every command above that runs it
+  gives the merged count; the "What changed" list of rerun triggers names both branches'
+  additions.
 
 ## #3 - Docker Compose services
 
@@ -1001,7 +1023,7 @@ The web app's guard and phase checks:
 `pnpm exec vitest run --project web --reporter=verbose` lists
 `server env module > refuses to load outside React Server Components` (importing
 `src/env/server.ts` anywhere but on the server throws) and a `validateWebEnv` test for each
-Next.js phase, and ends with `Tests  35 passed (35)`.
+Next.js phase, and ends with `Tests  35 passed (35)` (47 since round 2 of the wave w0 review).
 
 **Dependencies added**
 
@@ -1101,7 +1123,7 @@ How to verify the fixes:
 ```sh
 pnpm exec vitest run packages/shared/src/env.test.ts       # "Tests  54 passed (54)"
 pnpm exec vitest run apps/web/src/env                      # "Tests  33 passed (33)"
-pnpm exec vitest run apps/api/src/config.test.ts apps/api/src/server.test.ts  # "Tests  46 passed (46)"
+pnpm exec vitest run apps/api/src/config.test.ts apps/api/src/server.test.ts  # "Tests  54 passed (54)" (46 before round 2)
 pnpm exec vitest run env-access.test.ts env-files.test.ts  # "Tests  92 passed (92)" (61 before round 2)
 ```
 
@@ -1169,7 +1191,7 @@ How to verify the fixes:
 ```sh
 pnpm exec vitest run env-access.test.ts               # "Tests  64 passed (64)"
 pnpm exec vitest run apps/api/src/env-file.test.ts    # "Tests  6 passed (6)"
-pnpm exec vitest run git-hooks.test.ts -t "runs every test when"  # "Tests  19 passed | 49 skipped (68)"
+pnpm exec vitest run git-hooks.test.ts -t "runs every test when"  # "Tests  21 passed | 55 skipped (76)"
 mkdir -p apps/web/src/app/probe
 printf '"use client";\n\nexport { serverEnvSchema } from "../../env/server-schema";\n' \
   > apps/web/src/app/probe/leak.tsx
@@ -1222,7 +1244,7 @@ from the repository root:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm exec vitest run --project scripts            # "Test Files  5 passed (5)", "Tests  86 passed (86)"
+pnpm exec vitest run --project scripts            # "Test Files  6 passed (6)", "Tests  101 passed (101)"
 pnpm peers check                                  # "No peer dependency issues found"
 pnpm build 2>&1 | tee build.log                   # the route table, then "Done"
 node scripts/check-build-warnings.ts build.log    # "Found no warning or error lines ...", status 0
@@ -1446,7 +1468,7 @@ pnpm 12.11.2, Docker Engine 29.9.1 and Compose 5.1.3, the runner image's version
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run scripts/check-start.test.ts workspace.test.ts   # "Tests  16 passed (16)"
+pnpm exec vitest run scripts/check-start.test.ts workspace.test.ts   # "Tests  18 passed (18)"
 pnpm build
 node scripts/check-start.ts & sleep 0.2; kill -INT $!; wait $!; echo "status $?"
 # "Interrupted by SIGINT: stopped the apps." and "status 130"; if it says "Both apps started",
@@ -1592,7 +1614,7 @@ Charlie reviewed this instruction and changed:
 pnpm run                              # lists db:migrate, db:seed, docker:up, docker:down, docker:logs
 pnpm db:migrate; echo "status $?"     # db:migrate: not available yet. ... instruction 26. ... status 1
 pnpm db:seed; echo "status $?"        # db:seed: not available yet. ... instruction 26. ... status 1
-pnpm exec vitest run --project scripts  # "Tests  86 passed (86)"
+pnpm exec vitest run --project scripts  # "Tests  101 passed (101)"
 ```
 
 Without Docker, `pnpm docker:up` prints "Docker is not installed, or the `docker` command is not
@@ -1679,7 +1701,7 @@ From Alpha's hand-offs from the review of instruction 3:
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run scripts/check-docker.test.ts   # "Tests  21 passed (21)"
+pnpm exec vitest run scripts/check-docker.test.ts   # "Tests  21 passed (21)"; 33 since round 2
 ```
 
 **Review fixes (wave w0, round 2)**
@@ -1761,7 +1783,7 @@ pnpm exec vitest run scripts/check-docker.test.ts scripts/package-scripts.test.t
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm --filter @apex/api test   # all pass: "Tests  246 passed (246)" after round 2 of the review
+pnpm --filter @apex/api test   # all pass: "Tests  261 passed (261)" after round 2 of the review
 pnpm lint                      # exits with code 0
 pnpm typecheck                 # shared, api and web each report "Done"
 ```
@@ -1886,7 +1908,7 @@ pnpm --filter @apex/api exec vitest run src/lib/redact.test.ts src/logging.test.
 pnpm --filter @apex/api exec vitest run src/server.test.ts -t "pino-pretty|redacted JSON line"
 ```
 
-The first ends with `Tests  148 passed (148)`, the second with `Tests  4 passed | 13 skipped (17)`
+The first ends with `Tests  148 passed (148)`, the second with `Tests  4 passed | 19 skipped (23)`
 (round 2 added tests to both files).
 
 **Review fixes (wave w0, round 2)**
@@ -1928,7 +1950,7 @@ pnpm --filter @apex/api exec vitest run src/server.test.ts -t "LOG_FORMAT=pretty
 pnpm exec vitest run api-console.test.ts
 ```
 
-They end with `Tests  148 passed (148)`, `Tests  4 passed | 13 skipped (17)` and
+They end with `Tests  148 passed (148)`, `Tests  4 passed | 19 skipped (23)` and
 `Tests  4 passed (4)`. To see the pino-pretty messages for yourself, from `apps/api`:
 
 ```sh
