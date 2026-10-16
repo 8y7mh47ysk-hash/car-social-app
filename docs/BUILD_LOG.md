@@ -468,13 +468,14 @@ Without Docker (this is what ran on the build machine):
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm exec vitest run --project infra   # "Tests  17 passed (17)"
-pnpm test                              # "Test Files  6 passed (6)" and "Tests  44 passed (44)"
+pnpm exec vitest run --project infra   # "Tests  26 passed (26)" since the wave w0 review, round 2
+pnpm test                              # every test passes; when #3 was finished: "Test Files  6
+                                       # passed (6)" and "Tests  44 passed (44)"
 pnpm typecheck && pnpm lint            # both exit with code 0
 ```
 
 With Docker installed (see Owner actions; Docker is not installed on the build machine, so these
-were not run there; the review ran them in a Linux VM, see "Review fixes (wave w0, round 1)"):
+were not run there; the reviews ran them in Linux VMs, see the review fixes below):
 
 ```sh
 cp .env.example .env && chmod 600 .env   # then set POSTGRES_PASSWORD and REDIS_PASSWORD;
@@ -492,6 +493,9 @@ docker compose exec postgres psql -U postgres -d apex_garage -tAc \
 docker compose exec redis redis-cli ping          # PONG
 docker compose exec -e REDISCLI_AUTH=wrong redis redis-cli -e ping; echo "exit $?"
                                                   # AUTH failed: WRONGPASS ..., then exit 1
+docker compose exec redis redis-cli CONFIG GET appendonly   # appendonly, then yes
+docker inspect --format '{{json .Config.Cmd}}' "$(docker compose ps -q redis)"
+# ["redis-server","/usr/local/etc/redis/redis.conf"]: the password is not on the command line
 docker compose exec redis redis-cli SET apex:check kept
 docker compose down && docker compose up -d --wait
 docker compose exec redis redis-cli GET apex:check   # "kept": the named volume survived
@@ -556,8 +560,8 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
 - Docker is not installed on the build machine, so the containers were not started there. The
   file was checked with the real Compose parser, the JSON Schema and the tests above; the health
   check commands were checked against the images' entrypoints, the PostgreSQL documentation and
-  a Redis source build. The review then ran the containers in a Linux VM (see "Review fixes
-  (wave w0, round 1)"); they have not yet run under Docker Desktop or OrbStack (owner action).
+  a Redis source build. The reviews then ran the containers in Linux VMs (see the review fixes
+  below); they have not yet run under Docker Desktop or OrbStack (owner action).
 - The apps do not use PostgreSQL or Redis yet; that starts in Phase 2. Connection URLs are in
   `infra/README.md`.
 - Every `docker compose` command for this project needs the two passwords, so CI must pass
@@ -569,7 +573,9 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
   `infra/compose.test.ts`. Since Phase 0 was merged, both are in the root Vitest config's
   `forceRerunTriggers`, so staging either one runs every test. `pnpm test` and CI always run them.
 - `POSTGRES_PASSWORD`, `POSTGRES_USER` and `POSTGRES_DB` apply only when the data volume is
-  first created; `infra/README.md` explains how to change the password later.
+  first created; `infra/README.md` explains how to change the password later. The health check
+  uses `POSTGRES_USER` and `POSTGRES_DB` on every check, so change them only together with a new,
+  empty volume (since the wave w0 review, round 2).
 - The passwords are visible through `docker inspect` (instruction 104 moves them to Docker
   secrets); the API will connect as the PostgreSQL superuser until a least-privilege role arrives
   with the migrations (instruction 26); other containers on the Compose network can reach both
@@ -578,8 +584,9 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
 - `docker compose --profile app up` ends with both placeholders exited with status 1, on purpose,
   until the apps get real images. Remove them with `docker compose --profile app down`.
 - The health checks' one-second polling while a service starts (`start_interval`) needs Docker
-  Engine 25 or later and Compose 2.20.2 or later. On Linux, ports published on 127.0.0.1 stay
-  out of other machines' reach only from Docker Engine 28.
+  Engine 25 or later and Compose 2.20.2 or later; since the wave w0 review, round 2, Redis's
+  config file (`configs` with `content`) needs Compose 2.23.1 or later. On Linux, ports published
+  on 127.0.0.1 stay out of other machines' reach only from Docker Engine 28.
 
 **Review fixes (wave w0, round 1)**
 
@@ -593,8 +600,8 @@ Alpha reviewed this instruction, took it over and re-checked every requirement b
   pgvector 0.8.7 installed and ran a distance query; `/dev/shm` was 256 MB; both servers ran as
   unprivileged users; the VM's own network address was refused on both ports while 127.0.0.1
   answered; a TCP login without a password was refused by both; the Redis password did not appear in
-  the process list; redis-server restarted on its own after a `kill -9`; data in both survived
-  `down` and `up`.
+  the process list of the running server (it did while the container started: see round 2);
+  redis-server restarted on its own after a `kill -9`; data in both survived `down` and `up`.
 - Fixed: the final `docker compose down` left the exited placeholder behind, and the next
   `docker compose --profile app up` failed with "failed to set up container networking: network
   ... not found": without `--profile`, `down` only handles the services outside a profile. The
@@ -620,7 +627,7 @@ Alpha reviewed this instruction, took it over and re-checked every requirement b
 How to verify the fixes:
 
 ```sh
-pnpm exec vitest run --project infra   # "Tests  21 passed (21)"
+pnpm exec vitest run --project infra   # "Tests  21 passed (21)" then; 26 since round 2
 pnpm test && pnpm typecheck && pnpm lint && pnpm format:check   # all exit with code 0
 ```
 
@@ -641,6 +648,58 @@ From the reviewers' hand-offs:
   decision is in docs/DECISIONS.md.
 - Nothing enforced Docker Engine 28 on Linux (Alpha): the `docker:*` scripts now refuse an older
   engine there, see instruction 7's integration note.
+
+**Review fixes (wave w0, round 2)**
+
+Echo reviewed this instruction, took it over and checked it again, with the containers running in
+two throwaway Debian 13 VMs (Lima 2.2.1, Docker Engine 29.9.1, Compose 5.6.0):
+
+- Fixed (security): Redis got its password as a command-line argument (`--requirepass`). On Linux
+  every user can read any process's command line, and the Redis image's entrypoint runs with the
+  container's full command line before Redis hides its arguments: a watcher running as `nobody`
+  read the password from 36 command lines during 9 starts of the container. Round 1 looked only
+  at the running server, where it no longer shows. Redis now reads `requirepass` and `appendonly`
+  from a config file that Compose writes into the container (`configs` in `docker-compose.yml`,
+  which needs Compose 2.23.1 or later), and its command is `redis-server` and that file. The same
+  watcher found the password nowhere in 9 starts; auth, the health check, the append-only file,
+  data across `down` and `up`, a restart after `kill -9` and a password change behaved as before.
+  The decision is in `docs/DECISIONS.md`.
+- Fixed (tests): 16 of 45 deliberate breakages passed `infra/compose.test.ts`, two of them the
+  health-check timings, unpinned on purpose since round 1. The others included the PostgreSQL check
+  in exec form or disabled and `POSTGRES_USER` or `POSTGRES_DB` no longer passed to the container
+  (open item w0.V1.Charlie.1), `POSTGRES_HOST_AUTH_METHOD: trust` (TCP logins without a password), a
+  disabled Redis check, a later `--appendonly no`, an `entrypoint` override, a wrong or missing
+  published port and a template entry that the file never reads. The tests now compare the health
+  checks, environments, ports and Redis's command and config exactly, forbid `entrypoint`, keep
+  every secret off command lines and health checks, and require `.env.example` to list exactly the
+  variables the file reads. Now only the two timing changes pass, and all 15 breakages aimed at the
+  new config file fail.
+- Fixed (docs): `.env.example` and this entry said that `POSTGRES_USER` and `POSTGRES_DB` apply only
+  when the data volume is first created. The health check uses them on every check: in the VM, a
+  user or database renamed later kept the service healthy while PostgreSQL logged a FATAL line
+  every 10 seconds, and the psql command in `infra/README.md` failed. The template, that README
+  and the note above now say to change them only together with a new, empty volume.
+- Fixed (docs): `infra/README.md` and this entry validated the file with
+  `docker compose config --quiet`, which skips the `app` profile: Compose 5.6.0 exited with code 0
+  while the `web` placeholder depended on a service that does not exist. Both now use CI's
+  `docker compose --profile '*' config --quiet`.
+- Fixed (docs): switching to Valkey is not "a one-line image change" (open item w0.V1.Charlie.2).
+  With only the image changed, Valkey 9.1.2 ran its server as root in the VM, because its
+  entrypoint drops root privileges only for `valkey-server`; with that first word as well, it ran
+  as uid 999 and turned healthy. `docs/DEPENDENCIES.md`, the licence decision and the owner action
+  above say so.
+- Fixed (docs): "How to verify" quoted 17 infra tests after round 1 had added 4 (open item
+  w0.V1.Charlie.3); the counts above now say when they were taken.
+
+How to verify the fixes:
+
+```sh
+pnpm exec vitest run --project infra   # "Tests  26 passed (26)"
+pnpm test && pnpm typecheck && pnpm lint && pnpm format:check   # all exit with code 0
+```
+
+With Docker, run the commands under "How to verify" above: Redis's command holds only the config
+file, and the password and the append-only file still apply.
 
 ## #4 - Typed environment loader
 
