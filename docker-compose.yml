@@ -51,17 +51,13 @@ services:
     # multi-platform build: always change the tag and the digest together.
     image: redis:8.10.2-alpine3.23@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
     restart: unless-stopped
-    # The image turns Redis's protected mode off, so without a password any client that can reach
-    # the port gets in. Keep redis-server as the first word: the image drops root privileges only
-    # when it starts redis-server.
-    command:
-      - redis-server
-      - --requirepass
-      - ${REDIS_PASSWORD:?set it in .env (see .env.example)}
-      # Also log every write to an append-only file, synced once a second. Redis's default
-      # snapshots alone can lose up to an hour of writes (queued jobs, sessions) in a crash.
-      - --appendonly
-      - "yes"
+    # Redis reads its settings, the password among them, from the redis-config file (see configs
+    # at the end). Keep redis-server as the first word: the image drops root privileges only when
+    # it starts redis-server. Add nothing after the file: Redis applies later arguments on top.
+    command: [redis-server, /usr/local/etc/redis/redis.conf]
+    configs:
+      - source: redis-config
+        target: /usr/local/etc/redis/redis.conf
     environment:
       # redis-cli reads its password from this variable, so neither the health check nor
       # `docker compose exec redis redis-cli` needs the password on its command line.
@@ -119,3 +115,17 @@ services:
 volumes:
   postgres-data:
   redis-data:
+
+configs:
+  # Redis's settings. Compose copies this file into the redis container (mode 0444) when it starts
+  # the container, and the file stays there across restarts. The password goes here, not on the
+  # command line: on a Linux host every user can read any process's command line, and the image's
+  # entrypoint runs with the full command line each time the container starts.
+  redis-config:
+    # requirepass: the image turns Redis's protected mode off, so without a password any client
+    # that can reach the port gets in. appendonly: also log every write to a file, synced once a
+    # second; Redis's default snapshots alone can lose up to an hour of writes (queued jobs,
+    # sessions) in a crash.
+    content: |
+      requirepass ${REDIS_PASSWORD:?set it in .env (see .env.example)}
+      appendonly yes

@@ -17,14 +17,15 @@ Docker.
 | `api`      | Placeholder in the `app` profile: prints a reminder, exits 1 | none             | none            |
 | `web`      | Placeholder in the `app` profile: prints a reminder, exits 1 | none             | none            |
 
-You need Docker with Compose: Docker Desktop or OrbStack on macOS, Docker Engine on Linux. The
-file uses the health-check setting `start_interval` (checks every second while a service
-starts), which needs Compose 2.20.2 or later and Docker Engine 25 or later; any current Docker
-Desktop or OrbStack is newer than both. On Linux, use Docker Engine 28 or later, from Docker's
-own packages: with older engines, machines on the same local network can reach ports published
-on `127.0.0.1` (Docker's port-publishing documentation says so), and a distribution's own package
-can be older (Debian 13's `docker.io` is version 26.1). On Linux, the `pnpm docker:*` scripts
-refuse to run with an older engine.
+You need Docker with Compose: Docker Desktop or OrbStack on macOS, Docker Engine on Linux. The file
+uses the health-check setting `start_interval` (checks every second while a service starts), which
+needs Compose 2.20.2 or later and Docker Engine 25 or later, and writes Redis's config file from its
+own text (`configs` with `content`), which needs Compose 2.23.1 or later; any current Docker Desktop
+or OrbStack is newer than all of these. On Linux, use Docker Engine 28 or later, from Docker's own
+packages: with older engines, machines on the same local network can reach ports published on
+`127.0.0.1` (Docker's port-publishing documentation says so), and a distribution's own package can
+be older (Debian 13's `docker.io` is version 26.1). On Linux, the `pnpm docker:*` scripts refuse to
+run with an older engine.
 
 ### First run
 
@@ -86,6 +87,15 @@ and data, even with other ports. To run a separate copy, give that checkout's `.
   so changing `.env` alone is not enough. Open psql (see the table above), run `\password`, enter
   the new password twice, then put the same password in `.env`. Alternatively, delete all data
   with `docker compose down --volumes` and start again.
+
+### Changing the PostgreSQL user or database name
+
+`POSTGRES_USER` and `POSTGRES_DB`, like the password, take effect only when the data volume is
+first created. The health check uses them on every check, though: if they no longer match the
+database, PostgreSQL logs `FATAL: role "..." does not exist` (or `database "..." does not exist`)
+every 10 seconds while the service still shows as healthy, and the psql command above fails. To
+use other names, set them in `.env` and start with a new, empty volume:
+`docker compose down --volumes` deletes all data first.
 
 ### Health checks
 
@@ -153,6 +163,11 @@ and once the API image has a health check, `web` should wait for `service_health
 - `chmod 600 .env` keeps other accounts on the machine from reading the passwords: a plain copy
   is readable by every local user (on macOS every account is in the `staff` group, which can
   open home folders).
+- No password is ever a command-line argument: on Linux every user can read any process's
+  command line, and the Redis image's entrypoint runs with the container's full command line
+  each time the container starts. Redis reads its password from a config file that Compose
+  writes into the container (`redis-config` in `docker-compose.yml`), and redis-cli reads it from
+  the `REDISCLI_AUTH` variable.
 - The passwords are visible to anyone who can run `docker inspect` on this machine (Docker access
   is root-equivalent anyway). Instruction 104 moves them to Docker secrets or an encrypted file.
 - PostgreSQL runs with a superuser for now. A least-privilege role for the API belongs with the
@@ -164,14 +179,18 @@ and once the API image has a health check, `web` should wait for `service_health
 
 ### Checking the file
 
-- `docker compose config --quiet` validates the file. It needs the two passwords, from `.env` or
-  the environment; CI can pass throwaway values:
-  `POSTGRES_PASSWORD=ci REDIS_PASSWORD=ci docker compose config --quiet`.
+- `docker compose --profile '*' config --quiet` validates the whole file, as CI does, and prints
+  nothing when it is valid. Without `--profile '*'`, Compose skips the services in the `app`
+  profile, so a mistake in a placeholder (such as a `depends_on` that names no service) passes
+  unnoticed. It needs the two passwords, from `.env` or the environment, for example throwaway
+  values: `POSTGRES_PASSWORD=ci REDIS_PASSWORD=ci docker compose --profile '*' config --quiet`.
 - `pnpm test` includes `infra/compose.test.ts`, static checks that need no Docker: only
-  `postgres` and `redis` start by default, ports stay on `127.0.0.1`, passwords have no default,
-  PostgreSQL comes from the pgvector image, Redis keeps its append-only file, the health checks
-  and dependencies are the ones described here, the placeholders build nothing and exit with an
-  error, images are pinned, and `.env.example` documents every variable with the right defaults.
+  `postgres` and `redis` start by default, ports stay on `127.0.0.1`, passwords have no default
+  and stay off command lines, PostgreSQL comes from the pgvector image, Redis reads its password
+  and its append-only setting from its config file, the health checks, environments, ports and
+  dependencies are the ones described here, every image keeps its own entrypoint, the
+  placeholders build nothing and exit with an error, images are pinned, and `.env.example` lists
+  exactly the variables the file reads, with the right defaults.
 
 ## What comes next
 
@@ -193,4 +212,5 @@ Ground rules that apply to everything added here:
 
 - No secrets in committed files. Commit templates such as `.env.example` only.
 - Ollama, PostgreSQL and Redis are never exposed to the internet (playbook section 2).
-- Prefer configuration that can be validated locally, for example `docker compose config --quiet`.
+- Prefer configuration that can be validated locally, for example
+  `docker compose --profile '*' config --quiet`.
