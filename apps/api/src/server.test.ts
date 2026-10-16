@@ -264,7 +264,7 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
         "  - API_PORT: must be a whole number from 0 to 65535",
         "  - LOG_LEVEL: must be one of fatal, error, warn, info, debug, trace, silent",
         "  - LOG_FORMAT: must be one of json, pretty",
-        "Set them in apps/api/.env (see apps/api/.env.example) or in the environment.",
+        "Set them in apps/api/.env (see apps/api/.env.example) or in the environment, which overrides the file.",
         "",
       ].join("\n"),
     );

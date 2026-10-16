@@ -18,7 +18,7 @@ export interface EnvIssue {
 export interface ParseEnvOptions {
   /** The program that reads the variables, such as "the API". */
   readonly app: string;
-  /** The message's last line, such as "Set them in apps/api/.env or in the environment." */
+  /** The message's last line: where to set the variables, such as "Set them in apps/api/.env." */
   readonly hint: string;
 }
 

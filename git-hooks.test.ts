@@ -714,6 +714,11 @@ describe("the pre-commit hook's test step in this repository", { timeout: 60_000
     ".gitignore",
     ".github/workflows/ci.yml",
     "eslint.config.mjs",
+    // Env files, staged only with `git add --force`: env-files.test.ts then fails the commit.
+    "apps/api/.env",
+    "apps/web/.env.local",
+    "infra/postgres.env",
+    ".envrc",
   ])("runs every test when %s is staged", async (file) => {
     const result = await relatedTests(file);
 

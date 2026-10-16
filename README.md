@@ -120,10 +120,18 @@ arguments lists every script.
 
 ## Configuration
 
-Each app reads its settings from environment variables and validates them with Zod: the API as
-it starts, the web app whenever Next.js starts or builds it. If a variable is missing or invalid,
-the command stops and names every problem, without ever printing a value. Settings can also live
-in a gitignored `.env` file next to the app: copy the app's template to create one.
+Each app reads its settings from environment variables and validates them with Zod. If a variable
+is missing or invalid, the app stops with an error that names every problem without ever
+printing a value. The API checks its variables as it starts; in `pnpm dev` it then waits, and
+starts again when you save a fixed `apps/api/.env`. The web app checks its variables when Next.js
+needs them: `pnpm dev` checks all of them, `pnpm build` the `NEXT_PUBLIC_` ones that it copies
+into the browser's JavaScript, and `pnpm start` the server ones.
+
+Settings can also live in a gitignored `.env` file next to the app: copy the app's template to
+create one, and make the copy readable by your user only (`chmod 600`, as for the root `.env`),
+because settings can include secrets. Until `apps/api/.env` exists, the API prints Node.js's
+notice ".env not found. Continuing without it." as it starts (twice in `pnpm dev`); that is
+expected.
 
 | File            | Read by                                                       | Template                |
 | --------------- | ------------------------------------------------------------- | ----------------------- |
@@ -131,9 +139,12 @@ in a gitignored `.env` file next to the app: copy the app's template to create o
 | `apps/api/.env` | The API, in `pnpm dev` and `pnpm start`                       | `apps/api/.env.example` |
 | `apps/web/.env` | Next.js, in `pnpm dev`, `pnpm build`, `pnpm start`            | `apps/web/.env.example` |
 
-Variables set in the shell win over the files. `WEB_HOST` and `WEB_PORT` work only from the
-shell, because Next.js opens its port before it reads `.env` files. The templates explain each
-variable and the rules for adding one; the design is in [docs/DECISIONS.md](docs/DECISIONS.md).
+Variables set in the shell win over the files: if an error names a variable that the file sets
+correctly, the shell has exported its own value (check with `printenv LOG_LEVEL`, for example,
+which prints nothing for a variable that is not set). `WEB_HOST` and `WEB_PORT` work only from
+the shell, because Next.js opens its port before it reads `.env` files. The templates explain
+each variable and the rules for adding one; the design is in
+[docs/DECISIONS.md](docs/DECISIONS.md).
 
 The API logs one JSON object per line. To read its log in a terminal while developing, add
 `LOG_FORMAT=pretty` to `apps/api/.env`; how logging works is in
@@ -191,9 +202,10 @@ are not checked.
   a Vitest config or setup file, a git hook or its config, the API's entrypoint
   (`apps/api/src/server.ts`, which its tests start as a separate process) or a file that tests
   read instead of importing (`docker-compose.yml`, an `.env.example` template, a `.gitignore`, a
-  CI workflow or `eslint.config.mjs`) runs every test instead. Deleted files count as staged, so
-  deleting a module that is still imported fails the type check. A failing step does not stop the
-  others, so one run shows every problem.
+  CI workflow or `eslint.config.mjs`) runs every test instead. So does an env file, which only
+  `git add --force` can stage, and `env-files.test.ts` then fails the commit. Deleted files count
+  as staged, so deleting a module that is still imported fails the type check. A failing step does
+  not stop the others, so one run shows every problem.
 - **pre-merge-commit** ([`.husky/pre-merge-commit`](.husky/pre-merge-commit)) runs the same
   checks on what a merge brings in when `git merge` (or a `git pull` that merges) commits without
   conflicts; git runs pre-commit only for commits you make with `git commit`.

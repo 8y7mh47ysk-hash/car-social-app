@@ -51,7 +51,7 @@ export interface ApiConfig {
 export function loadConfig(env: EnvSource): ApiConfig {
   const values = parseEnv(apiEnvSchema, env, {
     app: "the API",
-    hint: "Set them in apps/api/.env (see apps/api/.env.example) or in the environment.",
+    hint: "Set them in apps/api/.env (see apps/api/.env.example) or in the environment, which overrides the file.",
   });
   return {
     host: values.API_HOST,
