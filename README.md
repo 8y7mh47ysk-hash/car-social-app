@@ -200,7 +200,7 @@ are not checked.
   commit; any ESLint warning fails), `pnpm typecheck` for the whole repository when a staged file
   is TypeScript, JSON or a pnpm workspace file, and `vitest related` for the unit tests that
   import a staged file. Staging a `package.json`, a pnpm lockfile or workspace file, a tsconfig,
-  a Vitest config or setup file, a git hook or its config, the API's entrypoint
+  a Vitest config or setup file, a PostCSS config, a git hook or its config, the API's entrypoint
   (`apps/api/src/server.ts`, which its tests start as a separate process) or a file that tests
   read instead of importing (`docker-compose.yml`, an `.env.example` template, a `.gitignore`, a
   CI workflow or `eslint.config.mjs`) runs every test instead. So does an env file, which only
@@ -226,30 +226,58 @@ becomes part of the commit. To review that change first, run `pnpm install` and 
 lockfile yourself.
 
 While the pre-commit hook runs, it keeps a backup of your changes in the git stash, in an entry
-named `lint-staged automatic backup`. Only Ctrl+C (SIGINT) lets it tidy up. If it is stopped in
-any other way (a closed terminal, an editor or tool that cancels the commit or gives up waiting,
-`kill`), your unstaged changes and untracked files stay in that entry and the working tree holds
-only what was staged. To get everything back exactly as it was, staged and unstaged:
+named `lint-staged automatic backup (<id>)`. Only Ctrl+C (SIGINT) lets it tidy up. If it is
+stopped in any other way (a closed terminal, an editor or tool that cancels the commit or gives up
+waiting, `kill`), your unstaged changes and untracked files stay in that entry and the working tree
+holds only what was staged. To get everything back exactly as it was, staged and unstaged:
 
 ```sh
-git stash list                      # find the "lint-staged automatic backup" entry: stash@{n}
+git stash list                      # find "lint-staged automatic backup (<id>)": stash@{n}
+d=$(git rev-parse --git-dir)        # this worktree's git folder
 git reset --hard                    # the backup also holds what was staged
 git stash apply --index stash@{n}   # restores the staged, unstaged and untracked files
 git stash drop stash@{n}
+rm -rf "$d/lint-staged/<id>"        # the hook's working files
 ```
 
 These are the steps the hook itself takes after a failed check. Run them before you edit again,
 because `git reset --hard` discards changes made since the hook stopped. A plain `git stash pop`
 is not enough: it stops with a merge conflict on any file that was partly staged.
 
+If that commit was finishing a merge (`git status` said "All conflicts fixed but you are still
+merging"), `git reset --hard` and `git stash apply` both end the merge, and the next commit would
+quietly leave out the merged branch. So set the merge's state aside around them, as the hook does:
+
+```sh
+git stash list                      # find "lint-staged automatic backup (<id>)": stash@{n}
+d=$(git rev-parse --git-dir) && mkdir "$d/merge-state"
+cp "$d/MERGE_HEAD" "$d/MERGE_MSG" "$d/MERGE_MODE" "$d/merge-state/"
+git reset --hard
+git stash apply --index stash@{n}
+mv "$d/merge-state/"* "$d/" && rmdir "$d/merge-state"   # the merge is in progress again
+git stash drop stash@{n}
+rm -rf "$d/lint-staged/<id>"
+```
+
+If `git merge` or `git pull` itself was stopped while the hook ran (closing the terminal stops
+both), git never recorded the merge. After the first set of steps, the merge's changes are staged
+as if they were yours, and committing them would leave out the merged branch. git refuses to merge
+with changes staged, so all of them came from the merge: drop them, keeping your own unstaged
+changes and untracked files, and merge again.
+
+```sh
+git reset --merge                   # drops the staged changes, keeps your own
+git merge <branch>                  # or run the git pull again
+```
+
 All worktrees of a repository share one stash list, so the top entry may be another worktree's
 backup: pick the entry that names your branch. Two worktrees committing at the same moment can
 occasionally leave a stray `lint-staged automatic backup` entry behind; it is only a copy, and
 safe to drop.
 
-Typical run times on an Apple M5, measured after the wave w0 review was merged (555 tests) while
-other work used the machine: about 1 s for a documentation change, 4 to 5 s for a source change
-with related tests, and about 19 s when every test runs.
+Typical run times on an Apple M5, measured in round 2 of the wave w0 review (610 tests) while
+other work used the machine: about 1 s for a documentation change, about 5 s for a source change
+with related tests, and about 27 s when every test runs.
 
 Hooks also run from scripts and IDEs. They need `node` and `pnpm` on `PATH`; if a GUI git client
 cannot find them, set `PATH` in `~/.config/husky/init.sh`, which husky reads before every hook.

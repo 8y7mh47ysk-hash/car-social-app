@@ -14,8 +14,12 @@ const nextConfig: NextConfig = {
   // live in node_modules/next/dist/docs/.
   agentRules: false,
   poweredByHeader: false,
-  // Workspace packages are consumed as TypeScript source and compiled by Next.js.
-  transpilePackages: ["@apex/shared"],
+  // `next build` type-checks with the same file as `pnpm typecheck`, which leaves out the route
+  // types that `next dev` keeps in .next/dev (see tsconfig.typecheck.json). Next.js reads its other
+  // TypeScript settings from that file too; it extends tsconfig.json, which editors keep using.
+  typescript: { tsconfigPath: "tsconfig.typecheck.json" },
+  // Workspace packages such as @apex/shared are imported as TypeScript source. Next.js compiles
+  // them by itself, so they need no `transpilePackages` entry (docs/DECISIONS.md).
   outputFileTracingRoot: monorepoRoot,
   turbopack: {
     root: monorepoRoot,
