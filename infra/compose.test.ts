@@ -37,6 +37,7 @@ const serviceSchema = z.looseObject({
       timeout: z.string(),
       retries: z.number().int().positive(),
       start_period: z.string(),
+      disable: z.boolean().optional(),
     })
     .optional(),
   depends_on: z.record(z.string(), z.looseObject({ condition: z.string() })).optional(),
@@ -188,18 +189,40 @@ describe("docker-compose.yml", () => {
   });
 
   it("health-checks postgres over TCP and fails the Redis check on error replies", () => {
-    const postgresCheck = service("postgres").healthcheck?.test.join(" ");
-    expect(postgresCheck).toContain("pg_isready");
-    // A Unix-socket check would pass against the temporary server that runs during first-time
-    // initialisation; TCP waits for the real server.
-    expect(postgresCheck).toContain("--host=127.0.0.1");
-    // The configured names ("$$" is Compose's escape, so the container's shell expands them). With
-    // any other names, such as the default "root", PostgreSQL logs a FATAL line for every check.
-    expect(postgresCheck).toContain('--username="$${POSTGRES_USER}"');
-    expect(postgresCheck).toContain('--dbname="$${POSTGRES_DB}"');
-
+    // TCP, because a Unix-socket check would pass against the temporary server that runs during
+    // first-time initialisation. CMD-SHELL, because a shell must expand the container's
+    // POSTGRES_USER and POSTGRES_DB ("$$" is Compose's escape for "$"): in exec form (CMD) the
+    // check gets the literal text, and with any other names, such as the default "root",
+    // PostgreSQL logs a FATAL line for every check while the service still counts as healthy.
+    expect(service("postgres").healthcheck?.test).toEqual([
+      "CMD-SHELL",
+      'pg_isready --host=127.0.0.1 --username="$${POSTGRES_USER}" --dbname="$${POSTGRES_DB}"',
+    ]);
     // Without -e, redis-cli exits 0 even on NOAUTH (wrong password) or LOADING replies.
     expect(service("redis").healthcheck?.test).toEqual(["CMD", "redis-cli", "-e", "ping"]);
+    for (const name of ["postgres", "redis"]) {
+      expect(service(name).healthcheck?.disable, name).not.toBe(true);
+    }
+  });
+
+  it("gives postgres and redis exactly the environment variables they need", () => {
+    // The health check reads POSTGRES_USER and POSTGRES_DB from the container's environment, so
+    // both must be set there. Anything more could weaken logins: POSTGRES_HOST_AUTH_METHOD=trust,
+    // for example, would let every TCP client in without a password. Redis needs only the
+    // password for redis-cli.
+    const { POSTGRES_PASSWORD: password, ...names } = service("postgres").environment ?? {};
+    expect(password).toMatch(requiredForm("POSTGRES_PASSWORD"));
+    expect(names).toEqual({
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}",
+      POSTGRES_DB: "${POSTGRES_DB:-apex_garage}",
+    });
+    expect(Object.keys(service("redis").environment ?? {})).toEqual(["REDISCLI_AUTH"]);
+  });
+
+  it("publishes each server's own port, on the host port set in .env", () => {
+    // A wrong container port would publish a port that nothing listens on.
+    expect(service("postgres").ports).toEqual(["127.0.0.1:${POSTGRES_PORT:-5432}:5432"]);
+    expect(service("redis").ports).toEqual(["127.0.0.1:${REDIS_PORT:-6379}:6379"]);
   });
 
   it("starts api after postgres and redis are healthy, and web after api has started", () => {
