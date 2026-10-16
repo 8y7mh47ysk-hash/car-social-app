@@ -29,7 +29,9 @@ const packageJson = z
 
 /**
  * The stand-in for `docker`: appends its arguments to $DOCKER_STUB_LOG, then exits with status 7
- * if they start with $DOCKER_STUB_FAIL_ON, or with status 0. It uses only shell built-ins.
+ * if they start with $DOCKER_STUB_FAIL_ON, or with status 0. For `compose version` it prints
+ * "Docker Compose version $DOCKER_STUB_COMPOSE_VERSION" when that is set, as Compose does. It uses
+ * only shell built-ins.
  */
 const dockerStub = `#!/bin/sh
 printf '%s\\n' "$*" >> "$DOCKER_STUB_LOG"
@@ -37,6 +39,9 @@ if [ -n "\${DOCKER_STUB_FAIL_ON-}" ]; then
   case "$*" in
     "$DOCKER_STUB_FAIL_ON"*) echo "docker stub: failing on purpose" >&2; exit 7 ;;
   esac
+fi
+if [ "$*" = "compose version" ] && [ -n "\${DOCKER_STUB_COMPOSE_VERSION-}" ]; then
+  echo "Docker Compose version $DOCKER_STUB_COMPOSE_VERSION"
 fi
 `;
 
@@ -50,9 +55,13 @@ interface ScriptRun {
 
 /**
  * Runs a root package.json script with a PATH of its own: `node`, plus the docker stand-in if
- * `docker` is set. `failOn` makes the stand-in fail for calls whose arguments start with it.
+ * `docker` is set. `failOn` makes the stand-in fail for calls whose arguments start with it, and
+ * `composeVersion` is the version it reports for Compose (none by default).
  */
-function runScript(name: string, options: { docker: boolean; failOn?: string }): ScriptRun {
+function runScript(
+  name: string,
+  options: { docker: boolean; failOn?: string; composeVersion?: string },
+): ScriptRun {
   const script = packageJson.scripts[name];
   if (script === undefined) {
     throw new Error(`package.json has no "${name}" script`);
@@ -78,6 +87,9 @@ function runScript(name: string, options: { docker: boolean; failOn?: string }):
       PATH: bin,
       DOCKER_STUB_LOG: log,
       ...(options.failOn === undefined ? {} : { DOCKER_STUB_FAIL_ON: options.failOn }),
+      ...(options.composeVersion === undefined
+        ? {}
+        : { DOCKER_STUB_COMPOSE_VERSION: options.composeVersion }),
     },
     encoding: "utf8",
     timeout: 15_000,
@@ -139,6 +151,21 @@ describe("docker:* scripts", { timeout: 20_000 }, () => {
     expect(run.status).toBe(1);
     expect(run.stderr).toBe(`${DOCKER_PROBLEMS.composeMissing.join("\n")}\n`);
     expect(run.dockerCalls).toEqual(["compose version"]);
+  });
+
+  it("explains a Compose too old for the compose file and runs nothing else", () => {
+    const run = runScript("docker:up", { docker: true, composeVersion: "v2.23.0" });
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toBe(`${DOCKER_PROBLEMS.composeTooOld.join("\n")}\n`);
+    expect(run.dockerCalls).toEqual(["compose version"]);
+  });
+
+  it("runs Compose 2.23.1, the oldest that reads the compose file", () => {
+    const run = runScript("docker:up", { docker: true, composeVersion: "v2.23.1" });
+
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.dockerCalls).toEqual([...checks, "compose up --detach --wait"]);
   });
 
   it("explains an engine that is not running and does not start Compose", () => {

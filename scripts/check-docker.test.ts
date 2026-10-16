@@ -103,6 +103,47 @@ describe("findDockerProblem", () => {
 
     expect(findDockerProblem(docker.run, "linux")).toBeUndefined();
   });
+
+  /** The result of `docker compose version` when it prints `output` and a newline. */
+  const composeOutput = (output: string): CommandResult => ({ status: 0, stdout: `${output}\n` });
+
+  // docker-compose.yml gives Redis its settings in a `configs` entry with inline `content`, which
+  // Compose refuses before 2.23.1. Distribution packages and Docker Desktop add suffixes, and
+  // some packages leave out the "v".
+  it.each([
+    "Docker Compose version v2.23.0",
+    "Docker Compose version v2.0.0",
+    "Docker Compose version 2.22.0+ds1-0ubuntu1",
+  ])("reports a Compose that is too old, on every system: %s", (output) => {
+    for (const platform of ["darwin", "linux"] as const) {
+      const docker = fakeDocker(composeOutput(output));
+
+      expect(findDockerProblem(docker.run, platform)).toBe("composeTooOld");
+      expect(docker.calls).toEqual(["docker compose version"]);
+    }
+  });
+
+  it.each([
+    "Docker Compose version v2.23.1",
+    "Docker Compose version v2.29.7-desktop.1",
+    "Docker Compose version 2.26.1-4",
+    "Docker Compose version v2.100.0",
+    "Docker Compose version v3.0.0",
+    "Docker Compose version v5.6.0",
+  ])("accepts %s", (output) => {
+    const docker = fakeDocker(composeOutput(output), engineVersion("29.9.0"));
+
+    expect(findDockerProblem(docker.run, "linux")).toBeUndefined();
+  });
+
+  it.each([
+    ["no version", ""],
+    ["a development build's version", "Docker Compose version dev"],
+  ])("lets Compose through when it prints %s", (_label, output) => {
+    const docker = fakeDocker(composeOutput(output));
+
+    expect(findDockerProblem(docker.run, "linux")).toBeUndefined();
+  });
 });
 
 // The command runner that the script uses when no stand-in is given.
