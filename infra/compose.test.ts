@@ -28,6 +28,7 @@ const serviceSchema = z.looseObject({
   ports: z.array(portSchema).optional(),
   volumes: z.array(z.string()).optional(),
   network_mode: z.string().optional(),
+  entrypoint: z.unknown().optional(),
   // Every health check sets all of its timings. start_period is also required by Compose
   // whenever start_interval is set.
   healthcheck: z
@@ -168,6 +169,14 @@ describe("docker-compose.yml", () => {
     expect(service("redis").command?.[0]).toBe("redis-server");
   });
 
+  it("keeps every image's own entrypoint", () => {
+    // The postgres and redis images' entrypoint scripts drop root privileges before they start
+    // the server, and an entrypoint such as ["true"] would let a placeholder exit with status 0.
+    for (const [name, definition] of Object.entries(compose.services)) {
+      expect(definition.entrypoint, name).toBeUndefined();
+    }
+  });
+
   it("turns on Redis's append-only file", () => {
     // Without it, Redis keeps only its default snapshots and a crash can lose an hour of writes.
     const command = service("redis").command ?? [];
@@ -275,12 +284,12 @@ describe("docker-compose.yml", () => {
 describe(".env.example", () => {
   const entries = envEntries(envExampleText);
 
-  it("lists every variable that docker-compose.yml reads", () => {
+  it("lists exactly the variables that docker-compose.yml reads, and the project name", () => {
     const names = new Set(composeInterpolations.map(({ name }) => name));
     expect(names.size).toBeGreaterThan(0);
-    for (const name of names) {
-      expect(entries.has(name), `${name} is missing from .env.example`).toBe(true);
-    }
+    // COMPOSE_PROJECT_NAME is read by Compose itself, not by the file. Any other entry that the
+    // file does not read would be a setting that silently does nothing.
+    expect([...entries.keys()].sort()).toEqual([...names, "COMPOSE_PROJECT_NAME"].sort());
   });
 
   it("shows the optional settings commented out, with the defaults Compose uses", () => {
