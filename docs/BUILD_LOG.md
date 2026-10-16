@@ -207,8 +207,11 @@ SIGINT to its process group; the scratch-clone hook recipe; the hooks in a new w
 after `pnpm install`). Every important behaviour was then broken on purpose, one change at a time,
 and each change was run through the checks CI runs (format, lint, type check and tests, and for the
 web app's build settings also the build, the build-warning check and the start check): 32 of a
-first 45 changes passed every check, and 14 of 34 more. Fixes, each with a test that fails
-without it:
+first 45 changes passed every check, and 16 of 34 more (two of them, in `.gitignore`, failed the
+format check here only because this checkout holds build output, and pass CI's checks in a fresh
+checkout). All but three of those 48 now fail a test: one removed a setting that did nothing,
+which is now gone (`transpilePackages`, below), and the two `.gitignore` changes are left as they
+were (see the end of this note). Fixes, each with a test that fails without it:
 
 - `pnpm build` failed once a route had been deleted or renamed after `next dev` ran, although
   `pnpm typecheck` passed (w0.V1.Bravo.1). The round-1 fix above assumed that `next build` leaves
@@ -226,15 +229,17 @@ without it:
   fail without the fix.
 - Behaviour that no check covered now has tests: the 10-second shutdown limit (an open request
   that never finishes: code 1 after 10 s), a close that fails (code 1) and a repeated SIGTERM
-  (`server.test.ts`); every tsconfig keeps the strict compiler settings and packages/shared gets
-  neither Node.js nor DOM types, and `pnpm typecheck` also checks the root files
+  (`server.test.ts`); every tsconfig keeps the strict compiler settings (ESLint noticed only three
+  of the nine flags missing) and packages/shared gets neither Node.js nor DOM types, and
+  `pnpm typecheck` also checks the root files
   (`typecheck.test.ts`); `pnpm test` runs every test file in the repository (`test-suite.test.ts`;
   without the apps' Vitest projects it had run 289 of 558 tests and passed); the ESLint config
   gives every package typescript-eslint's strict and stylistic rules, React packages the React
   Hooks and strict jsx-a11y rules, the Next.js app Next.js's rules and the API `no-console`
   (`eslint-config.test.ts`); the web app's dev and production servers default to 127.0.0.1:3000
-  (`apps/web/src/server-address.test.ts`); the root layout declares `lang="en-GB"`
-  (`apps/web/src/app/layout.test.tsx`); `.nvmrc` and `.node-version` name the major version that
+  (`apps/web/src/server-address.test.ts`); the root layout declares British English,
+  `lang="en-GB"` (`apps/web/src/app/layout.test.tsx`; ESLint's jsx-a11y rules require a `lang`
+  attribute but accept any language); `.nvmrc` and `.node-version` name the major version that
   `engines` asks for (`workspace.test.ts`).
 - Dropping the root Vitest config's "tooling" project, which holds the root tests (159 of them,
   the git hook tests among them) and `test-suite.test.ts` itself, passed every check.
@@ -243,7 +248,7 @@ without it:
 - The API's package scripts: nothing checked that `pnpm dev` and `pnpm start` read
   `apps/api/.env`, that stack traces from the production build point at the TypeScript source
   (both builds' source maps and the start script's `--enable-source-maps`), or that each build
-  empties `dist/` first and compiles no test files. Tests: four in
+  empties `dist/` first and compiles no test files. Tests: three in
   `apps/api/src/production.test.ts`, which run the scripts on its copy of the packages, and one in
   `server.test.ts`, which runs the dev script in a folder of its own.
 - `pnpm lint` without `--max-warnings 0`, on which CI's "fail on any warning" rests for ESLint,
@@ -258,7 +263,7 @@ without it:
 - Dropping `next typegen` from the web app's `typecheck` script passed every check, although
   `pnpm typecheck` and the hook then no longer check pages' and layouts' exports against Next.js's
   route types (`.next/types/validator.ts`). `typecheck.test.ts` now gives a copy of the app a page
-  whose default export is not a component and expects TS2344.
+  whose default export is not a component and expects a type error from that validator.
 - `transpilePackages` in `next.config.ts` did nothing: Next.js 16.4 compiles workspace packages
   by itself, and without it the tests, the build, CI's build-warning and start checks, and a Client
   Component that imports `@apex/shared` under `next dev` all worked. It is gone (docs/DECISIONS.md,
@@ -298,6 +303,25 @@ kill -0 $! 2>/dev/null && echo "still running" || echo "stopped"
 It logs only `"msg":"shutting down"` and prints "stopped". Before this round it also logged
 "Server listening at http://127.0.0.1:4000" and printed "still running" (stop it with
 `kill -KILL %1`).
+
+The final branch was checked again in a fresh clone: a frozen install, `pnpm peers check`, the
+format check, lint, the type check, 610 tests, the build, CI's build-warning check and its start
+check all passed; `pnpm dev` and `pnpm start` answered on ports 3040 and 4040 and stopped on
+Ctrl+C, leaving no process behind; and every "How to verify" command of this note and of
+instruction 2's round-2 note printed the counts it promises. In a fresh clone, a route that
+`next dev` had served and that was then deleted no longer failed `pnpm typecheck` or
+`pnpm build`; without the `tsconfigPath` setting, `next build` failed there with TS2307. Every
+change above except the `transpilePackages` one was then made again on the final branch, one at a
+time, and each failed a check: all that had passed every check now fail a test, apart from the two
+`.gitignore` changes.
+
+This round's tests change counts that the verify steps of other instructions quote, measured on
+this branch: `pnpm exec vitest run --project web` 47 tests (instruction 4 says 35); the API's
+`config.test.ts` and `server.test.ts` 52 (instruction 4's review fixes say 46);
+`pnpm --filter @apex/api test` 240 (instruction 8 says 231); instruction 8's `server.test.ts`
+filter "4 passed | 17 skipped (21)" (it says 15); and `--project scripts` 78 tests in 6 files
+(instructions 5 and 7 say 59 in 4; main already ran 77 in 5). The round's integration updates
+them, together with the other branches' tests.
 
 No owner actions. Left without tests, because they show at once: removing `.next/` or `dist/`
 from `.gitignore` passes CI's checks in a fresh checkout, but `git status` then lists the build
@@ -536,7 +560,7 @@ How to verify, from the repository root:
 
 ```sh
 pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  7 passed | 65 skipped (72)"
-pnpm exec vitest run typecheck.test.ts -t "root type check"  # "Tests  2 passed | 11 skipped (13)"
+pnpm exec vitest run typecheck.test.ts -t "root type check"  # "Tests  2 passed | 12 skipped (14)"
 ```
 
 In the scratch clone of the merge recipe above, run `git commit --no-edit` before
@@ -585,7 +609,11 @@ every change: each lint-staged flag, the merge-time `--diff=--staged --stash`, t
 hook's message file and each team rule in `commitlint.config.mjs`.
 
 `git-hooks.test.ts` now has 72 tests (64 before), so the counts of the commands above that run it
-are updated. It is the longest test file and its pre-commit tests run one after another, so a
+are updated. The integration note's count for the root type check tests was already wrong (main
+printed `Tests  1 passed | 2 skipped (3)`); it now gives this branch's count, which includes the
+round's new root type check test.
+
+`git-hooks.test.ts` is the longest test file and its pre-commit tests run one after another, so a
 commit that runs every test now takes about 27 s instead of about 19 s (measured three times in a
 fresh clone of this round's final branch, with 610 tests, at a load average of 3 to 4: 26.3 to
 27.1 s; a documentation change still takes 0.8 to 0.9 s and a source change with related tests
