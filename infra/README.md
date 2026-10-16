@@ -87,6 +87,15 @@ and data, even with other ports. To run a separate copy, give that checkout's `.
   the new password twice, then put the same password in `.env`. Alternatively, delete all data
   with `docker compose down --volumes` and start again.
 
+### Changing the PostgreSQL user or database name
+
+`POSTGRES_USER` and `POSTGRES_DB`, like the password, take effect only when the data volume is
+first created. The health check uses them on every check, though: if they no longer match the
+database, PostgreSQL logs `FATAL: role "..." does not exist` (or `database "..." does not exist`)
+every 10 seconds while the service still shows as healthy, and the psql command above fails. To
+use other names, set them in `.env` and start with a new, empty volume:
+`docker compose down --volumes` deletes all data first.
+
 ### Health checks
 
 - `postgres`: `pg_isready` over TCP. On the very first start the image initialises the database
