@@ -1229,14 +1229,18 @@ a ✅ line for each diagram and one for `/tmp/architecture.md`, and exits with c
 GitHub renders the diagrams too, once the repository is there.
 
 Check that the decisions log kept every earlier entry (472e750 is the last commit on main before
-the Phase 0 work started):
+the Phase 0 work started), in bash or zsh:
 
 ```sh
-git diff 472e750 -- docs/DECISIONS.md | grep -v '^---' | grep '^-'
+diff <(git show 472e750:docs/DECISIONS.md | grep '^### ') \
+  <(grep '^### ' docs/DECISIONS.md | head -n 18) && echo "every earlier entry is still there"
 ```
 
-It prints only lines of the old header (its introduction, `Rules:` and `Entry template:`), never a
-line of an entry.
+It prints `every earlier entry is still there`: the first 18 headings are still the template's
+`### <title>` and the titles of the 17 entries that 472e750 had, in the same order, so no entry was
+removed, renamed or moved, and every newer entry comes after them. The rules let a merged entry's
+facts be corrected, and some were: each correction says so in the entry, such as "(corrected in the
+wave w0 review, ...)". `git diff 472e750 -- docs/DECISIONS.md` shows every change.
 
 ```sh
 pnpm format:check   # "All matched files use Prettier code style!"
@@ -1284,6 +1288,21 @@ Delta reviewed this instruction and changed:
   a page logs while Next.js prerenders it gets through (Charlie's hand-off from the review of
   instruction 5). The sentence now says the output is checked for warnings and for errors that
   did not stop the build, and points to the DECISIONS entry that lists what the check cannot see.
+
+**Review fixes (wave w0, round 2)**
+
+Charlie reviewed this instruction and changed:
+
+- The check above that the decisions log kept its earlier entries. It used to print the removed
+  lines and promise "never a line of an entry", but corrections of fact that the rules allow
+  (from the review of instruction 1) had removed three lines inside old entries, so it printed
+  them and suggested tampering. It now compares the entry titles, which corrections leave alone.
+- `docs/ARCHITECTURE.md`: the list of responses that carry no `x-request-id` left out two that
+  Node.js sends itself (instruction 8's notes below give the list). The document now also says
+  that the API logs a 404, or a URL that its router rejects, without the raw URL, and that
+  writing to `process.stdout` or `process.stderr` directly would skip the logger. Its
+  deployment notes named only one of the two start flags that a Dockerfile must keep; they
+  name `--no-strip-types` too. All six diagrams still render with the command above.
 
 ## #7 - Developer scripts
 
@@ -1420,9 +1439,9 @@ for that case and exited with status 1.
   one JSON object per line with an ISO 8601 time. `LOG_FORMAT=pretty` prints readable lines for a
   terminal instead, through pino-pretty (a development dependency).
 - Request IDs (`apps/api/src/lib/request-id.ts`): a well-formed incoming `x-request-id` (8 to 64
-  letters, digits, `-` or `_`) is reused and anything else is replaced by a new UUID. Every
-  response sends the ID back in `x-request-id`, including the 400 and 414 responses that
-  Fastify's router sends for malformed URLs.
+  letters, digits, `-` or `_`) is reused and anything else is replaced by a new UUID. Responses
+  send the ID back in `x-request-id`, including the 400 and 414 responses that Fastify's router
+  sends for malformed URLs; the notes below list the few that go out before the ID can be added.
 - Request context (`apps/api/src/lib/request-context.ts`): an AsyncLocalStorage context entered in
   the app's first `onRequest` hook, so every line logged while a request is handled carries its
   ID as `reqId`, including lines from code that is never handed the request.
@@ -1435,8 +1454,9 @@ for that case and exited with status 1.
   `logFormat` (default `json`) and `logDestination` (for tests) instead of Fastify's `logger`
   option. `apps/api/src/config.ts` reads `LOG_FORMAT` (`json` or `pretty`, default `json`). Since
   Phase 0 was merged, the entrypoint passes instruction 4's `LOG_LEVEL` as `logLevel`.
-- `eslint.config.mjs`: `console` is an error in `apps/api/src` except `server.ts`, so every line
-  goes through the logger.
+- `eslint.config.mjs`: `console` is an error in `apps/api/src` except `server.ts`, so API code
+  cannot log around the logger with it. Writing to `process.stdout` or `process.stderr` directly
+  would also skip the logger, and no rule catches that.
 - Tests: unit tests for each module; `apps/api/src/logging.test.ts` for the whole app (every line
   of a request carries the same ID, including a service's line written without the request;
   concurrent requests; a body that arrives in pieces over a real connection; two requests on one
@@ -1448,7 +1468,7 @@ for that case and exited with status 1.
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm --filter @apex/api test   # all pass: "Tests  231 passed (231)" after the wave w0 review
+pnpm --filter @apex/api test   # all pass: "Tests  246 passed (246)" after round 2 of the review
 pnpm lint                      # exits with code 0
 pnpm typecheck                 # shared, api and web each report "Done"
 ```
@@ -1472,7 +1492,7 @@ curl -si http://127.0.0.1:4000/%zz
   `"/health?[Redacted]"`, and `secret-value` appears nowhere in the log.
 - The second shows a new UUID in `x-request-id`; the malformed ID is neither used nor logged.
 - The third returns `400 Bad Request` with an `x-request-id` header, and terminal 1 shows an
-  `incoming request` line and an error line with that ID.
+  `incoming request` line and a `malformed URL` line with that ID.
 
 Press Ctrl+C in terminal 1 (the API logs `"msg":"shutting down"`), then start it with readable
 logs and repeat a `curl`:
@@ -1508,19 +1528,22 @@ None.
 - `LOG_LEVEL` (instruction 4's environment loader) sets the level; the default is `info`.
 - Clients choose their request IDs when well formed, so an ID is a label for finding log lines,
   never something to trust.
-- Responses that Fastify sends before any hook runs carry no `x-request-id`: the 400, 431 and 408
-  it writes straight to the connection for a request it could not read (bytes that are not valid
-  HTTP, headers over Node.js's 16 KB limit, headers that arrive too slowly), logged at trace level
-  without an ID, and the 503 for a request arriving on an open connection during shutdown (its
-  log line has the ID).
+- Responses sent before any hook runs carry no `x-request-id`. Fastify writes a 400, 431 or 408
+  straight to the connection when Node.js cannot read a request (bytes that are not valid HTTP,
+  headers over Node.js's 16 KB limit, headers that arrive too slowly) and logs it at trace level
+  without an ID, and sends a 503 for a request arriving on an open connection during shutdown
+  (its log line has the ID). Node.js itself answers an HTTP/1.1 request without a `Host` header
+  (400) and an `Expect` header other than `100-continue` (417) without calling Fastify, so
+  nothing is logged, and closes the connection of a `CONNECT` request without answering.
 - Redaction works on key names and URL parts. A secret written into a message's text cannot be
   recognised, so never put one there.
 - Request lines record the client's IP address, which is personal data under UK GDPR; the privacy
   policy (#114) must cover logs.
 - Redaction parses and re-serialises each line: about 3.3 µs per line instead of 0.5 µs, measured
   on this Mac, which is negligible next to real routes.
-- Fastify logs client errors (4xx) at info level with a stack trace. Instruction 27's global error
-  handler should decide how errors are logged.
+- Fastify logs client errors (4xx) at info level with a stack trace, except a 404 and a URL that
+  its router rejects, which the API logs without the URL. Instruction 27's global error handler
+  should decide how errors are logged.
 - Only the API is covered: Next.js's own server output is not structured, and the web app does
   not yet pass request IDs on to the API (with the typed API client, #29).
 
@@ -1543,7 +1566,8 @@ Delta reviewed this instruction and changed:
 - The docs named two responses without `x-request-id`, one of them "the bare 400 that Node.js
   sends". Fastify writes that 400 itself, and also a 431 for headers over 16 KB (a very long URL
   is enough) and a 408 for headers that arrive too slowly. The notes above, `docs/ARCHITECTURE.md`
-  and the request ID decision now list them all.
+  and the request ID decision now list them (round 2 found two more, which Node.js sends itself:
+  see the notes above).
 - Written down, in the code and in `docs/ARCHITECTURE.md` ("Observability"), for the
   instructions that will need it:
   - a timer, socket or connection created while a request is handled keeps that request's
@@ -1569,4 +1593,56 @@ pnpm --filter @apex/api exec vitest run src/lib/redact.test.ts src/logging.test.
 pnpm --filter @apex/api exec vitest run src/server.test.ts -t "pino-pretty|redacted JSON line"
 ```
 
-The first ends with `Tests  135 passed (135)`, the second with `Tests  4 passed | 11 skipped (15)`.
+The first ends with `Tests  148 passed (148)`, the second with `Tests  4 passed | 13 skipped (17)`
+(round 2 added tests to both files).
+
+**Review fixes (wave w0, round 2)**
+
+Charlie reviewed this instruction and changed:
+
+- Redaction hid the credentials of only the first URL in a run of text without spaces, so a list
+  such as `redis://:pw1@a:6379,redis://:pw2@b:6379` logged the second password in full. Each URL
+  in such a run now gets its own check, still in linear time: a test with a million URLs in one
+  run fails if the scan goes back over the text for each of them.
+- `LOG_FORMAT=pretty` turned every failure to load pino-pretty into the advice that production
+  installs leave it out, and dropped the cause: a broken install (one of pino-pretty's own
+  dependencies missing, or an invalid package.json) printed only that line. Now only a pino-pretty
+  that Node.js cannot find gets the one-line advice; any other failure is printed as it is, with
+  its stack, and the API exits with code 1.
+- A URL that the router rejects (400 malformed URL, 414 route parameter too long) was logged with
+  its raw path three times, in the message, `err.message` and `err.stack`: 24,940 bytes for a
+  16 KB URL, which got around the 256-character cap on logged URLs. That line now says
+  "malformed URL" or "route parameter too long" and holds the error's code, under the request ID.
+- The notes above, `docs/ARCHITECTURE.md` and the request ID decision said that every response
+  carries the ID, or that Fastify sends all those that do not. Node.js itself answers an HTTP/1.1
+  request without a `Host` header (400) and an `Expect` header other than `100-continue` (417),
+  without calling Fastify or logging anything. Both are listed now, and new tests send the bytes
+  of each listed response except the slow 408 and the shutdown 503, and check the header and the
+  log.
+- Missing tests. Moving the request context hook out of `onRequest` broke no test, although 400
+  (invalid JSON) and 415 (unsupported content type) responses then lost `x-request-id`, as
+  validation errors from #28 would; two cases cover them now. The rule that makes `console` an
+  ESLint error in API code had no test; `api-console.test.ts` fails if it is deleted, narrowed,
+  made a warning or loses the entrypoint's exemption. The notes said the rule sends every line
+  through the logger, but writing to `process.stdout` or `process.stderr` directly would skip it;
+  they say so now.
+
+To check the fixes:
+
+```sh
+pnpm --filter @apex/api exec vitest run src/lib/redact.test.ts src/logging.test.ts
+pnpm --filter @apex/api exec vitest run src/server.test.ts -t "LOG_FORMAT=pretty"
+pnpm exec vitest run api-console.test.ts
+```
+
+They end with `Tests  148 passed (148)`, `Tests  4 passed | 13 skipped (17)` and
+`Tests  4 passed (4)`. To see the pino-pretty messages for yourself, from `apps/api`:
+
+```sh
+mv node_modules/pino-pretty /tmp/pino-pretty-link   # as a production install leaves it out
+LOG_FORMAT=pretty node src/server.ts; echo "exit code $?"
+mv /tmp/pino-pretty-link node_modules/pino-pretty   # put it back
+```
+
+The second command prints only "LOG_FORMAT=pretty needs pino-pretty, a development dependency
+that production installs leave out. Use LOG_FORMAT=json." and `exit code 1`.

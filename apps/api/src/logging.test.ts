@@ -242,13 +242,49 @@ describe("request IDs in the logs", () => {
     expect(output()).not.toContain("query-secret");
   });
 
+  // Fastify rejects these bodies before the route's later hooks (preValidation, preHandler) run, so
+  // the ID must be set in onRequest.
+  it.each([
+    ["is not valid JSON", "application/json", "{not json", 400, "FST_ERR_CTP_INVALID_JSON_BODY"],
+    ["has a type with no parser", "text/csv", "make,model", 415, "FST_ERR_CTP_INVALID_MEDIA_TYPE"],
+  ])(
+    "sends the ID back and logs it when the body %s",
+    async (_name, contentType, payload, statusCode, code) => {
+      const { app, lines } = await buildLoggedApp();
+      app.post("/cars", () => ({ saved: true }));
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/cars",
+        headers: { "content-type": contentType },
+        payload,
+      });
+
+      expect(response.statusCode).toBe(statusCode);
+      expect(response.json()).toMatchObject({ code });
+      const requestId = response.headers["x-request-id"];
+      expect(requestId).toMatch(UUID_V4);
+      expect(lines().map((line) => [line.msg, line.reqId])).toEqual([
+        ["incoming request", requestId],
+        [response.json<{ message: string }>().message, requestId],
+        ["request completed", requestId],
+      ]);
+    },
+  );
+
   // Fastify's router answers these itself, before any hook runs.
   it.each([
-    ["a malformed URL", "/cars/%zz?token=query-secret", 400, "FST_ERR_BAD_URL"],
-    ["an over-long route parameter", `/cars/${"x".repeat(101)}`, 414, "FST_ERR_MAX_PARAM_LENGTH"],
+    ["a malformed URL", "/cars/%zz?token=query-secret", 400, "FST_ERR_BAD_URL", "malformed URL"],
+    [
+      "an over-long route parameter",
+      `/cars/${"x".repeat(101)}`,
+      414,
+      "FST_ERR_MAX_PARAM_LENGTH",
+      "route parameter too long",
+    ],
   ])(
     "sends the ID back and logs it when the router rejects %s",
-    async (_name, url, statusCode, code) => {
+    async (_name, url, statusCode, code, message) => {
       const { app, output, lines } = await buildLoggedApp();
       app.get("/cars/:id", () => ({ ok: true }));
 
@@ -260,10 +296,28 @@ describe("request IDs in the logs", () => {
       expect(requestId).toMatch(UUID_V4);
       expect(lines().map((line) => line.reqId)).toEqual([requestId, requestId]);
       expect(lines()[0]?.msg).toBe("incoming request");
-      expect(lines()[1]).toMatchObject({ err: { code } });
+      expect(lines()[1]).toMatchObject({ level: 30, msg: message, res: { statusCode } });
+      // The error's type and code only: its message and stack would repeat the path.
+      expect(lines()[1]?.["err"]).toEqual({ type: "FastifyError", code });
       expect(output()).not.toContain("query-secret");
     },
   );
+
+  // The router's own error line would hold the path three times, each cut only at 8192 characters.
+  it("logs a URL that the router rejects once, shortened like any other", async () => {
+    const { app, output, lines } = await buildLoggedApp();
+    app.get("/cars/:id", () => ({ ok: true }));
+    const url = `/cars/%zz${"x".repeat(5000)}`;
+
+    const response = await app.inject({ url });
+
+    expect(response.statusCode).toBe(400);
+    expect(lines()[0]).toMatchObject({
+      msg: "incoming request",
+      req: { url: `${url.slice(0, 256)}... (${String(url.length - 256)} more characters)` },
+    });
+    expect(output()).not.toContain("x".repeat(300));
+  });
 
   it("reuses a well-formed x-request-id when the router rejects the URL", async () => {
     const { app } = await buildLoggedApp();
@@ -391,6 +445,46 @@ describe("request IDs over a real connection", () => {
       ["MX-5", first.requestId],
       ["GR86", second.requestId],
     ]);
+  });
+
+  // docs/ARCHITECTURE.md ("Observability") lists the responses that go out before any hook can
+  // add the header. Fastify writes the first two straight to the connection when Node.js's parser
+  // rejects the request, logging them at trace level without an ID; Node.js answers the last two
+  // itself, without calling Fastify, so nothing is logged at all.
+  it.each([
+    ["bytes that are not HTTP", "NOT HTTP\r\n\r\n", 400, ["client error"]],
+    [
+      "headers over Node.js's 16 KB limit",
+      `GET /health HTTP/1.1\r\nHost: x\r\nX-Big: ${"y".repeat(20_000)}\r\n\r\n`,
+      431,
+      ["client header_overflow"],
+    ],
+    [
+      "an HTTP/1.1 request without a Host header",
+      "GET /health HTTP/1.1\r\nConnection: close\r\n\r\n",
+      400,
+      [],
+    ],
+    [
+      "an Expect header other than 100-continue",
+      "GET /health HTTP/1.1\r\nHost: x\r\nExpect: tea\r\nConnection: close\r\n\r\n",
+      417,
+      [],
+    ],
+  ])("sends no ID with the response to %s", async (_name, bytes, statusCode, logged) => {
+    const { app, lines } = await buildLoggedApp();
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const linesBefore = lines().length;
+
+    const reply = await sendRaw(new URL(address), bytes);
+
+    expect(reply.slice(0, reply.indexOf("\r\n"))).toMatch(
+      new RegExp(`^HTTP/1\\.1 ${String(statusCode)} `),
+    );
+    expect(reply.toLowerCase()).not.toContain("x-request-id");
+    const written = lines().slice(linesBefore);
+    expect(written.map((line) => line.msg)).toEqual(logged);
+    expect(written.map((line) => line.reqId)).toEqual(logged.map(() => undefined));
   });
 });
 

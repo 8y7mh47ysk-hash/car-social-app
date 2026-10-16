@@ -69,20 +69,36 @@ function preload(source: string): string[] {
   return ["--import", `data:text/javascript,${encodeURIComponent(source)}`];
 }
 
+/**
+ * Node.js arguments that make resolving `specifier` fail with an error that has `code` and
+ * `message`, as Node.js fails for a package that is missing or broken. Only imports and requires
+ * from a file whose URL contains `from` fail (by default, all of them).
+ */
+function failToResolve(specifier: string, code: string, message: string, from = ""): string[] {
+  return preload(`
+    import { registerHooks } from "node:module";
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        if (
+          specifier === ${JSON.stringify(specifier)} &&
+          String(context.parentURL).includes(${JSON.stringify(from)})
+        ) {
+          throw Object.assign(new Error(${JSON.stringify(message)}), {
+            code: ${JSON.stringify(code)},
+          });
+        }
+        return nextResolve(specifier, context);
+      },
+    });
+  `);
+}
+
 /** Makes importing pino-pretty fail as it does in a production install, which leaves it out. */
-const WITHOUT_PINO_PRETTY = preload(`
-  import { registerHooks } from "node:module";
-  registerHooks({
-    resolve(specifier, context, nextResolve) {
-      if (specifier === "pino-pretty") {
-        throw Object.assign(new Error("Cannot find package 'pino-pretty'"), {
-          code: "ERR_MODULE_NOT_FOUND",
-        });
-      }
-      return nextResolve(specifier, context);
-    },
-  });
-`);
+const WITHOUT_PINO_PRETTY = failToResolve(
+  "pino-pretty",
+  "ERR_MODULE_NOT_FOUND",
+  "Cannot find package 'pino-pretty'",
+);
 
 /**
  * Adds `GET /fail` to the entrypoint's app through the diagnostics channel on which Fastify
@@ -351,6 +367,26 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
         "leave out. Use LOG_FORMAT=json.\n",
     );
   });
+
+  // An installed pino-pretty that cannot load is a broken install, not a production one: the
+  // advice to use JSON would hide what needs fixing.
+  it.each([
+    ["one of its own dependencies is missing", "colorette", "MODULE_NOT_FOUND", "/pino-pretty/"],
+    ["its package.json is invalid", "pino-pretty", "ERR_INVALID_PACKAGE_CONFIG", ""],
+  ])(
+    "refuses LOG_FORMAT=pretty when %s, printing the real cause",
+    async (_name, specifier, code, from) => {
+      const cause = `${specifier} cannot be loaded (${code}, a broken install)`;
+      const server = startServer(
+        { LOG_FORMAT: "pretty" },
+        failToResolve(specifier, code, cause, from),
+      );
+
+      expect(await server.exited).toEqual({ code: 1, signal: null });
+      expect(server.output()).toContain(cause);
+      expect(server.output()).not.toContain("production installs");
+    },
+  );
 
   it.each([
     ["an uncaught exception", "throw", "uncaughtException"],

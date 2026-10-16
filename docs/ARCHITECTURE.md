@@ -343,8 +343,10 @@ flowchart TB
   (#104).
 - The host updates itself, denies inbound traffic by default, allows SSH only over Tailscale, and
   runs the services as a separate non-admin user (#105).
-- The production API runs compiled JavaScript with `node --conditions=@apex/dist`, which its
-  future Dockerfile must keep (see "Workspace packages are consumed as TypeScript source" in
+- The production API runs compiled JavaScript, and its future Dockerfile must keep two flags
+  of its start script: `--conditions=@apex/dist` loads the compiled packages/shared, and
+  `--no-strip-types` makes a start without that condition fail instead of running the
+  TypeScript source (see "The production API start refuses TypeScript source" in
   [DECISIONS.md](DECISIONS.md)).
 - CI runs on GitHub Actions for every push to main and every pull request (built #5): a
   frozen-lockfile install, then peer dependency, formatting, lint, type and test checks, the
@@ -367,17 +369,23 @@ flowchart TB
   the request is handled carries it as `reqId`, including lines from code that is never handed
   the request (an AsyncLocalStorage context, in `apps/api/src/lib/request-context.ts`). Clients
   choose their own IDs, so an ID is only a label for finding log lines, never something to trust.
-  Responses that Fastify sends before any hook runs carry no ID: those it writes straight to the
-  connection for a request it could not read (400 for bytes that are not valid HTTP, 431 for
-  headers over Node.js's 16 KB limit, 408 for headers that arrive too slowly), which it logs at
-  trace level without an ID, and the 503 for a request that arrives on an open connection while
-  the server shuts down (its log line has the ID).
+  A few responses go out before any hook can add the header, so they carry no ID. Fastify writes
+  three straight to the connection when Node.js cannot read a request, and logs them at trace
+  level without an ID: 400 for bytes that are not valid HTTP, 431 for headers over Node.js's 16 KB
+  limit and 408 for headers that arrive too slowly. It answers a request that arrives on an open
+  connection while the server shuts down with a 503, whose log line has the ID. Node.js itself
+  answers two kinds of request without ever calling Fastify, so nothing is logged at any level:
+  an HTTP/1.1 request without a `Host` header (400) and an `Expect` header other than
+  `100-continue` (417); it also closes the connection of a `CONNECT` request without answering.
+  `apps/api/src/logging.test.ts` checks the 400s, the 431 and the 417.
   A route that writes its response to `reply.raw` itself, as a Server-Sent Events stream might
   (#72), sends only the headers it writes there, so it must include `reply.getHeaders()`.
 - **Redaction.** Before a line is written, the values of sensitive keys (passwords, tokens,
   cookies, authorization headers, API keys and similar) are replaced with `[Redacted]` at any
   depth; URL credentials, query strings and fragments are hidden in every string; strings are cut
-  to 8192 characters and request URLs to 256. Never put a secret in a log message: inside free
+  to 8192 characters and request URLs to 256. Fastify's lines for a 404 and for a URL its router
+  rejects would repeat the raw URL, so the API logs them without it ("route not found",
+  "malformed URL", "route parameter too long"). Never put a secret in a log message: inside free
   text only URL parts can be recognised. For the same reason, log parsed objects rather than raw
   bodies as strings (a raw webhook body, #91, is free text to the logger), and never put a secret
   in a URL path, which is logged as it is: tokens in links (#39, #41) go in the query string.
@@ -395,7 +403,9 @@ flowchart TB
   dependencies only (#102), can log JSON only.
 - **Writing log lines.** Route handlers and hooks log with `request.log`. Code that has no request
   (services, jobs) gets `app.log`, or a child of it, when it is created; the request's ID is
-  still added to its lines. ESLint rejects `console` calls in API code. A timer, socket or
+  still added to its lines. ESLint rejects `console` calls in API code (`api-console.test.ts`
+  checks the rule). Writing to `process.stdout` or `process.stderr` directly would skip the
+  logger too, and no rule catches that, so API code must not do it. A timer, socket or
   connection created while a request is handled keeps that request's context for good, so its
   later lines carry that request's ID: create long-lived clients, pools and intervals at startup.
 - **Next steps for request IDs.** When the web app calls the API from the server it should pass
