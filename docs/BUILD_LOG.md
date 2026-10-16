@@ -647,6 +647,11 @@ No owner actions.
   has 76 tests (72 on Delta's branch and 68 on Alpha's), and every command above that runs it
   gives the merged count; the "What changed" list of rerun triggers names both branches'
   additions.
+- Run times measured again on `main` after the merges, with 698 tests, in a fresh clone,
+  committing from a non-interactive shell, three rounds of each at a load average of 2 to 6: a
+  documentation change 0.8 to 1.0 s, a source change with related tests 4.5 to 4.6 s, and a
+  change that runs every test 26.6 to 26.8 s. The README's figures still hold; it now gives this
+  measurement's test count.
 
 ## #3 - Docker Compose services
 
