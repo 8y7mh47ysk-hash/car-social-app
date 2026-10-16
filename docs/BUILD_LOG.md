@@ -891,6 +891,17 @@ pnpm test && pnpm typecheck && pnpm lint && pnpm format:check   # all exit with 
 With Docker, run the commands under "How to verify" above: Redis's command holds only the config
 file, and the password and the append-only file still apply.
 
+**Integration fixes (wave w0, round 2)**
+
+- `infra/README.md`'s points to carry over into the apps' future images said only that the API's
+  production start needs `--conditions=@apex/dist`. Round 2 fixed the same note in
+  `docs/ARCHITECTURE.md` (instruction 6) and in docs/DECISIONS.md (instruction 1) after Bravo
+  reported it (w0.V1.Bravo.4), but not this copy. It now also names `--no-strip-types`, which
+  makes a start without the condition fail instead of running packages/shared's TypeScript
+  source. Documentation only.
+- The `docker:*` scripts now refuse a Compose older than 2.23.1, which this file needs since the
+  round-2 review (see instruction 7's integration note).
+
 ## #4 - Typed environment loader
 
 **What changed**

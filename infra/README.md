@@ -147,8 +147,11 @@ placeholders behind while it deletes the network they were attached to; the next
 
 When the apps get real images (at the latest with instruction 102, which hardens every service's
 container), the placeholders become builds from the repository root. Points to carry over: the
-API's production start needs `node --conditions=@apex/dist` (see `docs/DECISIONS.md`); inside a
-container it must listen on `API_HOST=0.0.0.0` while its published port stays on `127.0.0.1`;
+API's production start needs both flags of its `start` script, `--conditions=@apex/dist`, which
+loads the compiled packages/shared, and `--no-strip-types`, which makes a start without that
+condition fail instead of running the TypeScript source (see "The production API start refuses
+TypeScript source" in `docs/DECISIONS.md`); inside a container it must listen on
+`API_HOST=0.0.0.0` while its published port stays on `127.0.0.1`;
 and once the API image has a health check, `web` should wait for `service_healthy` instead of
 `service_started`.
 
