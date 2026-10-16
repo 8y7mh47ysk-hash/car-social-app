@@ -479,7 +479,7 @@ were not run there; the review ran them in a Linux VM, see "Review fixes (wave w
 ```sh
 cp .env.example .env && chmod 600 .env   # then set POSTGRES_PASSWORD and REDIS_PASSWORD;
                          # `openssl rand -hex 32` prints a suitable value (run it once for each)
-docker compose config --quiet                     # no output, exit code 0
+docker compose --profile '*' config --quiet       # no output, exit code 0 (every profile)
 docker compose config --services                  # postgres and redis only
 docker compose --profile app config --services    # postgres, redis, api and web
 docker compose up -d --wait                       # both containers reported "Healthy"
@@ -560,7 +560,9 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
 - The apps do not use PostgreSQL or Redis yet; that starts in Phase 2. Connection URLs are in
   `infra/README.md`.
 - Every `docker compose` command for this project needs the two passwords, so CI must pass
-  throwaway values: `POSTGRES_PASSWORD=ci REDIS_PASSWORD=ci docker compose config --quiet`.
+  throwaway values, as in
+  `POSTGRES_PASSWORD=ci REDIS_PASSWORD=ci docker compose --profile '*' config --quiet`; without
+  `--profile '*'`, Compose does not check the placeholders in the `app` profile.
 - The tests read `docker-compose.yml` and `.env.example` from disk, so `vitest related` (used by
   the pre-commit hook from instruction 2) cannot connect a change to those files with
   `infra/compose.test.ts`. Since Phase 0 was merged, both are in the root Vitest config's

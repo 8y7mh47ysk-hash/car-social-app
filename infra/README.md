@@ -173,9 +173,11 @@ and once the API image has a health check, `web` should wait for `service_health
 
 ### Checking the file
 
-- `docker compose config --quiet` validates the file. It needs the two passwords, from `.env` or
-  the environment; CI can pass throwaway values:
-  `POSTGRES_PASSWORD=ci REDIS_PASSWORD=ci docker compose config --quiet`.
+- `docker compose --profile '*' config --quiet` validates the whole file, as CI does, and prints
+  nothing when it is valid. Without `--profile '*'`, Compose skips the services in the `app`
+  profile, so a mistake in a placeholder (such as a `depends_on` that names no service) passes
+  unnoticed. It needs the two passwords, from `.env` or the environment, for example throwaway
+  values: `POSTGRES_PASSWORD=ci REDIS_PASSWORD=ci docker compose --profile '*' config --quiet`.
 - `pnpm test` includes `infra/compose.test.ts`, static checks that need no Docker: only
   `postgres` and `redis` start by default, ports stay on `127.0.0.1`, passwords have no default,
   PostgreSQL comes from the pgvector image, Redis keeps its append-only file, the health checks
@@ -202,4 +204,5 @@ Ground rules that apply to everything added here:
 
 - No secrets in committed files. Commit templates such as `.env.example` only.
 - Ollama, PostgreSQL and Redis are never exposed to the internet (playbook section 2).
-- Prefer configuration that can be validated locally, for example `docker compose config --quiet`.
+- Prefer configuration that can be validated locally, for example
+  `docker compose --profile '*' config --quiet`.
