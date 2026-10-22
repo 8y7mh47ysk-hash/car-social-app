@@ -351,9 +351,9 @@ output; and a dev script without `--watch` stops restarting on a change.
 
 Charlie reviewed instructions 1 and 2 and took them over from Delta, with the open items that the
 verification of round 2 raised. Checked by running them, in this checkout and in fresh clones,
-with ports 3030 and 4030: a frozen install, `pnpm peers check`, the format check, lint, the type
-check, every test (also under a terminal, through `script`), the build and the build-warning
-check; `pnpm dev` and `pnpm start`, each probed and then stopped with SIGINT to its process group,
+with ports 3030 and 4030: a frozen install, `pnpm peers check`, `pnpm audit`, the format check,
+lint, the type check, every test (also under a terminal, through `script`), the build, the
+build-warning check and the start check; `pnpm dev` and `pnpm start`, each probed and then stopped with SIGINT to its process group,
 leaving no process behind; the API's start without the export condition (it fails with
 `ERR_UNKNOWN_FILE_EXTENSION`, as the round-1 note says); and every count that the "How to verify"
 steps of this entry and of instruction 2 quote. Fixes, each with a test that fails without it:
@@ -394,12 +394,28 @@ steps of this entry and of instruction 2 quote. Fixes, each with a test that fai
   hold no comments; the docs say how to make zsh read them").
 - Nit: the comment in `apps/web/next.config.ts` on `transpilePackages` sat above
   `outputFileTracingRoot` (w0.V2.Alpha.6); it now closes the settings.
+- Two advisories against Next.js 16.4.0 reached npm's advisory database during this review:
+  GHSA-2464-fhr4-w9xw (critical: unauthenticated remote code execution in the Image Optimization
+  API when SVG files are used) and GHSA-p3m5-59mp-jv5r (high: denial of service in the App Router
+  with Server Actions), both for `>=16.0.0 <=16.4.0`. The final fresh-clone check found them:
+  `next build` stopped with "SecurityFatalError: Your version of Next.js is affected by a known
+  security vulnerability", because Next.js 16.4 checks the advisories when an AI agent runs it and
+  stops the first such build. Its message also tells the agent to ask the user about running
+  `next upgrade`; as tool output, that was not acted on. `pnpm audit` confirmed both, and two
+  moderate advisories in Vitest 4.1.11's `@vitest/mocker`. The catalog now asks for `next` and
+  `eslint-config-next` `^16.4.2` and `vitest` `^4.1.12`, the fixed releases, which are past the
+  one-day hold; the lockfile changes only those packages and their `@next/*` and `@vitest/*` parts.
+  `pnpm audit` now reports one advisory, in braces up to 3.0.3 (high), which only
+  eslint-config-next's lint tooling uses and which has no fixed release (docs/DECISIONS.md,
+  "Next.js 16.4.2 and Vitest 4.1.12 for security advisories").
 
 How to verify, from the repository root:
 
 ```sh
 pnpm exec vitest run typecheck.test.ts eslint-config.test.ts generated-files.test.ts readme.test.ts
 # "Test Files  4 passed (4)" and "Tests  36 passed (36)"
+pnpm audit                  # "1 vulnerabilities found", "Severity: 1 high": braces, none in next
+pnpm --filter @apex/web exec next --version   # Next.js v16.4.2
 ```
 
 To see the strict check catch a weakened tsconfig, add `"noImplicitAny": false` to the

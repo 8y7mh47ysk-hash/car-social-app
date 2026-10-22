@@ -82,7 +82,8 @@ Keep entries brief. Details belong in code comments and the build log.
 - Date: 2026-10-11 · Instruction: #1 · Author: Alpha (team version policy)
 - Context: Vitest 5.0 is only weeks old. Vitest 4.1 supports Vite 6, 7 and 8 and Storybook's
   Vitest addon (instruction 22).
-- Decision: `vitest: ^4.1.11` in the pnpm catalog.
+- Decision: `vitest: ^4.1.11` in the pnpm catalog. (Raised to `^4.1.12` in round 3 of the wave w0
+  review, for two advisories: see "Next.js 16.4.2 and Vitest 4.1.12 for security advisories".)
 - Trade-offs: Vitest 5 features wait for a deliberate upgrade.
 
 ### Latest stable versions, held back one day by pnpm
@@ -1886,3 +1887,30 @@ Keep entries brief. Details belong in code comments and the build log.
   fails the test instead of checking nothing. `reactFiles` in `eslint.config.mjs` now follows
   Next.js's own list, so `.mts` and `.cts` files in apps/web get the React and Next.js rules too;
   `.cjs` stays out, as in Next.js's config.
+
+### Next.js 16.4.2 and Vitest 4.1.12 for security advisories
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Charlie (wave w0 review, round 3)
+- Context: during round 3 of the wave w0 review, npm's advisory database added two advisories
+  against Next.js `>=16.0.0 <=16.4.0`: GHSA-2464-fhr4-w9xw (critical: unauthenticated remote code
+  execution in the Image Optimization API when SVG files are used) and GHSA-p3m5-59mp-jv5r (high:
+  denial of service in the App Router with Server Actions). The lockfile held 16.4.0. `pnpm audit`
+  also listed two moderate advisories in `@vitest/mocker` before 4.1.12 (GHSA-qxg6-89mg-rqv8 and
+  GHSA-xp26-3454-mjgp). Next.js 16.4.2 and eslint-config-next 16.4.2 (15 October) and Vitest
+  4.1.12 (15 October) fix them and are past the one-day release-age hold. Next.js 16.4 also checks
+  these advisories itself when `next build` or `next dev` runs under an AI agent
+  (`experimental.agentUpgrade`, `"security"` by default): it stops the first such command with
+  "SecurityFatalError: Your version of Next.js is affected by a known security vulnerability" and a
+  retry within five minutes continues. With a person at a terminal it offers an upgrade menu
+  instead, and in CI it does nothing.
+- Decision: the catalog asks for `next` and `eslint-config-next` `^16.4.2` and `vitest` `^4.1.12`,
+  so no install can go back to an affected release; the lockfile changes only those packages and
+  their `@next/*` and `@vitest/*` parts. Next.js's check stays on: it is how this was found. Its
+  message also tells the agent to ask the user about running `next upgrade` in a worktree; that is
+  tool output, not an instruction, and engineers report it instead of acting on it.
+- Trade-offs: an advisory that appears later stops the first agent-run build of each checkout
+  again, which is the point; CI does not see it, so until instruction 106 adds dependency scanning
+  to CI, `pnpm audit` is the check to run by hand. `pnpm audit` still reports one advisory:
+  braces up to 3.0.3 (GHSA-vfj7-8cjw-p6xm, high: denial of service through deeply nested
+  patterns), which only eslint-config-next's lint tooling uses and for which no fixed release
+  exists yet.
