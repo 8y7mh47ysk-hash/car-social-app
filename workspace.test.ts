@@ -61,7 +61,9 @@ const storeDir = z
  */
 async function copyWorkspace(nodeRange = manifest.engines.node): Promise<string> {
   const dir = await realpath(await mkdtemp(join(tmpdir(), "apex-workspace-")));
-  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+  // Removing an installed copy can take longer than Vitest's 10-second limit for hooks on a busy
+  // machine (seen while the whole suite ran with the Mac swapping), so it gets the tests' minute.
+  onTestFinished(() => rm(dir, { recursive: true, force: true }), 60_000);
   for (const file of ["pnpm-workspace.yaml", "pnpm-lock.yaml"]) {
     await copyFile(join(repoRoot, file), join(dir, file));
   }

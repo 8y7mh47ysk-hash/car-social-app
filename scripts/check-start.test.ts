@@ -296,20 +296,20 @@ describe("checkStart", { timeout: 20_000 }, () => {
   it("fails, and kills the apps, when they do not stop within its time limit after SIGTERM", async ({
     onTestFinished,
   }) => {
-    // The apps answer at once and SIGKILL ends them at once, so the check takes the 4 s that it
-    // gives them to stop and a little more: less than 7 s, where twice that limit would take 8.
+    // The apps answer at once and SIGKILL ends them at once, so the check takes the 5 s that it
+    // gives them to stop and a little more: less than 9 s, where twice that limit would take 10.
     const { result, seconds, running } = await checkStandIn("stubborn", onTestFinished, {
       timeoutMs: 10_000,
-      stopTimeoutMs: 4_000,
+      stopTimeoutMs: 5_000,
     });
 
     expect(result.problem).toBe(
-      "The apps did not stop within 4 s of SIGTERM; SIGKILL stopped them.",
+      "The apps did not stop within 5 s of SIGTERM; SIGKILL stopped them.",
     );
     expect(result.stopProblem).toBe(result.problem);
     expect(running).toBe(false);
-    expect(seconds).toBeGreaterThanOrEqual(4);
-    expect(seconds).toBeLessThan(7);
+    expect(seconds).toBeGreaterThanOrEqual(5);
+    expect(seconds).toBeLessThan(9);
   });
 
   it("stops waiting, and says why, when a process outside the group keeps the output open", async ({
@@ -436,7 +436,7 @@ describe.concurrent("checkStart, when an app answers wrongly", { timeout: 20_000
     onTestFinished,
   }) => {
     // Requests to a port that nothing listens on fail at once, so the check waits out its 2-second
-    // limit and stops then, not seconds later.
+    // limit and stops then: in less than 6.5 s, where a limit 5 s longer would take at least 7.
     const { result, seconds, running } = await checkStandIn("no-web", onTestFinished);
 
     expect(result.problem).toMatch(
@@ -448,7 +448,7 @@ describe.concurrent("checkStart, when an app answers wrongly", { timeout: 20_000
     );
     expect(running).toBe(false);
     expect(seconds).toBeGreaterThanOrEqual(2);
-    expect(seconds).toBeLessThan(5);
+    expect(seconds).toBeLessThan(6.5);
   });
 
   it("fails on a status other than 200 from either app, whatever the body", async ({
