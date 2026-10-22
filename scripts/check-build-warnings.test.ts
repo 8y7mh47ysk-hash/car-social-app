@@ -147,6 +147,26 @@ describe("findWarnings", () => {
     expect(findWarnings(log)).toHaveLength(3);
   });
 
+  it("finds the API's JSON log lines at level warn (40) or above, which need no marker", () => {
+    // As pnpm prints them while the API runs, in the API's format (pino's numeric levels).
+    const logged = (level: number, msg: string): string =>
+      `apps/api start: ${JSON.stringify({ level, time: "2026-10-11T09:30:00.000Z", pid: 4242, hostname: "runner", msg })}`;
+    const log = [
+      logged(30, "Server listening at http://127.0.0.1:4000"),
+      logged(40, "probe: a warning"),
+      logged(50, "probe: an error"),
+      logged(60, "probe: a fatal error"),
+      'apps/api start: {"level":"warn","msg":"not the API\'s format"}',
+      "apps/web build: > 3 |   const options = { level: 50 };",
+    ].join("\n");
+
+    expect(findWarnings(log)).toEqual([
+      logged(40, "probe: a warning"),
+      logged(50, "probe: an error"),
+      logged(60, "probe: a fatal error"),
+    ]);
+  });
+
   it("finds a warning that has colour codes and Windows line endings", () => {
     const log =
       "\u001b[33m\u001b[1m⚠\u001b[22m\u001b[39m Invalid next.config.ts options detected: \r\nok\r\n";

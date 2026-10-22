@@ -28,7 +28,8 @@ const WARNING =
  * answers /health with another body, "health-503" with status 503; "no-web" serves only the API;
  * "web-500" answers the page with status 500, "web-text" as text/plain, "web-no-end" without
  * </html>, and "web-hang" never; "warn" prints a warning line, as `next start` does for a
- * configuration it cannot serve; "exit" prints an error and exits with code 3; "stubborn" ignores
+ * configuration it cannot serve; "log-warn" logs an info line and then a warning as the API does
+ * (JSON lines, with pnpm's prefix); "exit" prints an error and exits with code 3; "stubborn" ignores
  * SIGTERM; "error-on-stop" prints an error line on SIGTERM, as pnpm does for the apps it stops.
  * Two modes start a helper process and add its process ID to the file: "escaped", one that leaves
  * the process group but keeps the output open for 30 s, and "left-behind", one that stays in the
@@ -87,6 +88,13 @@ if (modes.has("left-behind")) {
 }
 if (modes.has("warn")) {
   console.log(WARNING);
+}
+if (modes.has("log-warn")) {
+  const logged = (level, msg) =>
+    "apps/api start: " +
+    JSON.stringify({ level, time: new Date().toISOString(), pid: process.pid, hostname: "ci", msg });
+  console.log(logged(30, "Server listening at http://127.0.0.1:" + process.env.API_PORT));
+  console.log(logged(40, "probe: a warning that the API logs as it starts"));
 }
 
 const apiHost = process.env.API_HOST ?? "127.0.0.1";
@@ -342,6 +350,19 @@ describe("checkStart", { timeout: 20_000 }, () => {
     );
     expect(result.stopProblem).toBeUndefined();
     expect(running).toBe(false);
+  });
+
+  it("fails when the API logs a warning while the apps start", async ({ onTestFinished }) => {
+    // The API logs JSON lines; one at level 40 (a warning) logged without an Error object holds
+    // none of the markers that Next.js and Node.js warnings have. Its info line does not count.
+    const { result } = await checkStandIn("log-warn", onTestFinished);
+
+    expect(result.problem?.split("\n")).toEqual([
+      "The apps printed 1 warning or error line(s) while they started, and CI fails on any:",
+      expect.stringMatching(
+        /^ {2}apps\/api start: \{"level":40,.*"msg":"probe: a warning that the API logs as it starts"\}$/u,
+      ),
+    ]);
   });
 
   it("does not count what the apps print while they stop", async ({ onTestFinished }) => {

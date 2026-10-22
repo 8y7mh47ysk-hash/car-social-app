@@ -7,7 +7,8 @@
 // check shows that the apps start and answer, not that each one shuts down cleanly (the API's own
 // tests, apps/api/src/server.test.ts and production.test.ts, check its shutdown). CI fails on any
 // warning, so the check also fails when the apps print a warning or an error line while they start
-// (the markers of scripts/check-build-warnings.ts); what they print while they stop is not checked.
+// (as scripts/check-build-warnings.ts finds them, the API's log lines at level warn or above
+// included); what they print while they stop is not checked.
 //
 // Usage, from the repository root, after `pnpm build`: node scripts/check-start.ts
 // Exit status: 0 when both apps answered without printing a warning and then stopped, 1 otherwise.
