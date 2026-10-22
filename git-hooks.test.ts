@@ -502,7 +502,8 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       "src/module.mts",
       "src/view.tsx",
     ];
-    const other = ["src/data.json", "src/theme.css"];
+    // Dotfiles too: several rerun triggers in vitest.config.ts are dotfiles or in dot folders.
+    const other = [".github/workflows/ci.yml", ".nvmrc", "src/data.json", "src/theme.css"];
     for (const file of [...code, ...other]) {
       await repo.write(file, "content\n");
     }
@@ -968,13 +969,16 @@ describe("the pre-commit hook's test step", { timeout: 60_000 }, () => {
     ".husky/pre-commit",
     "commitlint.config.mjs",
     "lint-staged.config.ts",
-    // Files that the infra, env-file, CI workflow and env-access tests read instead of importing.
+    // Files that the infra, env-file, CI workflow, env-access and workspace tests read instead of
+    // importing.
     "docker-compose.yml",
     ".env.example",
     "apps/web/.env.example",
     ".gitignore",
     ".github/workflows/ci.yml",
     "eslint.config.mjs",
+    ".nvmrc",
+    ".node-version",
     // Env files, staged only with `git add --force`: env-files.test.ts then fails the commit.
     "apps/api/.env",
     "apps/web/.env.local",

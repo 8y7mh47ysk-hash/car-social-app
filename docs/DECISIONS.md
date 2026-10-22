@@ -1764,3 +1764,21 @@ Keep entries brief. Details belong in code comments and the build log.
   `docker compose` commands are not checked and fail with Compose's own message; infra/README.md
   gives the minimum. Current Docker Desktop, OrbStack and Docker's own Linux packages are far
   newer, so the check is for old distribution packages.
+
+### README changes do not run every test
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Charlie (wave w0 review, round 3)
+- Context: "Files that tests read from disk also make the pre-commit hook run every test" makes
+  such files rerun triggers. Round 2 of the wave w0 review added tests that read three more files
+  without making them triggers: `workspace.test.ts` reads `.nvmrc` and `.node-version`, and
+  `git-hooks.test.ts` runs the recovery steps in the README's section "Git hooks". A commit that
+  changed only one of them ran no tests in the hook.
+- Decision: `.nvmrc` and `.node-version` join the root `forceRerunTriggers`, and
+  `git-hooks.test.ts` checks both. README.md does not: a README change runs no tests in the hook,
+  and CI runs the README's steps with every other test.
+- Trade-offs: README.md changes far more often than the other triggers (in 38 of the first 236
+  commits, 27 of them with only documentation), and as a trigger it would take such a commit from
+  about 1 s to about 30 s, which invites `--no-verify`. A lint-staged task that runs only the
+  README's tests would be another list to keep in step with the tests, as the earlier entry says.
+  So a broken recovery step in the README is caught by CI, not by the hook. Revisit if the
+  README's tests move into a test file of their own, which such a task could run in a few seconds.

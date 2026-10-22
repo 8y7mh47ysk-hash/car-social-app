@@ -39,12 +39,15 @@ export default defineConfig({
       `${root}{commitlint,lint-staged}.config.*`,
       // Read from disk or through git by infra/compose.test.ts (the compose file and the root
       // template), env-files.test.ts (the ignore rules and the templates),
-      // scripts/ci-workflow.test.ts (the workflows) and env-access.test.ts (the ESLint config).
+      // scripts/ci-workflow.test.ts (the workflows), env-access.test.ts (the ESLint config) and
+      // workspace.test.ts (the Node.js version files). README.md, which git-hooks.test.ts reads, is
+      // left out on purpose: see docs/DECISIONS.md, "README changes do not run every test".
       `${root}docker-compose.yml`,
       `${root}**/.env.example`,
       `${root}**/.gitignore`,
       `${root}.github/workflows/*`,
       `${root}eslint.config.*`,
+      `${root}{.nvmrc,.node-version}`,
       // Env files, which git ignores: only `git add --force` stages one, and env-files.test.ts,
       // which lists what git tracks, then fails the commit.
       `${root}**/{.env,.env.*,*.env,.envrc}`,
