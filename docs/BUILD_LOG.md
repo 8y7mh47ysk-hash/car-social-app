@@ -2004,6 +2004,8 @@ Bravo reviewed this instruction and changed:
   and cut, but not object keys or the number of keys and items; `docs/ARCHITECTURE.md`
   ("Observability") says the same. A test read an error body through a type-only cast; it now
   parses it with Zod.
+- `api-console.test.ts` timed out in a full `pnpm test` while the machine was busy (5,033 ms
+  against Vitest's 5 s default): its first test loads the whole ESLint config. It now allows 30 s.
 
 To check the fixes:
 
