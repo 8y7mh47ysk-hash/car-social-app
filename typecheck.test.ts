@@ -16,6 +16,7 @@ import { basename, delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import ts from "typescript";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { z } from "zod";
 
@@ -236,6 +237,22 @@ const STRICT_OPTIONS = {
   noUncheckedSideEffectImports: true,
 };
 
+/**
+ * The flags that `strict` turns on, such as noImplicitAny, in the TypeScript version installed.
+ * `strict` sets only those that a tsconfig leaves unset, so a tsconfig can keep `strict: true` and
+ * still turn one off. TypeScript marks them `strictFlag` in its list of compiler options, which is
+ * not part of its typed API, so Zod checks the list's shape.
+ */
+const STRICT_FAMILY = z
+  .object({
+    optionDeclarations: z.array(
+      z.looseObject({ name: z.string(), strictFlag: z.boolean().optional() }),
+    ),
+  })
+  .parse(ts)
+  .optionDeclarations.filter((option) => option.strictFlag === true)
+  .map((option) => option.name);
+
 const run = promisify(execFile);
 
 /** Every tsconfig file in the repository except the base, which only the others use. */
@@ -273,8 +290,17 @@ describe("the TypeScript settings", () => {
     );
   });
 
+  it("know which flags strict turns on", () => {
+    expect(STRICT_FAMILY).toEqual(
+      expect.arrayContaining(["noImplicitAny", "strictNullChecks", "useUnknownInCatchVariables"]),
+    );
+  });
+
   it.for(tsconfigs)("make %s check types strictly", async (tsconfig) => {
-    expect(await compilerOptions(tsconfig)).toMatchObject(STRICT_OPTIONS);
+    const options = await compilerOptions(tsconfig);
+
+    expect(options).toMatchObject(STRICT_OPTIONS);
+    expect(STRICT_FAMILY.filter((flag) => options[flag] === false)).toEqual([]);
   });
 
   // Shared code also runs in browsers, so it may use neither Node.js's globals nor the DOM's.
