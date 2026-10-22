@@ -98,17 +98,20 @@ function droppedLine(): string {
  *
  * 1. replaces the value of every sensitive key, at any depth, with "[Redacted]", even when the
  *    value is an object or an array (see isSensitiveKey);
- * 2. hides URL credentials, query strings and fragments in every string, the message included
- *    (see redactUrls), and cuts every string to MAX_LOGGED_STRING_LENGTH characters;
+ * 2. hides URL credentials, query strings and fragments in every string value, the message
+ *    included (see redactUrls), and cuts every string value to MAX_LOGGED_STRING_LENGTH
+ *    characters. Object keys, and the number of keys and items, are left as they are;
  * 3. adds the ID of the request whose code is running to a line that has none. Lines from
  *    Fastify's per-request loggers (`request.log`) already carry their own request's ID; this
  *    covers every other logger (`app.log` and children made from it), so a service that is never
  *    handed the request still logs its request's ID.
  *
  * Apart from URL parts, a secret inside a string cannot be recognised, so never put one in a log
- * message. A line that is not a JSON object (pino never writes one) is replaced by an error line.
- * Parsing turns numbers into JavaScript numbers, so an integer beyond 2^53 (a BigInt, which pino
- * writes exactly) comes out rounded: log such values as strings.
+ * message. Log the fields you need from a client's data, not whole objects whose keys and size
+ * the client chooses, such as a parsed query string or body. A line that is not a JSON object
+ * (pino never writes one) is replaced by an error line. Parsing turns numbers into JavaScript
+ * numbers, so an integer beyond 2^53 (a BigInt, which pino writes exactly) comes out rounded: log
+ * such values as strings.
  */
 export function finishLogLine(line: string): string {
   let entry: unknown;
@@ -262,12 +265,13 @@ async function prettyDestination(destination: LogDestination | undefined): Promi
 }
 
 /**
- * The Fastify factory options that set up logging and request IDs: pino writing one JSON object
- * (or one readable entry) per line; a request ID that is validated or generated for every
- * request, appears on every line logged while that request is handled and goes back in the
- * x-request-id header, also when the router rejects the URL; and no secrets, query strings or
- * unbounded client input in the output. `buildApp` passes these to `fastify()` and registers
- * enterRequestContext, which covers every other response.
+ * The Fastify factory options that set up logging and request IDs: pino writes one JSON object
+ * (or one readable entry) per line, which finishLogLine redacts; genReqId gives each request that
+ * reaches Fastify's router a validated or new ID, which every line logged while the request is
+ * handled carries; and sendFrameworkError sends that ID in x-request-id with the router's 400 and
+ * 414 responses. `buildApp` passes these to `fastify()` and registers enterRequestContext, which
+ * sends the ID with the response of every request that reaches the hooks. The other responses
+ * that go out before any hook runs carry no ID: docs/ARCHITECTURE.md ("Observability") lists them.
  */
 export async function loggingServerOptions(
   settings: LoggingSettings,
