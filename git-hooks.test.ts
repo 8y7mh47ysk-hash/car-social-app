@@ -106,16 +106,31 @@ function run(
   return finished(spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] }));
 }
 
-/** Runs a command with `input` on its standard input; returns its exit code and output. */
-function runWithInput(
-  command: string,
-  args: readonly string[],
-  cwd: string,
-  env: NodeJS.ProcessEnv,
-  input: string,
-): Promise<Result> {
-  const child = spawn(command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
-  child.stdin.end(input);
+/**
+ * Pastes `script` at the prompt of an interactive zsh that has only zsh's own defaults (-f: no
+ * start-up files) and returns its exit code and output. zsh runs in a session of its own, without
+ * a terminal: an interactive zsh takes over any terminal it finds, which stops it, and the test
+ * with it, when the tests run in a terminal.
+ */
+function pasteIntoZsh(cwd: string, env: NodeJS.ProcessEnv, script: string): Promise<Result> {
+  const child = spawn("zsh", ["-f", "-i"], {
+    cwd,
+    env,
+    detached: true,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const group = child.pid;
+  // If the test fails first, zsh and whatever it started must not outlive it.
+  onTestFinished(() => {
+    try {
+      if (group !== undefined) {
+        process.kill(-group, "SIGKILL");
+      }
+    } catch {
+      // The group has already exited.
+    }
+  });
+  child.stdin.end(script);
   return finished(child);
 }
 
@@ -425,8 +440,7 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       },
       shell: (script, mode) =>
         mode === "pasted-zsh"
-          ? // -f: none of the machine's or the user's zsh start-up files, so zsh's own defaults.
-            runWithInput("zsh", ["-f", "-i"], root, env, script)
+          ? pasteIntoZsh(root, env, script)
           : run("sh", mode === "script" ? ["-e", "-c", script] : ["-c", script], root, env),
       merge: (branch, { fail = "" } = {}) =>
         run("git", ["merge", "--no-ff", "--no-edit", branch], root, { ...env, STUB_FAIL: fail }),
