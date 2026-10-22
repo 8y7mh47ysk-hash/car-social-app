@@ -37,6 +37,7 @@ const workflowSchema = z.object({
   permissions: z.unknown().optional(),
   concurrency: z.unknown().optional(),
   defaults: defaultsSchema.optional(),
+  env: envSchema.optional(),
   jobs: z.record(
     z.string(),
     z.object({
@@ -220,6 +221,24 @@ describe("ci.yml", () => {
   it("turns off Next.js's telemetry for every step", () => {
     for (const job of Object.values(ci.workflow.jobs)) {
       expect(job.env?.["NEXT_TELEMETRY_DISABLED"]).toBe("1");
+    }
+  });
+
+  it("never hides Node.js warnings, which the build-log and start checks fail on", () => {
+    // NODE_NO_WARNINGS=1, or NODE_OPTIONS with one of these flags, would keep every Node.js
+    // warning out of the output that those checks read, and CI would pass them.
+    const envs = [
+      ci.workflow.env,
+      ...Object.values(ci.workflow.jobs).flatMap((job) => [
+        job.env,
+        ...job.steps.map((s) => s.env),
+      ]),
+    ];
+    for (const env of envs) {
+      expect(env?.["NODE_NO_WARNINGS"]).toBeUndefined();
+      expect(String(env?.["NODE_OPTIONS"] ?? "")).not.toMatch(
+        /--(?:no-warnings|no-deprecation|disable-warning|redirect-warnings)\b/u,
+      );
     }
   });
 
