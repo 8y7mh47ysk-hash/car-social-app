@@ -3,6 +3,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import { ESLint } from "eslint";
 import tseslint from "typescript-eslint";
@@ -11,9 +12,10 @@ import { z } from "zod";
 
 // Instruction 1: one ESLint config for the whole repository, with typescript-eslint's
 // type-checked rules everywhere, Next.js's rules for the Next.js app, and React Hooks and strict
-// jsx-a11y rules for React code. These tests ask ESLint which rules the config gives to a file in
-// each part of the repository and compare them with the rule sets themselves, so that a narrowed
-// file pattern or a weaker rule set fails here instead of quietly linting less.
+// jsx-a11y rules for React code. These tests ask ESLint which rules the config gives to files of
+// every kind that a rule set covers, in each part of the repository, and compare them with the rule
+// sets themselves, so that a narrowed file pattern or a weaker rule set fails here instead of
+// quietly linting less.
 
 const repoRoot = import.meta.dirname;
 const eslint = new ESLint({ cwd: repoRoot });
@@ -21,8 +23,24 @@ const require = createRequire(import.meta.url);
 
 /** Flat configs, as far as these tests read them. */
 const flatConfigsSchema = z.array(
-  z.looseObject({ rules: z.record(z.string(), z.unknown()).optional() }),
+  z.looseObject({
+    name: z.string().optional(),
+    files: z.array(z.unknown()).optional(),
+    rules: z.record(z.string(), z.unknown()).optional(),
+  }),
 );
+
+/**
+ * The file extensions that the flat config called `name`, in a list of configs, applies to: those
+ * its `files` patterns name, such as "**\/*.ts" or "**\/*.{js,jsx}".
+ */
+function extensionsOf(configs: unknown, name: string): string[] {
+  const config = flatConfigsSchema.parse(configs).find((entry) => entry.name === name);
+  return (config?.files ?? []).flatMap((pattern) => {
+    const match = typeof pattern === "string" ? /^\*\*\/\*\.\{?([\w,]+)\}?$/.exec(pattern) : null;
+    return match?.[1]?.split(",") ?? [];
+  });
+}
 
 /** Whether a rule setting (a severity, or a severity followed by options) turns the rule on. */
 function isOn(setting: unknown): boolean {
@@ -58,9 +76,33 @@ const TYPESCRIPT_RULES = rulesTurnedOn([
   ...tseslint.configs.stylisticTypeChecked,
 ]);
 
+/** The kinds of file that typescript-eslint lints as TypeScript: ts, tsx, mts and cts. */
+const TYPESCRIPT_EXTENSIONS = extensionsOf(
+  tseslint.configs.strictTypeChecked,
+  "typescript-eslint/eslint-recommended",
+);
+
 // Neither package ships type declarations, so their configs are read with require and checked.
-const NEXT_RULES = rulesTurnedOn(require("eslint-config-next/core-web-vitals"));
+const nextConfigs: unknown = require("eslint-config-next/core-web-vitals");
+const NEXT_RULES = rulesTurnedOn(nextConfigs);
 const REACT_HOOKS_RULES = NEXT_RULES.filter((rule) => rule.startsWith("react-hooks/"));
+
+/**
+ * The kinds of file that Next.js's own config lints, which can hold React components and hooks:
+ * js, jsx, mjs, ts, tsx, mts and cts.
+ */
+const NEXT_EXTENSIONS = extensionsOf(nextConfigs, "next");
+
+/**
+ * Where code lives in a package: modules and components in src, deeper folders of src (hooks,
+ * route handlers) and config files at the package's root, such as next.config.ts.
+ */
+const PLACES = ["src/example", "src/lib/use-example", "src/app/example/route", "example.config"];
+
+/** A file of every kind in `extensions` in every place of the package in `dir`. */
+function filesIn(dir: string, extensions: readonly string[]): string[] {
+  return PLACES.flatMap((place) => extensions.map((extension) => `${dir}/${place}.${extension}`));
+}
 
 /** jsx-a11y's strict rules with their settings; its recommended set gives some weaker options. */
 const A11Y_STRICT_RULES = Object.entries(
@@ -109,49 +151,85 @@ const dependingOn = (name: string): string[] =>
   packages.filter(({ dependencies }) => dependencies.has(name)).map(({ dir }) => dir);
 
 describe("the ESLint config", () => {
-  it("knows the rule sets and the packages it is checked against", () => {
+  it("knows the rule sets, the kinds of file and the packages it is checked against", () => {
     expect(TYPESCRIPT_RULES.length).toBeGreaterThan(50);
     expect(A11Y_STRICT_RULES.length).toBeGreaterThan(20);
     expect(REACT_HOOKS_RULES).toContain("react-hooks/rules-of-hooks");
     expect(NEXT_RULES).toContain("@next/next/no-html-link-for-pages");
+    expect(TYPESCRIPT_EXTENSIONS).toEqual(expect.arrayContaining(["ts", "tsx"]));
+    expect(NEXT_EXTENSIONS).toEqual(expect.arrayContaining(["js", "jsx", "ts", "tsx"]));
     expect(dependingOn("react")).toContain("apps/web");
     expect(dependingOn("next")).toContain("apps/web");
   });
 
-  it.for([
-    ...packages.map(({ dir }) => `${dir}/src/example.ts`),
-    "example.test.ts",
-    "infra/example.test.ts",
-    "scripts/example.ts",
-  ])("gives %s every rule of typescript-eslint's strict and stylistic sets", async (file) => {
-    const rules = await rulesFor(file);
+  it.for(["example.test.ts", "infra/example.test.ts", "scripts/example.ts"])(
+    "gives %s every rule of typescript-eslint's strict and stylistic sets",
+    async (file) => {
+      const rules = await rulesFor(file);
 
-    expect(TYPESCRIPT_RULES.filter((rule) => !isOn(rules[rule]))).toEqual([]);
-  });
-
-  // When a React package is added, such as packages/ui (instructions 9 to 16), its files must be
-  // added to `reactFiles` in eslint.config.mjs.
-  it.for(dependingOn("react"))(
-    "gives the components in %s the React Hooks and strict jsx-a11y rules",
-    async (dir) => {
-      const rules = await rulesFor(`${dir}/src/example.tsx`);
-
-      expect(REACT_HOOKS_RULES.filter((rule) => !isOn(rules[rule]))).toEqual([]);
-      for (const [rule, setting] of A11Y_STRICT_RULES) {
-        if (rule === ALT_TEXT) {
-          expect(isOn(rules[rule]), rule).toBe(true);
-        } else {
-          expect(resolvedForm(rules[rule]), rule).toEqual(resolvedForm(setting));
-        }
-      }
+      expect(TYPESCRIPT_RULES.filter((rule) => !isOn(rules[rule]))).toEqual([]);
     },
   );
 
-  it.for(dependingOn("next"))("gives %s every rule of Next.js's recommended set", async (dir) => {
-    const rules = await rulesFor(`${dir}/src/app/example.tsx`);
+  // Each failure names the file and the first rule it lacks.
+  it.for(packages.map(({ dir }) => dir))(
+    "gives every TypeScript file in %s every rule of typescript-eslint's strict and stylistic sets",
+    async (dir) => {
+      const lacking: string[] = [];
+      for (const file of filesIn(dir, TYPESCRIPT_EXTENSIONS)) {
+        const rules = await rulesFor(file);
+        const off = TYPESCRIPT_RULES.filter((rule) => !isOn(rules[rule]));
+        if (off.length > 0) {
+          lacking.push(`${file}: ${String(off.length)} rules off, such as ${String(off[0])}`);
+        }
+      }
 
-    expect(NEXT_RULES.filter((rule) => !isOn(rules[rule]))).toEqual([]);
-  });
+      expect(lacking).toEqual([]);
+    },
+  );
+
+  // Hooks live in .ts files (use-*.ts) as well as in components, and JSX can be in .js files. When
+  // a React package is added, such as packages/ui (instructions 9 to 16), its files must be added
+  // to `reactFiles` in eslint.config.mjs.
+  it.for(dependingOn("react"))(
+    "gives every file in %s that Next.js's config lints the React Hooks and strict jsx-a11y rules",
+    async (dir) => {
+      const wrong: string[] = [];
+      for (const file of filesIn(dir, NEXT_EXTENSIONS)) {
+        const rules = await rulesFor(file);
+        for (const rule of REACT_HOOKS_RULES.filter((name) => !isOn(rules[name]))) {
+          wrong.push(`${file}: ${rule} is off`);
+        }
+        for (const [rule, setting] of A11Y_STRICT_RULES) {
+          const asStrict =
+            rule === ALT_TEXT
+              ? isOn(rules[rule])
+              : isDeepStrictEqual(resolvedForm(rules[rule]), resolvedForm(setting));
+          if (!asStrict) {
+            wrong.push(`${file}: ${rule} differs from jsx-a11y's strict set`);
+          }
+        }
+      }
+
+      expect(wrong).toEqual([]);
+    },
+  );
+
+  it.for(dependingOn("next"))(
+    "gives every file in %s that Next.js's config lints every rule of its recommended set",
+    async (dir) => {
+      const lacking: string[] = [];
+      for (const file of filesIn(dir, NEXT_EXTENSIONS)) {
+        const rules = await rulesFor(file);
+        const off = NEXT_RULES.filter((rule) => !isOn(rules[rule]));
+        if (off.length > 0) {
+          lacking.push(`${file}: ${String(off.length)} rules off, such as ${String(off[0])}`);
+        }
+      }
+
+      expect(lacking).toEqual([]);
+    },
+  );
 
   // The API logs through its logger, which adds request IDs and redacts secrets (instruction 8).
   it("forbids console output in the API's code", async () => {
