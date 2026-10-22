@@ -161,8 +161,9 @@ earlier one fails, so one run lists every problem.
 
 CI fails on any warning: ESLint warnings, unformatted files, unmet peer dependencies, warnings in
 the build output and errors that did not stop the build (Next.js prints both but still finishes
-the build), and Docker Compose warnings. [docs/DECISIONS.md](docs/DECISIONS.md) lists exactly
-what is enforced, what is not and why. To run the same checks before pushing:
+the build), warnings and errors that the apps print as they start, and Docker Compose warnings.
+[docs/DECISIONS.md](docs/DECISIONS.md) lists exactly what is enforced, what is not and why. To
+run the same checks before pushing:
 
 ```sh
 pnpm peers check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test
@@ -173,8 +174,9 @@ node scripts/check-start.ts
 The second line saves the build's output in `build.log` (git ignores `*.log` files) and runs CI's
 check on it. If the build itself fails, the reason is in `build.log`. The third starts both
 production builds with `pnpm start` on free ports, as CI does, and stops them once both answer;
-if one does not, it says which and prints what the apps printed. Ctrl+C stops it and the apps
-it started. With Docker and the root `.env` (see [Local services](#local-services)),
+if one does not, or the apps print a warning or an error line as they start (a warning in the
+API's JSON log included), it says so and prints what the apps printed. Ctrl+C stops it and the
+apps it started. With Docker and the root `.env` (see [Local services](#local-services)),
 `docker compose --profile '*' config --quiet` runs CI's last check, on `docker-compose.yml`: it
 prints nothing when the file is valid.
 
