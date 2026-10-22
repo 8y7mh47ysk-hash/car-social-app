@@ -90,6 +90,18 @@ describe("findWarnings", () => {
     expect(findWarnings(cleanBuild)).toEqual([]);
   });
 
+  it("ignores only that notice, not what Next.js prints when it cannot write a cache", () => {
+    // Next.js 16.4 prints these with console.warn and the Error ("Failed to update prerender
+    // cache for" and "Failed to set fetch cache" in next/dist/server); the page, the URL and the
+    // errors are made up.
+    const log = [
+      "apps/web build: Failed to update prerender cache for /garage Error: EACCES: permission denied",
+      "apps/web build: Failed to set fetch cache https://example.com/ Error: ENOSPC: no space left",
+    ].join("\n");
+
+    expect(findWarnings(log)).toHaveLength(2);
+  });
+
   it("finds the warnings that Next.js logs with ⚠, such as an unknown next.config.ts option", () => {
     expect(findWarnings(unknownConfigOption)).toEqual([
       "apps/web build: ⚠ Invalid next.config.ts options detected:",
