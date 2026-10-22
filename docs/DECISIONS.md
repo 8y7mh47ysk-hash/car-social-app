@@ -387,7 +387,9 @@ Keep entries brief. Details belong in code comments and the build log.
   footer, so a body line such as "Note: ..." straight after other body text is rejected by
   `footer-leading-blank`; add a blank line or reword it. Messages that start like git's own
   (`Merge ...`, `Revert ...`, `fixup!`, `squash!`, `amend!`) are accepted without any checks,
-  including hand-written ones.
+  including hand-written ones. (Corrected in round 3 of the wave w0 review: commitlint's defaults
+  also skip every check for `revert ...`, `Reapply ...`, `Merged ...`, `Automatic merge ...`,
+  `Auto-merged ...` and a version number on its own, such as `1.2.3` or `chore: 1.2.3`.)
 
 ### PostgreSQL 18 with pgvector, from the pgvector/pgvector image
 

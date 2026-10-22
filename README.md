@@ -333,7 +333,11 @@ Co-Authored-By: Name <email@example.com>
   So does a line that starts with one word, a space and `#`, such as `the #6 entry ...`: when a
   body line wraps there, rewrap it or write "instruction 6" instead.
 - Messages that git writes itself are accepted as they are: merges, reverts, and `fixup!`,
-  `squash!` and `amend!` commits.
+  `squash!` and `amend!` commits. commitlint skips every check for any message that starts like
+  one of them, even one written by hand (`Merge branch ...`, `Revert ...`, `revert ...`,
+  `Reapply ...`), and also for `Merged ...`, `Automatic merge ...`, `Auto-merged ...` and a
+  version number on its own (`1.2.3`, `v1.2.3`, `chore: 1.2.3`). Write your own as
+  `revert: ...` or `chore(release): ...` so they are checked.
 
 To check a message without committing: `printf 'feat: add x\n' | pnpm exec commitlint`.
 
