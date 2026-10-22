@@ -91,7 +91,11 @@ and data, even with other ports. To run a separate copy, give that checkout's `.
 ### Changing a password
 
 - **Redis:** change `REDIS_PASSWORD` in `.env` and run `docker compose up -d`, which recreates
-  the container with the new password.
+  the container with the new password. Do not rely on `docker compose restart`, which keeps the
+  old password, or on `docker compose start` after a `stop`: with Compose 5 it gives Redis the
+  new password, but `docker compose exec redis redis-cli` keeps the old one until the container
+  is recreated. The health check reads the password from Redis's config file, so it always uses
+  the one Redis has.
 - **PostgreSQL:** the password is stored in the database when the data volume is first created,
   so changing `.env` alone is not enough. Open psql (see the table above), run `\password`, enter
   the new password twice, then put the same password in `.env`. Alternatively, delete all data
@@ -111,8 +115,10 @@ use other names, set them in `.env` and start with a new, empty volume:
 - `postgres`: `pg_isready` over TCP. On the very first start the image initialises the database
   with a temporary server that listens only on a Unix socket, so the TCP check stays unhealthy
   until the real server is up.
-- `redis`: `redis-cli -e ping`, authenticated through the `REDISCLI_AUTH` variable. `-e` makes a
-  wrong password (`NOAUTH`) or a server still loading its data (`LOADING`) count as unhealthy;
+- `redis`: `redis-cli -e ping`, with the password that the check reads from Redis's own config
+  file and passes in the `REDISCLI_AUTH` variable, so it always uses the password Redis has (the
+  container's own `REDISCLI_AUTH` can be older, see "Changing a password"). `-e` makes a wrong
+  password (`WRONGPASS`) or a server still loading its data (`LOADING`) count as unhealthy;
   without it, redis-cli exits successfully on those error replies.
 
 Each check runs every 10 seconds (every second while the service starts, for up to 30 seconds
@@ -179,7 +185,7 @@ and once the API image has a health check, `web` should wait for `service_health
   command line, and the Redis image's entrypoint runs with the container's full command line
   each time the container starts. Redis reads its password from a config file that Compose
   writes into the container (`redis-config` in `docker-compose.yml`), and redis-cli reads it from
-  the `REDISCLI_AUTH` variable.
+  the `REDISCLI_AUTH` variable (the health check sets that variable from the config file).
 - The passwords are visible to anyone who can run `docker inspect` on this machine (Docker access
   is root-equivalent anyway). Instruction 104 moves them to Docker secrets or an encrypted file.
 - PostgreSQL runs with a superuser for now. A least-privilege role for the API belongs with the
@@ -187,6 +193,9 @@ and once the API image has a health check, `web` should wait for `service_health
 - Every image is pinned to a tag and a digest, so a rebuilt tag cannot change what runs. To
   update one, pick the new tag, read its digest with `docker buildx imagetools inspect <tag>`
   (the `Digest:` line) and change both together. Instruction 106 adds automated update checks.
+  The `pgvector/pgvector` image gets new builds only for pgvector and PostgreSQL releases, so it
+  can lack Debian security updates that the official `postgres` image already has; see "The
+  pgvector image lags the official postgres image's security rebuilds" in `docs/DECISIONS.md`.
 - Container logs use Docker's `local` driver, which keeps at most 100 MB per container.
 
 ### Checking the file
@@ -196,13 +205,16 @@ and once the API image has a health check, `web` should wait for `service_health
   profile, so a mistake in a placeholder (such as a `depends_on` that names no service) passes
   unnoticed. It needs the two passwords, from `.env` or the environment, for example throwaway
   values: `POSTGRES_PASSWORD=ci REDIS_PASSWORD=ci docker compose --profile '*' config --quiet`.
-- `pnpm test` includes `infra/compose.test.ts`, static checks that need no Docker: only
-  `postgres` and `redis` start by default, ports stay on `127.0.0.1`, passwords have no default
-  and stay off command lines, PostgreSQL comes from the pgvector image, Redis reads its password
-  and its append-only setting from its config file, the health checks, environments, ports and
-  dependencies are the ones described here, every image keeps its own entrypoint, the
-  placeholders build nothing and exit with an error, images are pinned, and `.env.example` lists
-  exactly the variables the file reads, with the right defaults.
+- `pnpm test` includes `infra/compose.test.ts`, static checks that need no Docker. The file may
+  hold only the services and settings the checks know (so no `env_file`, `extends`, `include`,
+  `entrypoint`, `network_mode`, YAML merge key and so on), and the repository no other file that
+  Compose reads by default, such as a `compose.yaml` or a `docker-compose.override.yml`. Within
+  that: only `postgres` and `redis` start by default, ports stay on `127.0.0.1`, passwords have
+  no default and stay off command lines, PostgreSQL comes from the pgvector image, Redis's config
+  file holds exactly its password and the append-only setting, the health checks, environments,
+  ports and dependencies are the ones described here, the placeholders exit with an error,
+  images are pinned, and `.env.example` lists exactly the variables the file reads, with the
+  right defaults. A new setting needs a test for its value before the checks accept it.
 
 ## What comes next
 
