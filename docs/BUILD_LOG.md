@@ -353,10 +353,14 @@ Charlie reviewed instructions 1 and 2 and took them over from Delta, with the op
 verification of round 2 raised. Checked by running them, in this checkout and in fresh clones,
 with ports 3030 and 4030: a frozen install, `pnpm peers check`, `pnpm audit`, the format check,
 lint, the type check, every test (also under a terminal, through `script`), the build, the
-build-warning check and the start check; `pnpm dev` and `pnpm start`, each probed and then stopped with SIGINT to its process group,
-leaving no process behind; the API's start without the export condition (it fails with
-`ERR_UNKNOWN_FILE_EXTENSION`, as the round-1 note says); and every count that the "How to verify"
-steps of this entry and of instruction 2 quote. Fixes, each with a test that fails without it:
+build-warning check and the start check; `pnpm dev` and `pnpm start`, each probed and then stopped
+with SIGINT to its process group, leaving no process behind; the API's start without the export
+condition (it fails with `ERR_UNKNOWN_FILE_EXTENSION`, as the round-1 note says); and every count
+that the "How to verify" steps of this entry and of instruction 2 quote. A search of every tracked
+file and of the whole git history for key and token formats (Stripe, GitHub, AWS, Google, Slack,
+npm, private keys, JWTs) and for passwords, secrets and tokens given values found no real or
+realistic secret: the templates leave their passwords empty, and the tests use obviously fake
+values such as `query-secret`. Fixes, each with a test that fails without it:
 
 - A tsconfig could keep `strict: true` and turn off a flag that `strict` implies (w0.V2.Alpha.3):
   with `"noImplicitAny": false` in `apps/api/tsconfig.json`, an untyped parameter passed the type
