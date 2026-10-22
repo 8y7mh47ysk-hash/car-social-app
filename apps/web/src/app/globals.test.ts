@@ -2,8 +2,11 @@
 // The stylesheet is compiled in Node.js, as Next.js compiles it: through PostCSS with
 // postcss.config.mjs, which runs Tailwind CSS (vitest.config.ts turns that on for this stylesheet).
 // Importing it here also lets `vitest related`, in the pre-commit hook, find this test when it
-// changes.
+// changes. Tailwind CSS generates the utilities that it finds in the layout and the home page, which
+// this test checks, so importing those too makes the hook run this test when either changes.
 import "./globals.css";
+import "./layout";
+import "./page";
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
