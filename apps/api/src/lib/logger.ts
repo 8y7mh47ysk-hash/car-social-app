@@ -1,3 +1,5 @@
+import { writeSync } from "node:fs";
+
 import {
   LogController,
   type FastifyError,
@@ -240,16 +242,50 @@ async function importPinoPretty() {
   return import("pino-pretty");
 }
 
+/** Memory for Atomics.wait, which pauses the thread without returning to the event loop. */
+const pauseCell = new Int32Array(new SharedArrayBuffer(4));
+
+/**
+ * Writes all of `text` to the file descriptor `fd` before it returns. process.stdout.write()
+ * only queues what a full pipe cannot take yet (on macOS, and `pnpm dev` reads the API's output
+ * through a pipe), and the process.exit() with which the entrypoint stops after logging a crash
+ * drops that queue, crash line included. So while the pipe is full this waits for its reader, as
+ * pino's own destination (used for JSON) does when it flushes at exit. Once the reader has gone
+ * (EPIPE) the text is dropped, as pino drops it.
+ */
+function writeAll(fd: number, text: string): void {
+  let rest = Buffer.from(text);
+  while (rest.length > 0) {
+    try {
+      rest = rest.subarray(writeSync(fd, rest));
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? error.code : undefined;
+      if (code === "EPIPE") {
+        return;
+      }
+      if (code !== "EAGAIN") {
+        throw error;
+      }
+      Atomics.wait(pauseCell, 0, 0, 10);
+    }
+  }
+}
+
 /**
  * Formats lines with pino-pretty's synchronous formatter, after finishLogLine has redacted them.
- * Each log call then writes its formatted line straight to the destination, exactly as in the
- * JSON format: no worker thread (pino-pretty's transport API runs one) and no extra stream
- * pipeline (its stream API builds one). pino-pretty is imported only here, so the JSON format
+ * Each log call then writes its formatted line straight to the destination, as in the JSON
+ * format: no worker thread (pino-pretty's transport API runs one) and no extra stream pipeline
+ * (its stream API builds one). Standard output is written synchronously (see writeAll), so no
+ * line is lost when the process exits. pino-pretty is imported only here, so the JSON format
  * never loads it.
  */
 async function prettyDestination(destination: LogDestination | undefined): Promise<LogDestination> {
   const pinoPretty = await importPinoPretty();
-  const target: LogDestination = destination ?? process.stdout;
+  const target: LogDestination = destination ?? {
+    write(text) {
+      writeAll(process.stdout.fd, text);
+    },
+  };
   const prettify = pinoPretty.prettyFactory({
     // Colour only on a terminal, never in output that tests or files read back.
     colorize: destination === undefined && pinoPretty.isColorSupported,
