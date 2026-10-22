@@ -10,6 +10,13 @@ instructions add tests, so commands that run several instructions' tests (`pnpm 
 package's tests or a whole Vitest project) report more; a command that names a single test file
 keeps its count unless the entry is updated.
 
+The command blocks use `#` for comments, often to say what a command should print. zsh, the
+default shell on macOS, does not treat `#` typed or pasted at its prompt as the start of a comment
+unless its `interactivecomments` option is on, and passes the comment's words to the command: a
+commit then fails on a pathspec named `#`, which looks like the hook rejecting it. So in zsh, run
+`setopt interactivecomments` before you paste these commands (or add that line to `~/.zshrc`);
+bash needs nothing.
+
 ## #1 - Monorepo foundation
 
 **What changed**
@@ -148,7 +155,7 @@ How to verify, from the repository root:
 ```sh
 pnpm exec vitest run typecheck.test.ts workspace.test.ts apps/api/src/production.test.ts \
   apps/api/src/server.test.ts
-# "Test Files  4 passed (4)" and "Tests  46 passed (46)" since round 2 of the review
+# "Test Files  4 passed (4)" and "Tests  47 passed (47)" since round 3 of the review
 pnpm --filter @apex/shared build && pnpm --filter @apex/api build
 cd apps/api && node --no-strip-types dist/server.js; cd ../..
 # exits at once: ERR_UNKNOWN_FILE_EXTENSION for packages/shared/src/index.ts (no condition)
@@ -276,7 +283,7 @@ How to verify, from the repository root:
 
 ```sh
 pnpm exec vitest run typecheck.test.ts workspace.test.ts apps/api/src/production.test.ts \
-  apps/api/src/server.test.ts                  # "Test Files  4 passed (4)", "Tests  46 passed (46)"
+  apps/api/src/server.test.ts                  # "Test Files  4 passed (4)", "Tests  47 passed (47)"
 pnpm exec vitest run test-suite.test.ts eslint-config.test.ts scripts/tooling-project.test.ts
                                                # "Test Files  3 passed (3)", "Tests  13 passed (13)"
 pnpm --filter @apex/web test                   # "Tests  47 passed (47)"
@@ -340,6 +347,69 @@ output; and a dev script without `--watch` stops restarting on a change.
   the round-1 note above and of the round-2 note report 46 tests (44 on Delta's branch). The other
   counts that Delta's note lists are updated in their entries, with the other branches' tests.
 
+**Review fixes (wave w0, round 3)**
+
+Charlie reviewed instructions 1 and 2 and took them over from Delta, with the open items that the
+verification of round 2 raised. Checked by running them, in this checkout and in fresh clones,
+with ports 3030 and 4030: a frozen install, `pnpm peers check`, the format check, lint, the type
+check, every test (also under a terminal, through `script`), the build and the build-warning
+check; `pnpm dev` and `pnpm start`, each probed and then stopped with SIGINT to its process group,
+leaving no process behind; the API's start without the export condition (it fails with
+`ERR_UNKNOWN_FILE_EXTENSION`, as the round-1 note says); and every count that the "How to verify"
+steps of this entry and of instruction 2 quote. Fixes, each with a test that fails without it:
+
+- A tsconfig could keep `strict: true` and turn off a flag that `strict` implies (w0.V2.Alpha.3):
+  with `"noImplicitAny": false` in `apps/api/tsconfig.json`, an untyped parameter passed the type
+  check and lint, and every test passed. `strict` sets its flags only where a tsconfig leaves them
+  unset. `typecheck.test.ts` now takes those flags from the installed TypeScript and fails when
+  `tsc --showConfig` shows one set to false; noImplicitAny, strictNullChecks,
+  strictFunctionTypes, strictBuiltinIteratorReturn and useUnknownInCatchVariables were each tried.
+- `eslint-config.test.ts` checked each rule set on one kind of file: typescript-eslint's on `.ts`
+  files and the React, jsx-a11y and Next.js sets on `.tsx` files (w0.V2.Alpha.4). Narrowing
+  `reactFiles` to `.tsx`, turning `react-hooks/rules-of-hooks` off for `.ts` files (where custom
+  hooks live) or narrowing typescript-eslint's sets to `.ts` (so no `.tsx` component kept them)
+  passed every check; a conditional `useState` in `src/lib/use-thing.ts`, or `any` in a `.tsx`
+  file, then linted clean. The tests now check a file of every kind that each set covers, from
+  the sets' own file patterns, in three places of every package. They found that `.mts` and `.cts`
+  files in apps/web got none of the React and Next.js rules, which Next.js's own config gives them;
+  `reactFiles` now lists them (docs/DECISIONS.md, "Lint and type-check tests take their lists from
+  the tools").
+- Removing `.next/`, `dist/`, `next-env.d.ts`, `node_modules/` or `*.log` from `.gitignore` passed
+  every check, because CI starts from a fresh checkout with no build output (w0.R2.Delta.19, left
+  without a test in round 2). `generated-files.test.ts` asks git about a file in each place where
+  the tools write, including every tsconfig's `outDir`, and fails when a rule ignores a file that
+  git tracks (docs/DECISIONS.md, "Tests check that git ignores what the tools generate").
+- `apps/web/src/app/globals.test.ts` checks utilities that only the layout and the home page use,
+  which Tailwind CSS finds by scanning those files, but imported neither: a home page change that
+  dropped `sm:grid-cols-2` passed the pre-commit hook and failed only in `pnpm test`. The test now
+  imports both, so the hook runs it when either changes. When instruction 17 replaces the page,
+  the test's list of utilities has to change with it.
+- The README's quick start stopped at its first line in zsh, the default shell on macOS:
+  `pnpm install   # also installs the git hooks (see "Git hooks" below)` printed "zsh: number
+  expected" and installed nothing, because zsh does not read `#` at its prompt as the start of a
+  comment unless `interactivecomments` is on (zsh 5.9, with macOS's start-up files and the
+  owner's). The README's command blocks now hold commands only, `readme.test.ts` fails on a `#`
+  comment in any of them, and the README's prerequisites and this log's introduction say how to
+  make zsh read the comments in the docs' blocks (docs/DECISIONS.md, "The README's command blocks
+  hold no comments; the docs say how to make zsh read them").
+- Nit: the comment in `apps/web/next.config.ts` on `transpilePackages` sat above
+  `outputFileTracingRoot` (w0.V2.Alpha.6); it now closes the settings.
+
+How to verify, from the repository root:
+
+```sh
+pnpm exec vitest run typecheck.test.ts eslint-config.test.ts generated-files.test.ts readme.test.ts
+# "Test Files  4 passed (4)" and "Tests  36 passed (36)"
+```
+
+To see the strict check catch a weakened tsconfig, add `"noImplicitAny": false` to the
+`compilerOptions` of `apps/api/tsconfig.json` and run
+`pnpm exec vitest run typecheck.test.ts -t "strictly"`: the tests for `apps/api/tsconfig.json` and
+`apps/api/tsconfig.build.json` fail. Then run `git checkout apps/api/tsconfig.json`.
+
+The new tests change no count that the verify steps of the other instructions quote; instruction
+2's round-3 note lists the hook tests' counts. No owner actions.
+
 ## #2 - Git hooks and conventional commits
 
 **What changed**
@@ -380,7 +450,7 @@ Run from the repository root:
 ```sh
 pnpm install --frozen-lockfile          # a fresh install prints ". prepare$ husky"
 git config --get core.hooksPath         # prints .husky/_
-pnpm exec vitest run git-hooks.test.ts  # "Tests  76 passed (76)" since the wave w0 round-2 review
+pnpm exec vitest run git-hooks.test.ts  # "Tests  83 passed (83)" since the wave w0 round-3 review
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
@@ -505,7 +575,7 @@ instruction 4 and two merge tests from the round's integration (see below). How 
 the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts   # "Tests  64 passed (64)"; 76 since the round-2 review
+pnpm exec vitest run git-hooks.test.ts   # "Tests  64 passed (64)"; 83 since the round-3 review
 ```
 
 To see a merge stopped by the checks, in a scratch clone (a branch committed with `--no-verify`
@@ -574,8 +644,8 @@ Found while merging the round's five branches, and from the reviewers' hand-offs
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  7 passed | 69 skipped (76)"
-pnpm exec vitest run typecheck.test.ts -t "root type check"  # "Tests  2 passed | 12 skipped (14)"
+pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  9 passed | 74 skipped (83)"
+pnpm exec vitest run typecheck.test.ts -t "root type check"  # "Tests  2 passed | 13 skipped (15)"
 ```
 
 In the scratch clone of the merge recipe above, run `git commit --no-edit` before
@@ -624,9 +694,10 @@ every change: each lint-staged flag, the merge-time `--diff=--staged --stash`, t
 hook's message file and each team rule in `commitlint.config.mjs`.
 
 `git-hooks.test.ts` now has 72 tests (64 before), so the counts of the commands above that run it
-are updated. The integration note's count for the root type check tests was already wrong (main
-printed `Tests  1 passed | 2 skipped (3)`); it now gives this branch's count, which includes the
-round's new root type check test.
+are updated. So is the integration note's count for the root type check tests: it said
+`Tests  1 passed | 2 skipped (3)`, which was right until this round added a root type check test
+and the settings tests to `typecheck.test.ts`. (Corrected in round 3 of the review: this note first
+said that the count had already been wrong.)
 
 `git-hooks.test.ts` is the longest test file and its pre-commit tests run one after another, so a
 commit that runs every test now takes about 27 s instead of about 19 s (measured three times in a
@@ -635,7 +706,7 @@ fresh clone of this round's final branch, with 610 tests, at a load average of 3
 4.7 to 5.1 s). How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  6 passed | 70 skipped (76)"
+pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 73 skipped (83)"
 ```
 
 No owner actions.
@@ -652,6 +723,72 @@ No owner actions.
   documentation change 0.8 to 1.0 s, a source change with related tests 4.5 to 4.6 s, and a
   change that runs every test 26.6 to 26.8 s. The README's figures still hold; it now gives this
   measurement's test count.
+
+**Review fixes (wave w0, round 3)**
+
+Charlie reviewed this instruction with instruction 1 (see its round-3 note). The scratch-clone
+recipe above, run from a non-interactive shell, gave every result it promises: the bad messages
+were rejected in 0.3 to 0.9 s, the lint error, the type error and the failing related test in 5
+to 8 s, and the documentation change passed in 1.0 s. Fixes, each with a test that fails without
+it:
+
+- The README's steps after a stopped hook could lose the backup they restore (w0.V2.Alpha.2).
+  Most lines had a `#` comment, which zsh, the default shell on macOS, does not read as a comment
+  at its prompt. Pasted as one block, the apostrophe in "this worktree's git folder" opened a
+  quote that swallowed the lines after it; typed one line at a time, every step failed except
+  `git stash drop`, which dropped the only copy of the unstaged changes and untracked files (they
+  were left in a dangling commit). In bash too, a `git stash apply` that failed, for example on a
+  new file with the name of one in the backup, did not stop the `git stash drop` on the next line.
+  The steps now hold commands only, and `git stash pop --index` replaces apply and drop: git drops
+  the backup only once everything is back. `git-hooks.test.ts` pastes each set of steps into zsh
+  (where zsh is installed; CI's runner may not have it, and `readme.test.ts` keeps comments out of
+  the README there), and runs the steps after a restore that fails one line at a time, as a prompt
+  does: the backup is kept (docs/DECISIONS.md, "The steps after a stopped hook pop the backup and
+  hold no comments"). The first version of the zsh tests hung when the tests ran in a terminal,
+  because an interactive zsh takes the terminal over; zsh now runs in a session of its own.
+- Staging `.nvmrc` or `.node-version`, which `workspace.test.ts` reads, ran no tests in the hook:
+  a commit that set `.nvmrc` to 22 passed it and would have failed only in CI. Both are now rerun
+  triggers; in a scratch clone the same commit is rejected by `workspace.test.ts`. README.md,
+  which `git-hooks.test.ts` reads for the steps above, is left out on purpose, so a README change
+  still runs no tests in the hook (docs/DECISIONS.md, "README changes do not run every test").
+  The hook test that stages every kind of file now also stages a dotfile and a file in a dot
+  folder, as several triggers are, so lint-staged's handing of them to `vitest related` is
+  checked from end to end.
+- A failing test file that no Vitest project includes passed the hook, because `vitest related`
+  found "No test files found" for it: tried with `packages/shared/src/probe.test.tsx`, which the
+  shared project, with only `.test.ts` files, leaves out. When a test file is staged, the hook now
+  also runs `test-suite.test.ts` (about 0.4 s), which fails for a test file that `pnpm test` does
+  not run; in a scratch clone that commit is now rejected (docs/DECISIONS.md, "A staged test file
+  makes the hook check that a Vitest project runs it").
+- The round-2 note above said that the integration note's count for the root type check tests
+  had already been wrong (w0.V2.Alpha.1, w0.V2.Alpha.5). It was right: `typecheck.test.ts`
+  printed `Tests  1 passed | 2 skipped (3)` until round 2 added tests to it. The note is corrected.
+
+Run times measured again in a fresh clone of this branch, with 716 tests, committing from a
+non-interactive shell, three rounds of each at a load average of 2 to 7 while other work used the
+machine: a documentation change 0.9 to 1.2 s, a source change with related tests 5.8 to 6.0 s,
+and a change that runs every test 30.9 to 31.1 s. The README gives these figures.
+
+How to verify, from the repository root (the counts are those on a machine with zsh; without it,
+the zsh tests are skipped):
+
+```sh
+pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 73 skipped (83)"
+pnpm exec vitest run readme.test.ts                    # "Tests  2 passed (2)"
+```
+
+To see a staged test file that no project runs stop a commit, in a scratch clone:
+
+```sh
+printf 'import { it } from "vitest";\n\nit("runs", () => undefined);\n' > packages/shared/src/x.test.tsx
+git add packages/shared/src/x.test.tsx
+git commit -m "test(shared): add a probe"   # rejected: test-suite.test.ts lists x.test.tsx
+```
+
+This round's hook tests change a count that instruction 4's round-2 note quotes:
+`pnpm exec vitest run git-hooks.test.ts -t "runs every test when"` now gives
+`Tests  23 passed | 60 skipped (83)` (it says 21 and 55 of 76). The round's integration updates it
+with the other branches' tests. No owner actions.
 
 ## #3 - Docker Compose services
 

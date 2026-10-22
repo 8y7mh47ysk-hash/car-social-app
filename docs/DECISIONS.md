@@ -1278,6 +1278,7 @@ Keep entries brief. Details belong in code comments and the build log.
   write to a terminal that no longer exists; `--no-stash` would also give up hiding unstaged
   changes and untracked files. If lint-staged starts handling more signals, the tests fail and
   this advice should be updated.
+- Superseded by: The steps after a stopped hook pop the backup and hold no comments
 
 ### A stop signal repeated within a second counts as one
 
@@ -1802,3 +1803,84 @@ Keep entries brief. Details belong in code comments and the build log.
   The output folders of tools that later instructions add (Storybook, Playwright) join the list
   with those tools. `.husky/_` is left out: husky ignores that folder itself, and only once it has
   run, so a `HUSKY=0` install would fail the test.
+
+### The steps after a stopped hook pop the backup and hold no comments
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Charlie (wave w0 review, round 3)
+- Context: replaces the commands that "A stopped pre-commit hook is recovered by hand, with tested
+  steps" chose, `git stash apply --index` followed by `git stash drop`, which "The steps after a
+  stopped hook keep a merge, and the tests run them from the README" kept. The README gave them
+  with a `#` comment on most lines (w0.V2.Alpha.2). At the prompt of zsh, the default shell on
+  macOS, `#` starts no comment unless the `interactivecomments` option is on: pasted as one block,
+  an apostrophe in a comment opened a quote that swallowed the lines after it, and typed one line
+  at a time, every step failed except `git stash drop`, which dropped the only copy of the unstaged
+  changes and untracked files. In bash too, an apply that failed (git does not replace a new file
+  that has the name of one in the backup) did not stop the drop on the next line. The tests ran
+  the steps with `sh -e`, which reads `#` as a comment and stops at the first failure, so they
+  could see neither problem.
+- Decision: the three sets of steps hold commands only, with the explanations in the text around
+  them, and `git stash pop --index` replaces apply and drop: git drops the entry only once
+  everything is back, and otherwise says that it kept it. `git-hooks.test.ts` also pastes each set
+  into `zsh -f -i` where zsh is installed, and runs the steps after a stopped commit with a new
+  file in the way, every line whatever the one before did, as a prompt runs pasted lines: the
+  backup must survive.
+- Trade-offs: a `pop` that fails leaves the files it did restore and the entry, which the person
+  then sorts out by hand; nothing is lost. The zsh tests are skipped where zsh is missing, as it
+  may be on CI's runner, so there `readme.test.ts`, which fails on any `#` comment in the README's
+  command blocks, keeps the steps free of comments. Chaining every step with `&&` was the
+  alternative; `pop` protects the backup without it, and the merge steps must put the merge's state
+  back even when the restore fails.
+
+### The README's command blocks hold no comments; the docs say how to make zsh read them
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Charlie (wave w0 review, round 3)
+- Context: the README's quick start began with
+  `pnpm install   # also installs the git hooks (see "Git hooks" below)`, which zsh, the default
+  shell on macOS, stops with "zsh: number expected" before running anything: at its prompt zsh
+  reads `#` as an ordinary word unless the `interactivecomments` option is on, and it is off by
+  default, in macOS's own start-up files and in the owner's. The build log's "How to verify" blocks
+  (121 commented lines in 33 blocks) fail the same way: `pnpm lint   # prints ...` lints files
+  named "#" and "prints", and the commits of instruction 2's hook recipe fail on a pathspec named
+  "#", which looks like the hook rejecting them.
+- Decision: the README's command blocks hold commands only, with the explanations in the text
+  around them, and `readme.test.ts` fails on a `#` comment in any of them. The build log keeps its
+  comments, which say what each command should print; its introduction and the README's
+  prerequisites say to run `setopt interactivecomments` in zsh first.
+- Trade-offs: the build log's blocks still need a reader who has seen that note; rewriting 33
+  blocks in eight entries, most of them other engineers', was out of proportion. New README blocks
+  must keep comments out. Other documents with commented blocks, such as infra/README.md, are left
+  to their owners.
+
+### A staged test file makes the hook check that a Vitest project runs it
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Charlie (wave w0 review, round 3)
+- Context: `vitest related` runs the staged test files that a Vitest project includes, and passes
+  with "No test files found" on one that none includes, such as a `.test.tsx` file in
+  packages/shared, whose project includes only `.test.ts` files. That test then never runs, and
+  only `test-suite.test.ts` notices, in `pnpm test` or CI.
+- Decision: a fifth task in `lint-staged.config.ts`, for files named like Vitest's test files, runs
+  `vitest run --project tooling test-suite.test.ts` once per commit.
+- Trade-offs: about 0.4 s more for each commit that stages a test file, which most code commits
+  do. Making test files rerun triggers would catch it too, but would run every test (about 30 s)
+  for each such commit. If `test-suite.test.ts` is renamed, the task fails with "No test files
+  found" until the config is changed with it.
+
+### Lint and type-check tests take their lists from the tools
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Charlie (wave w0 review, round 3)
+- Context: "Tests check the resolved settings that decide what CI and the hook check" compares
+  resolved settings with lists in the tests, and two lists let weakened settings through
+  (w0.V2.Alpha.3, w0.V2.Alpha.4): the strict compiler flags left out the ones that `strict`
+  implies, which a tsconfig can still turn off one by one, and each ESLint rule set was checked on
+  one kind of file only.
+- Decision: `typecheck.test.ts` takes the flags that `strict` turns on from the installed
+  TypeScript (the compiler options it marks `strictFlag`) and fails when a tsconfig sets one to
+  false. `eslint-config.test.ts` takes the kinds of file from each rule set's own `files` patterns
+  (typescript-eslint: ts, tsx, mts and cts; Next.js: js, jsx, mjs, ts, tsx, mts and cts) and checks
+  one of each in three places of every package: `src`, a deeper folder of `src` and the package's
+  root.
+- Trade-offs: TypeScript's list of compiler options is not part of its typed API; Zod checks its
+  shape, and the test checks that it names noImplicitAny, so a TypeScript version that changes it
+  fails the test instead of checking nothing. `reactFiles` in `eslint.config.mjs` now follows
+  Next.js's own list, so `.mts` and `.cts` files in apps/web get the React and Next.js rules too;
+  `.cjs` stays out, as in Next.js's config.
