@@ -1528,7 +1528,10 @@ Keep entries brief. Details belong in code comments and the build log.
   Each test stand-in writes its process ID, which the test's clean-up kills however the test
   ends, and ends by itself once the test runner has gone. On macOS and in an Ubuntu 26.04 VM, no
   process was left after an interrupt at any moment of the check, after tests that timed out, or
-  after the whole test run was killed.
+  after the whole test run was killed. (Corrected in the wave w0 round-3 review: when the apps
+  needed SIGKILL, or a process outside the command's process group still held their output, it
+  prints that problem instead of "stopped the apps.", for example "Interrupted by SIGINT. The
+  apps' output was still open 10 s after SIGKILL: ...".)
 - Trade-offs: SIGKILL, which no program can handle, still leaves the apps running, as does
   Ctrl+\ (SIGQUIT); CI's runner removes leftover processes when a job ends. A command in the
   check's own process group would get a terminal's Ctrl+C directly, but `kill` and `timeout`,
@@ -1548,6 +1551,9 @@ Keep entries brief. Details belong in code comments and the build log.
   volume as the store.
 - Decision: the test asks `pnpm store path` in the checkout once and passes that store to every
   install of a copy (`--config.store-dir`); `--frozen-store` still keeps them from writing to it.
+  (Corrected in the wave w0 round-3 review: it asked with every `npm_config_` and `pnpm_config_`
+  variable removed, so with the store set by `PNPM_CONFIG_STORE_DIR` the copies got another store
+  and failed; it now asks with the test's own environment, as `pnpm install` ran.)
 - Trade-offs: one more pnpm command per run of the file, about 0.05 s. Rejected: copying the
   workspace into the checkout instead, onto its file system, which would put temporary folders
   inside the repository; and `TMPDIR` set to the runner's temporary folder in CI, which would
@@ -1764,3 +1770,27 @@ Keep entries brief. Details belong in code comments and the build log.
   `docker compose` commands are not checked and fail with Compose's own message; infra/README.md
   gives the minimum. Current Docker Desktop, OrbStack and Docker's own Linux packages are far
   newer, so the check is for old distribution packages.
+
+### The start check fails on warnings and errors that the apps print while they start
+
+- Date: 2026-10-11 · Instruction: #5 · Author: Alpha (wave w0 review, round 3)
+- Context: found in the round-3 review. "What "fail on any warning" means in CI" covers the
+  build's output, and "CI starts the production build and checks that both apps answer" looked
+  only at the answers, so a warning that the apps print as they start passed CI. Against this
+  repository's real build, `next start` with `NODE_ENV=staging` printed "⚠ You are using a
+  non-standard "NODE_ENV" value in your environment. ..." twice, and the start check passed.
+  `next start` also warns with "⚠" for `output: "standalone"`, which instruction 102 may set.
+  The API logs JSON lines with pino's numeric levels, and a warning or an error that it logs
+  without an Error object (`{"level":40,...}`) holds none of the build check's markers.
+- Decision: `scripts/check-start.ts` fails when what the apps printed until both had answered
+  holds a line that `findWarnings` in `scripts/check-build-warnings.ts` reports: a line with one
+  of the build check's markers, or now also a JSON log line (after pnpm's prefix) whose level,
+  read with Zod, is 40 (a warning) or above. The build-log check counts those lines too. What the
+  apps print once they are being stopped is not checked: pnpm then reports both apps as failed
+  ("Error: ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL"), and the API's own tests check its shutdown.
+- Trade-offs: a warning that appears only after both apps have answered, such as on a later
+  request, is not seen: the check sends just its two requests. Plain text without a marker still
+  passes, as in the build log, and a JSON log line that names its level instead of numbering it
+  is not read (the API's logger writes numbers). A warning that the apps print at every start
+  fails every CI run until it is fixed, which is what "fail on any warning" asks; one that has
+  to be accepted would need a named exception, like the build check's cache notice.
