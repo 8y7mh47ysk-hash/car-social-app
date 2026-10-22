@@ -1782,3 +1782,23 @@ Keep entries brief. Details belong in code comments and the build log.
   README's tests would be another list to keep in step with the tests, as the earlier entry says.
   So a broken recovery step in the README is caught by CI, not by the hook. Revisit if the
   README's tests move into a test file of their own, which such a task could run in a few seconds.
+
+### Tests check that git ignores what the tools generate
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Charlie (wave w0 review, round 3)
+- Context: round 2 of the wave w0 review found that removing `.next/` or `dist/` from `.gitignore`
+  passes CI's checks, which start from a fresh checkout with no build output, and left it without
+  a test because the build output "shows at once" in `git status` (BUILD_LOG #1, round 2). It shows
+  only to someone who builds and reads `git status` before running `git add --all`, and meanwhile
+  the pre-commit hook sets all of the untracked build output aside, and puts it back, on every
+  commit.
+- Decision: `generated-files.test.ts` asks git (`git check-ignore --no-index`, without the user's
+  global ignore file) about a file in each place where the tools in use write: `node_modules` at
+  the root and in a package, `.next` and `next-env.d.ts`, `build.log`, and the `outDir` of every
+  tsconfig as `tsc --showConfig` resolves it, so a new package's build output is checked without a
+  change to the test. It also fails when a rule ignores a file that git tracks, because `git add`
+  would then skip new files of that kind without a word.
+- Trade-offs: the list of tool outputs partly repeats `.gitignore`; the `outDir` check does not.
+  The output folders of tools that later instructions add (Storybook, Playwright) join the list
+  with those tools. `.husky/_` is left out: husky ignores that folder itself, and only once it has
+  run, so a `HUSKY=0` install would fail the test.
