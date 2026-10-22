@@ -239,7 +239,7 @@ describe("docker-compose.yml", () => {
     expect(redis.image).toMatch(/^redis:\d+\.\d+\.\d+-[\w.]+@sha256:[0-9a-f]{64}$/);
   });
 
-  it("health-checks postgres over TCP and fails the Redis check on error replies", () => {
+  it("health-checks postgres over TCP and Redis with the password from its own config file", () => {
     // TCP, because a Unix-socket check would pass against the temporary server that runs during
     // first-time initialisation. CMD-SHELL, because a shell must expand the container's
     // POSTGRES_USER and POSTGRES_DB ("$$" is Compose's escape for "$"): in exec form (CMD) the
@@ -249,8 +249,16 @@ describe("docker-compose.yml", () => {
       "CMD-SHELL",
       'pg_isready --host=127.0.0.1 --username="$${POSTGRES_USER}" --dbname="$${POSTGRES_DB}"',
     ]);
-    // Without -e, redis-cli exits 0 even on NOAUTH (wrong password) or LOADING replies.
-    expect(redis.healthcheck.test).toEqual(["CMD", "redis-cli", "-e", "ping"]);
+    // The password comes from the file redis-server read, so the check always uses the one Redis
+    // has, also after `docker compose start` has written a new one into the file while the
+    // container's REDISCLI_AUTH still holds the old one. It goes through REDISCLI_AUTH, not a
+    // command line. Without -e, redis-cli exits 0 even on WRONGPASS (wrong password) or LOADING
+    // replies.
+    expect(redis.healthcheck.test).toEqual([
+      "CMD-SHELL",
+      "REDISCLI_AUTH=\"$$(sed -n 's/^requirepass //p' /usr/local/etc/redis/redis.conf)\" " +
+        "redis-cli -e ping",
+    ]);
   });
 
   it("gives postgres and redis exactly the environment variables they need", () => {
@@ -263,7 +271,10 @@ describe("docker-compose.yml", () => {
       POSTGRES_USER: "${POSTGRES_USER:-postgres}",
       POSTGRES_DB: "${POSTGRES_DB:-apex_garage}",
     });
-    // Redis needs only the password for redis-cli. Anything more could change how the image
+    // Redis needs only the password for redis-cli. It must stay: Compose recreates a container
+    // when its settings change, and a change in the config file's content alone goes unnoticed,
+    // so without this copy `docker compose up -d` would leave Redis on the old password (seen on
+    // Compose 5.6.1 in the wave w0 review, round 3). Anything more could change how the image
     // starts Redis: SKIP_DROP_PRIVS=1, for example, keeps the server running as root.
     expect(redis.environment).toEqual({
       REDISCLI_AUTH: "${REDIS_PASSWORD:?set it in .env (see .env.example)}",

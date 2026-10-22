@@ -59,8 +59,11 @@ services:
       - source: redis-config
         target: /usr/local/etc/redis/redis.conf
     environment:
-      # redis-cli reads its password from this variable, so neither the health check nor
-      # `docker compose exec redis redis-cli` needs the password on its command line.
+      # redis-cli reads its password from this variable, so `docker compose exec redis redis-cli`
+      # needs no password on its command line. Keep it: Compose recreates the container when its
+      # settings change, and this one changes with the password, while a change in the config
+      # file's content alone goes unnoticed, so without it `docker compose up -d` would keep the
+      # old password.
       REDISCLI_AUTH: ${REDIS_PASSWORD:?set it in .env (see .env.example)}
     ports:
       - 127.0.0.1:${REDIS_PORT:-6379}:6379
@@ -68,10 +71,17 @@ services:
       # The image declares no volume: without this one the data would go with the container.
       - redis-data:/data
     healthcheck:
-      # -e makes redis-cli exit with an error when Redis replies with one, such as NOAUTH for a
-      # wrong password or LOADING while the data is read back after a restart. Without -e both
-      # would count as healthy.
-      test: [CMD, redis-cli, -e, ping]
+      # The check reads the password from the file that redis-server read, so it always uses the
+      # password Redis has: the container's REDISCLI_AUTH keeps the old one when
+      # `docker compose start` writes a new password into the file. It hands the password to
+      # redis-cli in REDISCLI_AUTH, never on a command line. -e makes redis-cli exit with an error
+      # when Redis replies with one, such as WRONGPASS for a wrong password or LOADING while the
+      # data is read back after a restart; without -e both would count as healthy.
+      test:
+        - CMD-SHELL
+        - >-
+          REDISCLI_AUTH="$$(sed -n 's/^requirepass //p' /usr/local/etc/redis/redis.conf)"
+          redis-cli -e ping
       interval: 10s
       timeout: 5s
       retries: 5
