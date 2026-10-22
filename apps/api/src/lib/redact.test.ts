@@ -104,9 +104,14 @@ describe("redactUrls", () => {
       "a password with an @: postgres://apex:p@ss@db/apex",
       `a password with an @: postgres://${REDACTED}@db/apex`,
     ],
+    // A "?" or "#" before the "@" may start a query string instead, so everything after "://" goes.
     [
       "a password with a ?: postgres://apex:p?ss@db/apex",
-      `a password with a ?: postgres://${REDACTED}@db/apex`,
+      `a password with a ?: postgres://${REDACTED}`,
+    ],
+    [
+      "a password with a #: postgres://apex:p#ss@db/apex",
+      `a password with a #: postgres://${REDACTED}`,
     ],
     ["(postgres://apex:pw@db)", `(postgres://${REDACTED}@db)`],
     // Several URLs joined without spaces, as in lists of Redis or PostgreSQL servers.
@@ -144,6 +149,9 @@ describe("redactUrls", () => {
       `https://example.com/garage/1?${REDACTED}`,
     ],
     ["https://example.com?a=1", `https://example.com?${REDACTED}`],
+    // An "@" in the query string of a URL without a path might end a password instead.
+    ["https://example.com?invite=a@b.com&token=abc", `https://${REDACTED}`],
+    ["see https://example.com#email=a@b.com&access_token=abc", `see https://${REDACTED}`],
     [
       "https://minio:9000/photos/car.jpg?X-Amz-Credential=key&X-Amz-Signature=sig",
       `https://minio:9000/photos/car.jpg?${REDACTED}`,
@@ -229,7 +237,65 @@ describe("redactUrl", () => {
     ["*?token=abc", `*?${REDACTED}`],
     ["http://u:p@example.com?token=abc", `http://${REDACTED}@example.com?${REDACTED}`],
     ["http://apex:it's-a-secret@example.com/", `http://${REDACTED}@example.com/`],
+    ["http://example.com?email=a@b&token=abc", `http://${REDACTED}`],
   ])("logs %j as %j", (url, expected) => {
     expect(redactUrl(url)).toBe(expected);
+  });
+});
+
+// The rules of both functions, checked on random runs of text made of URL characters with a
+// secret somewhere in each. The generator is seeded, so every run checks the same texts.
+describe("URL redaction on random text", () => {
+  const pieces = ["a", "b", "/", ":", "?", "#", "@", "://", "'", '"', "=", "&", ",", ".", "%"];
+  let seed = 7;
+  const random = (n: number): number => {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return seed % n;
+  };
+  const randomText = (): string =>
+    Array.from({ length: random(10) }, () => pieces[random(pieces.length)]).join("");
+
+  /** Whether the secret at `at` is in the user information of a URL with "://". */
+  function inUserInfo(text: string, at: number): boolean {
+    const nextSlash = text.indexOf("/", at);
+    const authorityEnd = nextSlash === -1 ? text.length : nextSlash;
+    for (let scheme = text.indexOf("://"); scheme !== -1 && scheme < at;) {
+      if (!text.slice(scheme + 3, at).includes("/")) {
+        return text.slice(at, authorityEnd).includes("@");
+      }
+      scheme = text.indexOf("://", scheme + 1);
+    }
+    return false;
+  }
+
+  it("never shows a secret in user information, or after a ? or # that a / comes before", () => {
+    const shown: string[] = [];
+    for (let round = 0; round < 20_000; round += 1) {
+      const before = randomText();
+      const text = `${before}secret${randomText()}`;
+      const slash = text.indexOf("/");
+      const query = slash === -1 ? -1 : text.slice(slash).search(/[?#]/);
+      const afterQuery = query !== -1 && slash + query < before.length;
+      if ((afterQuery || inUserInfo(text, before.length)) && redactUrls(text).includes("secret")) {
+        shown.push(text);
+      }
+    }
+
+    expect(shown).toEqual([]);
+  });
+
+  it("never shows a secret in a request URL's user information, query string or fragment", () => {
+    const shown: string[] = [];
+    for (let round = 0; round < 20_000; round += 1) {
+      const before = randomText();
+      const text = `${before}secret${randomText()}`;
+      const query = text.search(/[?#]/);
+      const afterQuery = query !== -1 && query < before.length;
+      if ((afterQuery || inUserInfo(text, before.length)) && redactUrl(text).includes("secret")) {
+        shown.push(text);
+      }
+    }
+
+    expect(shown).toEqual([]);
   });
 });

@@ -598,6 +598,12 @@ describe("secrets in the logs", () => {
       "http://apex:it's-query-secret@x/cars",
       `http://${REDACTED}@x/cars`,
     ],
+    [
+      "an @ in a query string with no path",
+      "GET",
+      "http://x?email=a@b&token=query-secret",
+      `http://${REDACTED}`,
+    ],
   ])("hides the secrets of a request URL with %s", async (_name, method, target, logged) => {
     const { app, output, lines } = await buildLoggedApp({ logLevel: "info" });
     const address = await app.listen({ host: "127.0.0.1", port: 0 });
