@@ -217,6 +217,12 @@ describe("ci.yml", () => {
     }
   });
 
+  it("turns off Next.js's telemetry for every step", () => {
+    for (const job of Object.values(ci.workflow.jobs)) {
+      expect(job.env?.["NEXT_TELEMETRY_DISABLED"]).toBe("1");
+    }
+  });
+
   it("also fails on peer dependency problems, formatting and build warnings", () => {
     expect(runs).toContain("pnpm peers check");
     expect(runs).toContain("pnpm format:check");
@@ -254,6 +260,13 @@ describe("ci.yml", () => {
 
     expect(compose).toContain("cp .env.example .env");
     expect(compose).toContain("docker compose --profile '*' config --quiet");
+  });
+
+  it("validates docker-compose.yml even when the install failed", () => {
+    // The check needs only Docker, so a broken lockfile does not hide a broken compose file.
+    const step = steps.find((candidate) => candidate.run?.includes("docker compose") === true);
+
+    expect(step?.if).toBe("${{ !cancelled() && steps.checkout.outcome == 'success' }}");
   });
 
   it("gives the Compose check a value for every variable docker-compose.yml requires", () => {
