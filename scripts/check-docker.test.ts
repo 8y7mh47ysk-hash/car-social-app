@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
+
+import { describe, expect, it, vi } from "vitest";
 
 import {
   DOCKER_PROBLEMS,
@@ -7,6 +9,10 @@ import {
   runQuietly,
   type CommandResult,
 } from "./check-docker.ts";
+
+// Every export of node:child_process becomes a spy that calls the real function, so a test can see
+// the options that the check's runner passes to spawnSync.
+vi.mock("node:child_process", { spy: true });
 
 const ok: CommandResult = { status: 0 };
 const failed: CommandResult = { status: 1 };
@@ -170,6 +176,14 @@ describe("runQuietly", () => {
     expect(result.status).toBeNull();
     expect(result.error?.code).toBe("ETIMEDOUT");
     expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it("gives each command the 20-second limit that the docs promise", () => {
+    // Waiting 20 s for a real hang would slow every test run, so this reads the limit that the
+    // runner passes to spawnSync, which the test above shows to stop a command.
+    runQuietly(process.execPath, ["-e", ""]);
+
+    expect(vi.mocked(spawnSync).mock.lastCall?.[2]?.timeout).toBe(20_000);
   });
 });
 
