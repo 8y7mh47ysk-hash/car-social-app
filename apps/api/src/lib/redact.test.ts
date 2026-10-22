@@ -154,6 +154,9 @@ describe("redactUrls", () => {
     // Only whitespace ends a URL: what follows it without a space is hidden with the query.
     ['in "/login?token=abc" (GET)', `in "/login?${REDACTED} (GET)`],
     ["['/a?x=1','/b?token=abc']", `['/a?${REDACTED}`],
+    // A "?" or "#" with no "/" before it does not end the search for one that has.
+    ['{"q":"why?","next":"/reset?token=abc"}', `{"q":"why?","next":"/reset?${REDACTED}`],
+    ["#12:/reset?token=abc", `#12:/reset?${REDACTED}`],
     // Characters that a query string can hold unencoded, all before the secret.
     ["/reset?name=d'arcy&token=abc", `/reset?${REDACTED}`],
     ["/search?q=a`b&token=abc", `/search?${REDACTED}`],

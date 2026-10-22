@@ -53,7 +53,7 @@ const URL_LIKE_TOKEN = /\S+/g;
  *   ("X-Amz-Signature=...") and OAuth redirects ("#access_token=..."). Whatever follows a URL
  *   without a space, such as the closing quote in '"/reset?token=abc",', is hidden with it.
  *
- * A "?" or "#" counts only in a run of text without whitespace that has a "/" before it, so
+ * A "?" or "#" counts only if a "/" comes before it in its run of text without whitespace, so
  * questions ("ready?") and numbers ("#12") are left alone. A URL that contains a raw space, which
  * URLs never do once encoded, ends at the space: whatever follows it stays visible. The work is
  * linear in the length of the text, whatever it contains.
@@ -113,9 +113,9 @@ function hideQuery(text: string, queryStart: number): string {
 
 function redactUrlToken(token: string): string {
   const result = redactUserInfo(token);
-  const queryStart = result.search(/[?#]/);
-  // In free text, a "?" or "#" belongs to a URL or path only if a "/" comes before it.
-  return queryStart !== -1 && result.lastIndexOf("/", queryStart) !== -1
-    ? hideQuery(result, queryStart)
-    : result;
+  // In free text, a "?" or "#" starts a query string or fragment only after a "/". One before the
+  // first "/" ('why?"/reset?token=abc"') stays, and the search goes on after it.
+  const slash = result.indexOf("/");
+  const queryOffset = slash === -1 ? -1 : result.slice(slash).search(/[?#]/);
+  return queryOffset === -1 ? result : hideQuery(result, slash + queryOffset);
 }
