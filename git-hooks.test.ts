@@ -876,7 +876,7 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       },
     );
 
-    // Most people paste the steps into the default shell of their Mac, zsh.
+    // On a Mac the steps get pasted into zsh, macOS's default shell.
     it.skipIf(!hasZsh)("restores everything with the README's steps pasted into zsh", async () => {
       const { repo } = await stopCommit("SIGKILL");
 
