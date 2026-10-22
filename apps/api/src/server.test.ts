@@ -578,7 +578,7 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
 
   // As when the output is piped to `head` and it exits: the lines are dropped, the API runs on.
   it.each(["json", "pretty"])(
-    "keeps serving with LOG_FORMAT=%s after the reader of its output has gone",
+    "keeps serving after the reader of its %s output has gone",
     async (format) => {
       const server = startServer({ LOG_FORMAT: format });
       const url = await listeningUrl(server);
