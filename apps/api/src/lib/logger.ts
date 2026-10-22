@@ -7,7 +7,7 @@ import {
   type LogLevel,
 } from "fastify";
 
-import { REDACTED, isSensitiveKey, redactUrls } from "./redact.ts";
+import { REDACTED, isSensitiveKey, redactUrl, redactUrls } from "./redact.ts";
 import { getRequestContext } from "./request-context.ts";
 import { REQUEST_ID_HEADER, requestIdFor } from "./request-id.ts";
 
@@ -60,12 +60,13 @@ function truncate(text: string, max: number): string {
 }
 
 /**
- * A request URL as it is logged: the query string and fragment hidden, because they can carry
- * tokens (for example in links from emails), and at most MAX_LOGGED_URL_LENGTH characters, because
- * the client chooses the URL. "/reset?token=abc" becomes "/reset?[Redacted]".
+ * A request URL as it is logged: everything after its first "?" or "#" hidden, because query
+ * strings can carry tokens (for example in links from emails), and at most MAX_LOGGED_URL_LENGTH
+ * characters, because the client chooses the URL. "/reset?token=abc" becomes "/reset?[Redacted]",
+ * whatever characters the query string holds (see redactUrl).
  */
 export function loggableUrl(url: string): string {
-  return truncate(redactUrls(url), MAX_LOGGED_URL_LENGTH);
+  return truncate(redactUrl(url), MAX_LOGGED_URL_LENGTH);
 }
 
 /** A JSON.parse reviver: called for every key and value, innermost first. */

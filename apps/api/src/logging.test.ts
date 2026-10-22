@@ -550,6 +550,56 @@ describe("secrets in the logs", () => {
     expect(line("reply headers")).toMatchObject({ headers: { "set-cookie": REDACTED } });
   });
 
+  // Node.js accepts these characters unencoded in a request target (app.inject() would encode
+  // most of them first), so none of them may end the part of the URL that is hidden.
+  it.each([
+    ["an apostrophe", "GET", "/cars?owner=d'arcy&token=query-secret", `/cars?${REDACTED}`],
+    ["a backtick", "GET", "/cars?q=a`b&token=query-secret", `/cars?${REDACTED}`],
+    ["a double quote", "GET", '/cars?q="&token=query-secret', `/cars?${REDACTED}`],
+    ["angle brackets", "GET", "/cars?q=<b>&token=query-secret", `/cars?${REDACTED}`],
+    ["no slash before the ?", "OPTIONS", "*?token=query-secret", `*?${REDACTED}`],
+    [
+      "an apostrophe in a password",
+      "GET",
+      "http://apex:it's-query-secret@x/cars",
+      `http://${REDACTED}@x/cars`,
+    ],
+  ])("hides the secrets of a request URL with %s", async (_name, method, target, logged) => {
+    const { app, output, lines } = await buildLoggedApp({ logLevel: "info" });
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+    const reply = await sendRaw(
+      new URL(address),
+      `${method} ${target} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`,
+    );
+
+    expect(reply).toMatch(/^HTTP\/1\.1 404 /);
+    expect(lines().find((line) => line.msg === "incoming request")?.["req"]).toEqual({
+      method,
+      url: logged,
+      remoteAddress: "127.0.0.1",
+    });
+    expect(output()).not.toContain("query-secret");
+  });
+
+  // Fastify's warnings about a reply sent twice quote the raw request URL in their messages.
+  it("hides the query string of a raw request URL that a message quotes", async () => {
+    const { app, output, lines } = await buildLoggedApp({ logLevel: "info" });
+    app.get("/twice", (_request, reply) => {
+      void reply.send({ first: true });
+      void reply.send({ second: true });
+    });
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+    await sendRaw(
+      new URL(address),
+      'GET /twice?q="&token=query-secret HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n',
+    );
+
+    expect(lines().some((line) => line.msg.includes(`"/twice?${REDACTED}`))).toBe(true);
+    expect(output()).not.toContain("query-secret");
+  });
+
   // Node.js attaches the raw bytes of a request it cannot parse to the error that Fastify logs at
   // trace level, so they hold every header the client sent, cookies included.
   it("hides the raw bytes of a malformed request", async () => {

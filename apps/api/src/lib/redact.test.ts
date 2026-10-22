@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { REDACTED, isSensitiveKey, redactUrls } from "./redact.ts";
+import { REDACTED, isSensitiveKey, redactUrl, redactUrls } from "./redact.ts";
 
 describe("isSensitiveKey", () => {
   it.each([
@@ -124,6 +124,13 @@ describe("redactUrls", () => {
       "nodes=[redis://:pw1@a;redis://:pw2@b]",
       `nodes=[redis://${REDACTED}@a;redis://${REDACTED}@b]`,
     ],
+    // Characters that can stand unencoded in a password, before or after its "@".
+    ["postgres://apex:it's-a-secret@db:5432/apex", `postgres://${REDACTED}@db:5432/apex`],
+    ['postgres://apex:a"b<c>d`e@db/apex', `postgres://${REDACTED}@db/apex`],
+    [
+      "connecting to 'postgres://apex:pw@db/apex'",
+      `connecting to 'postgres://${REDACTED}@db/apex'`,
+    ],
   ])("hides the user information in %j", (text, expected) => {
     expect(redactUrls(text)).toBe(expected);
   });
@@ -142,9 +149,21 @@ describe("redactUrls", () => {
       `https://minio:9000/photos/car.jpg?${REDACTED}`,
     ],
     ["postgres://apex:pw@db/apex?sslmode=require", `postgres://${REDACTED}@db/apex?${REDACTED}`],
-    ['in "/login?token=abc" (GET)', `in "/login?${REDACTED}" (GET)`],
     ["Route GET:/nope?token=abc not found", `Route GET:/nope?${REDACTED} not found`],
     ["two: /a?x=1 and /b?y=2", `two: /a?${REDACTED} and /b?${REDACTED}`],
+    // Only whitespace ends a URL: what follows it without a space is hidden with the query.
+    ['in "/login?token=abc" (GET)', `in "/login?${REDACTED} (GET)`],
+    ["['/a?x=1','/b?token=abc']", `['/a?${REDACTED}`],
+    // Characters that a query string can hold unencoded, all before the secret.
+    ["/reset?name=d'arcy&token=abc", `/reset?${REDACTED}`],
+    ["/search?q=a`b&token=abc", `/search?${REDACTED}`],
+    ['/search?q="a"&token=abc', `/search?${REDACTED}`],
+    ["/search?q=<a>&token=abc", `/search?${REDACTED}`],
+    // Fastify's warning for a reply sent twice quotes the raw request URL.
+    [
+      'Reply was already sent, did you forget to "return reply" in the "/cars?q="&token=abc" (GET) route?',
+      `Reply was already sent, did you forget to "return reply" in the "/cars?${REDACTED} (GET) route?`,
+    ],
   ])("hides the query string and fragment in %j", (text, expected) => {
     expect(redactUrls(text)).toBe(expected);
   });
@@ -158,6 +177,7 @@ describe("redactUrls", () => {
     "ready?",
     "is /health up?",
     "fixed in #12",
+    "it's ready?",
     "a/b",
     "/health",
     "/health?",
@@ -188,5 +208,25 @@ describe("redactUrls", () => {
     const text = "a://u:p@h,".repeat(100_000);
 
     expect(redactUrls(text)).toBe(`a://${REDACTED}@h,`.repeat(100_000));
+  });
+});
+
+// Request targets, as Node.js accepts them from a client.
+describe("redactUrl", () => {
+  it.each([
+    ["/health", "/health"],
+    ["/health?", "/health?"],
+    ["/cars/7?sort=name", `/cars/7?${REDACTED}`],
+    ["/cb#access_token=abc", `/cb#${REDACTED}`],
+    ["/reset?name=d'arcy&token=abc", `/reset?${REDACTED}`],
+    ["/search?q=a`b&token=abc", `/search?${REDACTED}`],
+    ['/search?q="&token=abc', `/search?${REDACTED}`],
+    ["/search?q=<>&token=abc", `/search?${REDACTED}`],
+    // Without a "/" before the "?", which redactUrls needs in free text.
+    ["*?token=abc", `*?${REDACTED}`],
+    ["http://u:p@example.com?token=abc", `http://${REDACTED}@example.com?${REDACTED}`],
+    ["http://apex:it's-a-secret@example.com/", `http://${REDACTED}@example.com/`],
+  ])("logs %j as %j", (url, expected) => {
+    expect(redactUrl(url)).toBe(expected);
   });
 });

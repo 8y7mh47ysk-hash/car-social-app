@@ -33,8 +33,13 @@ export function isSensitiveKey(key: string): boolean {
   return SENSITIVE_KEY.test(key.toLowerCase().replaceAll(/[^a-z\d]/g, ""));
 }
 
-/** A run of text that may hold a URL or a path: no whitespace, quotes or angle brackets. */
-const URL_LIKE_TOKEN = /[^\s"'`<>]+/g;
+/**
+ * A run of text without whitespace, which may hold a URL or a path. Only whitespace ends it:
+ * quotes, backticks and angle brackets can stand unencoded inside a URL (an apostrophe in a
+ * password or a query string, a backtick in a query string that a browser sends), and Node.js
+ * accepts all of them in a request target, which Fastify quotes in some of its messages.
+ */
+const URL_LIKE_TOKEN = /\S+/g;
 
 /**
  * Hides the parts of URLs that can carry secrets, wherever URLs appear in a piece of text:
@@ -43,19 +48,32 @@ const URL_LIKE_TOKEN = /[^\s"'`<>]+/g;
  *   "postgres://[Redacted]@db/apex". Everything up to the last "@" before the first "/" counts,
  *   so a password that contains "@", "?" or "#" is hidden too. URLs joined without spaces, as in
  *   "redis://:pw@a:6379,redis://:pw@b:6379", each get their own;
- * - everything after the first "?" or "#" of a URL or path, so query strings and fragments never
- *   reach the logs: "/reset?token=abc" becomes "/reset?[Redacted]". That covers reset links,
- *   signed storage URLs ("X-Amz-Signature=...") and OAuth redirects ("#access_token=...").
+ * - everything after the first "?" or "#" of a URL or path, up to the next whitespace:
+ *   "/reset?token=abc" becomes "/reset?[Redacted]". That covers reset links, signed storage URLs
+ *   ("X-Amz-Signature=...") and OAuth redirects ("#access_token=..."). Whatever follows a URL
+ *   without a space, such as the closing quote in '"/reset?token=abc",', is hidden with it.
  *
- * A "?" or "#" counts only in a run of text (no spaces or quotes) that has a "/" before it, so
- * questions ("ready?") and numbers ("#12") are left alone. The work is linear in the length of
- * the text, whatever it contains.
+ * A "?" or "#" counts only in a run of text without whitespace that has a "/" before it, so
+ * questions ("ready?") and numbers ("#12") are left alone. A URL that contains a raw space, which
+ * URLs never do once encoded, ends at the space: whatever follows it stays visible. The work is
+ * linear in the length of the text, whatever it contains.
  */
 export function redactUrls(text: string): string {
   if (!text.includes("@") && !text.includes("?") && !text.includes("#")) {
     return text;
   }
   return text.replace(URL_LIKE_TOKEN, redactUrlToken);
+}
+
+/**
+ * Hides the user information of `url` and everything after its first "?" or "#", treating the
+ * whole text as one URL: unlike redactUrls, it needs no "/" before the "?" (a request target can
+ * be "*?token=abc") and nothing in the URL ends it early. For request URLs, which the client
+ * chooses: "/reset?name=d'arcy&token=abc" becomes "/reset?[Redacted]".
+ */
+export function redactUrl(url: string): string {
+  const result = redactUserInfo(url);
+  return hideQuery(result, result.search(/[?#]/));
 }
 
 /**
@@ -83,17 +101,21 @@ function redactUserInfo(token: string): string {
   return `${result}${token.slice(copied)}`;
 }
 
+/**
+ * Replaces everything after the "?" or "#" at `queryStart` with REDACTED. A text without one
+ * (`queryStart` is -1), or with nothing after it ("/health?"), is returned as it is.
+ */
+function hideQuery(text: string, queryStart: number): string {
+  return queryStart === -1 || queryStart === text.length - 1
+    ? text
+    : `${text.slice(0, queryStart + 1)}${REDACTED}`;
+}
+
 function redactUrlToken(token: string): string {
-  let result = redactUserInfo(token);
-
+  const result = redactUserInfo(token);
   const queryStart = result.search(/[?#]/);
-  if (
-    queryStart !== -1 &&
-    queryStart < result.length - 1 &&
-    result.lastIndexOf("/", queryStart) !== -1
-  ) {
-    result = `${result.slice(0, queryStart + 1)}${REDACTED}`;
-  }
-
-  return result;
+  // In free text, a "?" or "#" belongs to a URL or path only if a "/" comes before it.
+  return queryStart !== -1 && result.lastIndexOf("/", queryStart) !== -1
+    ? hideQuery(result, queryStart)
+    : result;
 }
