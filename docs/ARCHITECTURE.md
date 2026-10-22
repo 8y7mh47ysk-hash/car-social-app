@@ -382,13 +382,18 @@ flowchart TB
   (#72), sends only the headers it writes there, so it must include `reply.getHeaders()`.
 - **Redaction.** Before a line is written, the values of sensitive keys (passwords, tokens,
   cookies, authorization headers, API keys and similar) are replaced with `[Redacted]` at any
-  depth; URL credentials, query strings and fragments are hidden in every string; strings are cut
-  to 8192 characters and request URLs to 256. Fastify's lines for a 404 and for a URL its router
-  rejects would repeat the raw URL, so the API logs them without it ("route not found",
-  "malformed URL", "route parameter too long"). Never put a secret in a log message: inside free
-  text only URL parts can be recognised. For the same reason, log parsed objects rather than raw
-  bodies as strings (a raw webhook body, #91, is free text to the logger), and never put a secret
-  in a URL path, which is logged as it is: tokens in links (#39, #41) go in the query string.
+  depth. A request URL is logged with its credentials and everything after its first `?` or `#`
+  hidden, whatever characters it holds. In every other string value, URL credentials, query
+  strings and fragments are hidden up to the next whitespace, where a URL is taken to end (an
+  encoded URL never holds a space), so a quote or bracket glued to a URL is hidden with it. String
+  values are cut to 8192 characters and request URLs to 256; object keys, and the number of keys
+  and items, are logged as they are. Fastify's lines for a 404 and for a URL its router rejects
+  would repeat the raw URL, so the API logs them without it ("route not found", "malformed URL",
+  "route parameter too long"). Never put a secret in a log message: inside free text only URL
+  parts can be recognised. For the same reason, log the parsed fields you need, not raw bodies as
+  strings (a raw webhook body, #91, is free text to the logger) or whole objects whose keys and
+  size a client chooses, and never put a secret in a URL path, which is logged as it is: tokens in
+  links (#39, #41) go in the query string.
 - **Crashes.** An uncaught exception, or a promise rejection that nothing handles, is logged at
   fatal level, redacted and with the ID of the request whose code failed, before the process
   exits with code 1 (`apps/api/src/server.ts`). Node.js's own report would be unredacted text.
