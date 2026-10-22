@@ -576,6 +576,23 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
     },
   );
 
+  // As when the output is piped to `head` and it exits: the lines are dropped, the API runs on.
+  it.each(["json", "pretty"])(
+    "keeps serving with LOG_FORMAT=%s after the reader of its output has gone",
+    async (format) => {
+      const server = startServer({ LOG_FORMAT: format });
+      const url = await listeningUrl(server);
+
+      server.child.stdout.destroy();
+      for (let request = 0; request < 3; request += 1) {
+        expect((await fetch(new URL("/health", url))).status).toBe(200);
+      }
+
+      server.child.kill("SIGTERM");
+      expect(await server.exited).toEqual({ code: 0, signal: null });
+    },
+  );
+
   it("does not need pino-pretty to log JSON", async () => {
     const server = startServer({ LOG_FORMAT: "json" }, WITHOUT_PINO_PRETTY);
     const url = await listeningUrl(server);
