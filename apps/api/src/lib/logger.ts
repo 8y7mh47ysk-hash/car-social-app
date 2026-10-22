@@ -51,7 +51,7 @@ const REQUEST_ID_LOG_KEY = "reqId";
 /** Request URLs are logged with at most this many characters. */
 export const MAX_LOGGED_URL_LENGTH = 256;
 
-/** Any other string in a log line is cut to this many characters. */
+/** Any other string value in a log line is cut to this many characters (keys are not). */
 export const MAX_LOGGED_STRING_LENGTH = 8192;
 
 /** Cuts `text` to `max` characters, saying how much was left out. */
