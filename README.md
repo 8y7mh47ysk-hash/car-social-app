@@ -229,45 +229,50 @@ While the pre-commit hook runs, it keeps a backup of your changes in the git sta
 named `lint-staged automatic backup (<id>)`. Only Ctrl+C (SIGINT) lets it tidy up. If it is
 stopped in any other way (a closed terminal, an editor or tool that cancels the commit or gives up
 waiting, `kill`), your unstaged changes and untracked files stay in that entry and the working tree
-holds only what was staged. To get everything back exactly as it was, staged and unstaged:
+holds only what was staged. To get everything back exactly as it was, staged and unstaged, find
+the entry with `git stash list`, then run these steps with its number (`n` in `stash@{n}`) and
+`<id>` filled in, before you edit anything:
 
 ```sh
-git stash list                      # find "lint-staged automatic backup (<id>)": stash@{n}
-d=$(git rev-parse --git-dir)        # this worktree's git folder
-git reset --hard                    # the backup also holds what was staged
-git stash apply --index stash@{n}   # restores the staged, unstaged and untracked files
-git stash drop stash@{n}
-rm -rf "$d/lint-staged/<id>"        # the hook's working files
+d=$(git rev-parse --git-dir)
+git reset --hard
+git stash pop --index stash@{n}
+rm -rf "$d/lint-staged/<id>"
 ```
 
-These are the steps the hook itself takes after a failed check. Run them before you edit again,
-because `git reset --hard` discards changes made since the hook stopped. A plain `git stash pop`
-is not enough: it stops with a merge conflict on any file that was partly staged.
+`git reset --hard` empties the working tree, because the backup also holds what was staged; it
+also discards anything changed since the hook stopped. `git stash pop --index` puts back the
+staged, unstaged and untracked files and only then drops the entry: if it cannot put everything
+back (for example because a new file of yours has the name of one in the backup), it says so and
+keeps the entry, so nothing is lost. The last step deletes the hook's working files from this
+worktree's git folder. These are the steps the hook itself takes after a failed check. Without
+`git reset --hard` first, `git stash pop` stops with a merge conflict on any partly staged file.
 
 If that commit was finishing a merge (`git status` said "All conflicts fixed but you are still
-merging"), `git reset --hard` and `git stash apply` both end the merge, and the next commit would
-quietly leave out the merged branch. So set the merge's state aside around them, as the hook does:
+merging"), `git reset --hard` and `git stash pop` both end the merge, and the next commit would
+quietly leave out the merged branch. So copy the merge's state aside first and put it back after,
+as the hook does; once `mv` has run, the merge is in progress again:
 
 ```sh
-git stash list                      # find "lint-staged automatic backup (<id>)": stash@{n}
-d=$(git rev-parse --git-dir) && mkdir "$d/merge-state"
+d=$(git rev-parse --git-dir)
+mkdir "$d/merge-state"
 cp "$d/MERGE_HEAD" "$d/MERGE_MSG" "$d/MERGE_MODE" "$d/merge-state/"
 git reset --hard
-git stash apply --index stash@{n}
-mv "$d/merge-state/"* "$d/" && rmdir "$d/merge-state"   # the merge is in progress again
-git stash drop stash@{n}
+git stash pop --index stash@{n}
+mv "$d/merge-state/"* "$d/"
+rmdir "$d/merge-state"
 rm -rf "$d/lint-staged/<id>"
 ```
 
 If `git merge` or `git pull` itself was stopped while the hook ran (closing the terminal stops
 both), git never recorded the merge. After the first set of steps, the merge's changes are staged
 as if they were yours, and committing them would leave out the merged branch. git refuses to merge
-with changes staged, so all of them came from the merge: drop them, keeping your own unstaged
-changes and untracked files, and merge again.
+with changes staged, so all of them came from the merge: drop them with `git reset --merge`, which
+keeps your own unstaged changes and untracked files, then merge again (or run the `git pull` again):
 
 ```sh
-git reset --merge                   # drops the staged changes, keeps your own
-git merge <branch>                  # or run the git pull again
+git reset --merge
+git merge <branch>
 ```
 
 All worktrees of a repository share one stash list, so the top entry may be another worktree's
