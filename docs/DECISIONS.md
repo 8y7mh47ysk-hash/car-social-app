@@ -1775,18 +1775,26 @@ Keep entries brief. Details belong in code comments and the build log.
   characters unencoded in a request target, so `GET /reset?name=d'arcy&token=...` was logged as
   `/reset?[Redacted]'arcy&token=...` and `OPTIONS *?token=...` in full. An apostrophe is also
   legal in a password (`postgres://apex:it's-a-secret@db/apex` was logged unchanged), and
-  Fastify's warnings about a reply sent twice quote the raw request URL.
+  Fastify's warnings about a reply sent twice quote the raw request URL. User information ran to
+  the last `@` before the next `/`, so in `https://example.com?invite=a@b.com&token=abc`, a URL
+  without a path, it took the `?` with it and the rest of the query string was logged.
 - Decision: `redactUrl` in `apps/api/src/lib/redact.ts` treats a request URL as one URL: it hides
   the credentials and everything after the first `?` or `#`, and `loggableUrl` uses it. In other
-  strings, `redactUrls` ends a URL only at whitespace, which an encoded URL never holds. A `?` or
-  `#` in free text still counts only after a `/`, so "ready?" and "#12" stay as they are.
+  strings, `redactUrls` ends a URL only at whitespace, which an encoded URL never holds, and hides
+  from the first `?` or `#` that a `/` comes before, so "ready?" and "#12" stay as they are. When
+  the `@` that ends user information comes after the start of the query string, everything after
+  the `://` is hidden, because that `@` may end a password or belong to the query string. Seeded
+  property tests check these rules on random text.
 - Trade-offs: text glued to a URL without a space is hidden with its query string: `"/a?b=1",`
   loses its closing quote and comma, and a JSON document logged as one string loses everything
-  after its first URL with a query string. That costs readability, never a secret. A URL that was
-  never encoded can hold a raw space and then ends there. Rejected: keeping quotes as boundaries
-  in free text (Fastify's own messages quote raw request URLs, which may contain quotes), and the
-  WHATWG URL parser (it rejects relative paths such as `/reset?token=abc` and accepts characters
-  that it would encode, so it cannot find where a URL ends in text either).
+  after its first URL with a query string. A password with a raw `?` or `#` hides the host as
+  well. That costs readability, never a secret. A URL that was never encoded can hold a raw space
+  and then ends there, and a raw `/` in a password ends its user information, so such a password
+  shows; the passwords that infra/README.md has the owner generate are hex. Rejected: keeping
+  quotes as boundaries in free text (Fastify's own messages quote raw request URLs, which may
+  contain quotes), and the WHATWG URL parser (it rejects relative paths such as
+  `/reset?token=abc` and accepts characters that it would encode, so it cannot find where a URL
+  ends in text either).
 
 ### LOG_FORMAT=pretty writes to standard output synchronously
 

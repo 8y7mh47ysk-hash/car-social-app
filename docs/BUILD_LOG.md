@@ -1788,7 +1788,7 @@ pnpm exec vitest run scripts/check-docker.test.ts scripts/package-scripts.test.t
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm --filter @apex/api test   # all pass: "Tests  299 passed (299)" after round 3 of the review
+pnpm --filter @apex/api test   # all pass: "Tests  308 passed (308)" after round 3 of the review
 pnpm lint                      # exits with code 0
 pnpm typecheck                 # shared, api and web each report "Done"
 ```
@@ -1913,7 +1913,7 @@ pnpm --filter @apex/api exec vitest run src/lib/redact.test.ts src/logging.test.
 pnpm --filter @apex/api exec vitest run src/server.test.ts -t "pino-pretty|redacted JSON line"
 ```
 
-The first ends with `Tests  180 passed (180)`, the second with `Tests  4 passed | 23 skipped (27)`
+The first ends with `Tests  189 passed (189)`, the second with `Tests  4 passed | 23 skipped (27)`
 (rounds 2 and 3 added tests to both files).
 
 **Review fixes (wave w0, round 2)**
@@ -1955,7 +1955,7 @@ pnpm --filter @apex/api exec vitest run src/server.test.ts -t "LOG_FORMAT=pretty
 pnpm exec vitest run api-console.test.ts
 ```
 
-They end with `Tests  180 passed (180)`, `Tests  4 passed | 23 skipped (27)` and
+They end with `Tests  189 passed (189)`, `Tests  4 passed | 23 skipped (27)` and
 `Tests  4 passed (4)` (round 3 added tests to the first two files). To see the pino-pretty
 messages for yourself, from `apps/api`:
 
@@ -1981,6 +1981,14 @@ Bravo reviewed this instruction and changed:
   now ends only at whitespace, so a password with an apostrophe
   (`postgres://apex:it's-a-secret@db/apex`) and the raw URL that Fastify quotes when a reply is
   sent twice are hidden too; text glued to a URL without a space is hidden with it.
+- Query strings after an `@`. User information ran to the last `@` before the next `/`, so in a
+  URL without a path, the `@` of an email address in the query string ended it and took the `?`
+  with it: `https://example.com?invite=a@b.com&token=abc` was logged as
+  `https://[Redacted]@b.com&token=abc`, in messages and in request lines
+  (`GET http://x?email=a@b&token=...`). In that case everything after the `://` is now hidden. A
+  `?` or `#` with no `/` before it also ended the search for a later one in the same run of text
+  (`why?"/reset?token=abc"`), which the change above to whitespace-only runs made more likely.
+  Seeded property tests now check 20,000 random runs of text against these rules.
 - A value logged under the key `req` that is not a Fastify request (null, an object without a
   `url`, an outgoing `http.ClientRequest`) made the log call throw a TypeError, which fails a
   request or, from a timer, stops the API. The request serializer now logs only the string fields
@@ -2004,13 +2012,14 @@ pnpm --filter @apex/api exec vitest run src/lib/redact.test.ts src/lib/logger.te
 pnpm --filter @apex/api exec vitest run src/server.test.ts -t "reader"
 ```
 
-They end with `Tests  201 passed (201)` and `Tests  4 passed | 23 skipped (27)`. With the API
+They end with `Tests  210 passed (210)` and `Tests  4 passed | 23 skipped (27)`. With the API
 running as above (`pnpm --filter @apex/api dev`), in terminal 2:
 
 ```sh
 curl -s -o /dev/null "http://127.0.0.1:4000/reset?name=d'arcy&token=secret-value"
 curl -s -o /dev/null -X OPTIONS --request-target '*?token=secret-value' http://127.0.0.1:4000/
+curl -s -o /dev/null --request-target 'http://x?email=a@b&token=secret-value' http://127.0.0.1:4000/
 ```
 
-Terminal 1 logs the two URLs as `"/reset?[Redacted]"` and `"*?[Redacted]"`, and `secret-value`
-appears nowhere.
+Terminal 1 logs the three URLs as `"/reset?[Redacted]"`, `"*?[Redacted]"` and
+`"http://[Redacted]"`, and `secret-value` appears nowhere.
