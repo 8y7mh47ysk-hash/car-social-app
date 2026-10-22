@@ -5,12 +5,14 @@
 // answers GET /health and the web app serves its home page; then stops them by sending SIGTERM to
 // pnpm. pnpm passes it on to both apps, but kills the other app as soon as one has ended, so the
 // check shows that the apps start and answer, not that each one shuts down cleanly (the API's own
-// tests, apps/api/src/server.test.ts and production.test.ts, check its shutdown).
+// tests, apps/api/src/server.test.ts and production.test.ts, check its shutdown). CI fails on any
+// warning, so the check also fails when the apps print a warning or an error line while they start
+// (the markers of scripts/check-build-warnings.ts); what they print while they stop is not checked.
 //
 // Usage, from the repository root, after `pnpm build`: node scripts/check-start.ts
-// Exit status: 0 when both apps answered and then stopped, 1 otherwise. On failure it says what
-// went wrong and prints everything the apps printed. Interrupted by SIGINT (Ctrl+C), SIGTERM or
-// SIGHUP, it stops the apps first and then ends by that signal.
+// Exit status: 0 when both apps answered without printing a warning and then stopped, 1 otherwise.
+// On failure it says what went wrong and prints everything the apps printed. Interrupted by SIGINT
+// (Ctrl+C), SIGTERM or SIGHUP, it stops the apps first and then ends by that signal.
 
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -18,6 +20,8 @@ import { createServer, type Server } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { z } from "zod";
+
+import { findWarnings } from "./check-build-warnings.ts";
 
 /** The API's GET /health body, as packages/shared's healthResponseSchema defines it. */
 const healthSchema = z.strictObject({ status: z.literal("ok") });
@@ -60,7 +64,10 @@ export interface StartCheckOptions {
 export interface StartCheckResult {
   /** The ports the apps were given, as WEB_PORT and API_PORT. */
   readonly ports: { readonly web: number; readonly api: number };
-  /** What went wrong, one problem per line; undefined when both apps answered and then stopped. */
+  /**
+   * What went wrong, one problem per line; undefined when both apps answered without printing a
+   * warning and then stopped.
+   */
   readonly problem: string | undefined;
   /**
    * What went wrong while stopping the apps (also the last line of `problem`): they needed SIGKILL,
@@ -144,8 +151,9 @@ const seconds = (ms: number): string => String(ms / 1000);
 /**
  * Starts the apps with `options.command` (by default `pnpm start`), with WEB_HOST and API_HOST set
  * to 127.0.0.1 and WEB_PORT and API_PORT to free ports, in a process group of its own. Waits until
- * the API answers GET /health and the web app its home page, then stops the group with SIGTERM,
- * and with SIGKILL if its output has not closed in time. Never waits longer than the time limits.
+ * the API answers GET /health and the web app its home page, and fails if they printed a warning
+ * or an error line by then. Then stops the group with SIGTERM, and with SIGKILL if its output has
+ * not closed in time. Never waits longer than the time limits.
  */
 export async function checkStart(options: StartCheckOptions = {}): Promise<StartCheckResult> {
   const [command, ...args] = options.command ?? ["pnpm", "start"];
@@ -228,6 +236,20 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
     await sleep(POLL_INTERVAL_MS);
     apiState = apiState === undefined ? undefined : await probe(api.url, healthProblem, signal);
     webState = webState === undefined ? undefined : await probe(web.url, pageProblem, signal);
+  }
+  if (problems.length === 0) {
+    // Both apps answered. Only what they printed until now counts: once stopped, pnpm reports
+    // them as failed ("Error: ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL").
+    const warnings = findWarnings(output);
+    if (warnings.length > 0) {
+      problems.push(
+        [
+          `The apps printed ${String(warnings.length)} warning or error line(s) while they ` +
+            "started, and CI fails on any:",
+          ...warnings.map((warning) => `  ${warning}`),
+        ].join("\n"),
+      );
+    }
   }
 
   const signalGroup = (stop: NodeJS.Signals): void => {

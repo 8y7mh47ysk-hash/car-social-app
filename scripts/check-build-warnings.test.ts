@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, onTestFinished } from "vitest";
 
-import { findBuildWarnings } from "./check-build-warnings.ts";
+import { findWarnings } from "./check-build-warnings.ts";
 
 // The logs below are excerpts of real `pnpm build` output from this repository, captured with
 // CI=true as on GitHub Actions. The warnings and errors were provoked on purpose in a scratch copy.
@@ -85,13 +85,13 @@ const textLoggedWhilePrerendering = [
   "apps/web build: ✓ Generating static pages using 5 workers (4/4) in 161ms",
 ].join("\n");
 
-describe("findBuildWarnings", () => {
+describe("findWarnings", () => {
   it("finds no warnings in a clean build, ignoring the CI notice about the build cache", () => {
-    expect(findBuildWarnings(cleanBuild)).toEqual([]);
+    expect(findWarnings(cleanBuild)).toEqual([]);
   });
 
   it("finds the warnings that Next.js logs with ⚠, such as an unknown next.config.ts option", () => {
-    expect(findBuildWarnings(unknownConfigOption)).toEqual([
+    expect(findWarnings(unknownConfigOption)).toEqual([
       "apps/web build: ⚠ Invalid next.config.ts options detected:",
       "apps/web build: ⚠     Unrecognized key(s) in object: 'notARealOption'",
       "apps/web build: ⚠ See more info here: https://nextjs.org/docs/messages/invalid-next-config",
@@ -99,7 +99,7 @@ describe("findBuildWarnings", () => {
   });
 
   it("finds Turbopack's compile warnings", () => {
-    expect(findBuildWarnings(turbopackWarnings)).toEqual([
+    expect(findWarnings(turbopackWarnings)).toEqual([
       "apps/web build: Turbopack build encountered 2 warnings:",
       "apps/web build: Warning: Dynamic filesystem access causes tracing of the whole project",
       "apps/web build: Warning: Dynamic filesystem access causes tracing of the whole project",
@@ -107,7 +107,7 @@ describe("findBuildWarnings", () => {
   });
 
   it("finds errors that pages log or leave unhandled while Next.js prerenders them", () => {
-    expect(findBuildWarnings(errorsWhilePrerendering)).toEqual([
+    expect(findWarnings(errorsWhilePrerendering)).toEqual([
       "apps/web build: Error: probe: an error logged while prerendering",
       "apps/web build: Error: probe: an unhandled rejection while prerendering",
     ]);
@@ -122,7 +122,7 @@ describe("findBuildWarnings", () => {
       "apps/web build: TypeError: Cannot read properties of undefined (reading 'name')",
     ].join("\n");
 
-    expect(findBuildWarnings(log)).toHaveLength(2);
+    expect(findWarnings(log)).toHaveLength(2);
   });
 
   it("finds Node.js warnings and pnpm warnings", () => {
@@ -132,20 +132,20 @@ describe("findBuildWarnings", () => {
       "[WARN] Unsupported engine: wanted node >=24",
     ].join("\n");
 
-    expect(findBuildWarnings(log)).toHaveLength(3);
+    expect(findWarnings(log)).toHaveLength(3);
   });
 
   it("finds a warning that has colour codes and Windows line endings", () => {
     const log =
       "\u001b[33m\u001b[1m⚠\u001b[22m\u001b[39m Invalid next.config.ts options detected: \r\nok\r\n";
 
-    expect(findBuildWarnings(log)).toEqual(["⚠ Invalid next.config.ts options detected:"]);
+    expect(findWarnings(log)).toEqual(["⚠ Invalid next.config.ts options detected:"]);
   });
 
   it("cannot see plain text that pages log while Next.js prerenders them", () => {
     // A known limit, listed in docs/DECISIONS.md ("What "fail on any warning" means in CI"): if
     // this test starts to fail because the check finds these lines, update that list.
-    expect(findBuildWarnings(textLoggedWhilePrerendering)).toEqual([]);
+    expect(findWarnings(textLoggedWhilePrerendering)).toEqual([]);
   });
 
   it("does not flag lines that only mention warnings or errors", () => {
@@ -156,7 +156,7 @@ describe("findBuildWarnings", () => {
       "apps/web build: Warnings and errors are shown above",
     ].join("\n");
 
-    expect(findBuildWarnings(log)).toEqual([]);
+    expect(findWarnings(log)).toEqual([]);
   });
 });
 

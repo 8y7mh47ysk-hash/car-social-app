@@ -4,7 +4,8 @@
 // page, and still finishes the build. (tsc, which builds packages/shared and the API, reports only
 // errors, and those fail `pnpm build`.) pnpm's default reporter merges every package's stdout and
 // stderr into one stream, so problems are recognised by how they are written. docs/DECISIONS.md
-// lists what CI enforces, what it cannot see and why.
+// lists what CI enforces, what it cannot see and why. scripts/check-start.ts looks for the same
+// markers in what the apps print while they start.
 //
 // Usage: node scripts/check-build-warnings.ts <file holding the output of pnpm build>
 // Exit status: 0 nothing found, 1 warnings or errors found, 2 wrong arguments or unreadable file.
@@ -38,10 +39,10 @@ const PROBLEM_MARKERS = [
 const NOT_WARNINGS = [/No build cache found\./u];
 
 /**
- * Returns the lines of a build log that report a warning, or an error that did not stop the build,
- * without colour codes.
+ * Returns the lines of a log that report a warning or an error, without colour codes: in a build
+ * log, the warnings and the errors that did not stop the build.
  */
-export function findBuildWarnings(log: string): string[] {
+export function findWarnings(log: string): string[] {
   return log
     .split(/\r?\n/u)
     .map((line) => stripVTControlCharacters(line).trim())
@@ -77,7 +78,7 @@ function main(args: readonly string[]): number {
     return 2;
   }
 
-  const warnings = findBuildWarnings(log);
+  const warnings = findWarnings(log);
   if (warnings.length === 0) {
     // Not "no warnings": text that code logs while a page is prerendered has no marker.
     console.log("Found no warning or error lines in the build output.");

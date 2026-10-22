@@ -14,13 +14,22 @@ import { checkStart } from "./check-start.ts";
 // real apps need a build, which `pnpm test` does not make; CI runs the check on them.
 
 /**
+ * A warning that `next start` prints for a configuration it cannot serve, as pnpm shows it
+ * (next/dist/server/next.js).
+ */
+const WARNING =
+  'apps/web start: ⚠ "next start" does not work with "output: standalone" configuration. ' +
+  'Use "node .next/standalone/server.js" instead.';
+
+/**
  * The stand-in. It writes its process ID to the file in its second argument, then behaves as its
  * first argument says: one mode, or several joined with "+". "ok" serves {"status":"ok"} on
  * API_PORT's /health and an HTML page on WEB_PORT. The other modes change that: "bad-health"
  * answers /health with another body, "health-503" with status 503; "no-web" serves only the API;
  * "web-500" answers the page with status 500, "web-text" as text/plain, "web-no-end" without
- * </html>, and "web-hang" never; "exit" prints an error and exits with code 3; "stubborn" ignores
- * SIGTERM.
+ * </html>, and "web-hang" never; "warn" prints a warning line, as `next start` does for a
+ * configuration it cannot serve; "exit" prints an error and exits with code 3; "stubborn" ignores
+ * SIGTERM; "error-on-stop" prints an error line on SIGTERM, as pnpm does for the apps it stops.
  * Two modes start a helper process and add its process ID to the file: "escaped", one that leaves
  * the process group but keeps the output open for 30 s, and "left-behind", one that stays in the
  * group and ignores SIGTERM but does not hold the output. The stand-in and its helpers end by
@@ -33,6 +42,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 
+const WARNING = ${JSON.stringify(WARNING)};
 const [mode, pidFile, runner] = process.argv.slice(2);
 const modes = new Set(mode.split("+"));
 writeFileSync(pidFile, String(process.pid));
@@ -60,6 +70,12 @@ if (modes.has("exit")) {
 if (modes.has("stubborn")) {
   process.on("SIGTERM", () => {});
 }
+if (modes.has("error-on-stop")) {
+  process.on("SIGTERM", () => {
+    console.error("Error: ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL");
+    process.exit(1);
+  });
+}
 if (modes.has("escaped")) {
   startHelper("setTimeout(() => process.exit(0), 30_000)", {
     detached: true,
@@ -68,6 +84,9 @@ if (modes.has("escaped")) {
 }
 if (modes.has("left-behind")) {
   startHelper('process.on("SIGTERM", () => {})', { stdio: "ignore" });
+}
+if (modes.has("warn")) {
+  console.log(WARNING);
 }
 
 const apiHost = process.env.API_HOST ?? "127.0.0.1";
@@ -298,6 +317,25 @@ describe("checkStart", { timeout: 20_000 }, () => {
 
     expect(result.problem, result.output).toBeUndefined();
     expect(await endsWithin(leftBehind, 5_000)).toBe(true);
+  });
+
+  it("fails when the apps print a warning while they start", async ({ onTestFinished }) => {
+    const { result, running } = await checkStandIn("warn", onTestFinished);
+
+    expect(result.problem).toBe(
+      "The apps printed 1 warning or error line(s) while they started, and CI fails on any:\n" +
+        `  ${WARNING}`,
+    );
+    expect(result.stopProblem).toBeUndefined();
+    expect(running).toBe(false);
+  });
+
+  it("does not count what the apps print while they stop", async ({ onTestFinished }) => {
+    // pnpm reports the apps it stops as failed, with "Error: ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL".
+    const { result } = await checkStandIn("error-on-stop", onTestFinished);
+
+    expect(result.output).toContain("Error: ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL");
+    expect(result.problem).toBeUndefined();
   });
 
   it("stops the apps, and fails, once its signal is aborted while it waits", async ({
