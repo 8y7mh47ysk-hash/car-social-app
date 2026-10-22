@@ -29,18 +29,27 @@ a Compose older than 2.23.1 and, on Linux, with an older engine.
 
 ### First run
 
+Make a copy of the template that only your user can read, and print two strong passwords:
+
 ```sh
-cp .env.example .env && chmod 600 .env   # a copy only your user can read
-openssl rand -hex 32                     # prints a strong password; run it once for each
-                                         # and put them in .env as POSTGRES_PASSWORD and
-                                         # REDIS_PASSWORD
-docker compose up -d --wait
-docker compose ps                        # postgres and redis both show "(healthy)"
+cp .env.example .env && chmod 600 .env
+openssl rand -hex 32
+openssl rand -hex 32
 ```
 
-`up -d` starts only `postgres` and `redis`; `--wait` returns once both are healthy. Every
-`docker compose` command for this project needs `.env` (or the two passwords set in the
-environment), even `ps`, `logs` and `down`.
+Put the two passwords in `.env` as `POSTGRES_PASSWORD` and `REDIS_PASSWORD`, then start the
+services and check them:
+
+```sh
+docker compose up -d --wait
+docker compose ps
+```
+
+`up -d` starts only `postgres` and `redis`; `--wait` returns once both are healthy, and
+`docker compose ps` shows both as "(healthy)". Every `docker compose` command for this project
+needs `.env` (or the two passwords set in the environment), even `ps`, `logs` and `down`. The
+command blocks in this document hold commands only, so they can be pasted into zsh, the default
+shell on macOS, which does not read `#` comments at its prompt.
 
 ### Everyday commands
 
@@ -119,11 +128,11 @@ rewrite its append-only file, and with that setting the kernel can refuse to sta
 memory is short. A failed snapshot makes Redis refuse writes (`MISCONF` errors) until a later one
 succeeds, because Redis's default `stop-writes-on-bgsave-error` is on. The setting belongs to the
 host's kernel, and a container cannot change it. On a Linux machine that runs these services, set
-it once:
+it once: the first command keeps the setting after a reboot, the second applies it now.
 
 ```sh
-echo 'vm.overcommit_memory = 1' | sudo tee /etc/sysctl.d/99-redis.conf   # kept after a reboot
-sudo sysctl -w vm.overcommit_memory=1                                    # applies it now
+echo 'vm.overcommit_memory = 1' | sudo tee /etc/sysctl.d/99-redis.conf
+sudo sysctl -w vm.overcommit_memory=1
 ```
 
 It applies to every process on that machine: the kernel then always grants memory and, if memory
