@@ -761,8 +761,10 @@ No owner actions.
 Charlie reviewed this instruction with instruction 1 (see its round-3 note). The scratch-clone
 recipe above, run from a non-interactive shell, gave every result it promises: the bad messages
 were rejected in 0.3 to 0.9 s, the lint error, the type error and the failing related test in 5
-to 8 s, and the documentation change passed in 1.0 s. Fixes, each with a test that fails without
-it:
+to 8 s, and the documentation change passed in 1.0 s. In a new `git worktree add` of the branch,
+a commit with a bad message went through unchecked until `pnpm install` ran there, as the README
+says; after it, from a non-interactive shell, a bad message and a staged lint error were rejected
+and a documentation change passed in 1.0 s. Fixes, each with a test that fails without it:
 
 - The README's steps after a stopped hook could lose the backup they restore (w0.V2.Alpha.2).
   Most lines had a `#` comment, which zsh, the default shell on macOS, does not read as a comment
