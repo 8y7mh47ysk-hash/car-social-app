@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DOCKER_PROBLEMS,
   findDockerProblem,
+  quietRunner,
   runQuietly,
   type CommandResult,
 } from "./check-docker.ts";
@@ -159,6 +160,16 @@ describe("runQuietly", () => {
     const result = runQuietly("apex-no-such-command", []);
 
     expect(result.error?.code).toBe("ENOENT");
+  });
+
+  it("stops a command that hangs, as a Docker engine can, and reports ETIMEDOUT", () => {
+    // findDockerProblem then reports Compose or the engine as not working.
+    const started = Date.now();
+    const result = quietRunner(200)(process.execPath, ["-e", "setTimeout(() => {}, 10_000)"]);
+
+    expect(result.status).toBeNull();
+    expect(result.error?.code).toBe("ETIMEDOUT");
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 });
 

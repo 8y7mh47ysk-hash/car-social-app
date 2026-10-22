@@ -73,13 +73,21 @@ export const MIN_COMPOSE_VERSION = [2, 23, 1] as const;
 /** Waits at most this long for each Docker command, in case the engine hangs. */
 const TIMEOUT_MS = 20_000;
 
-/** Runs a command without showing its output, and returns what it printed. */
-export const runQuietly: RunCommand = (command, args) =>
-  spawnSync(command, args, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-    timeout: TIMEOUT_MS,
-  });
+/**
+ * A command runner that runs each command without showing its output, returns what it printed,
+ * and stops it after `timeoutMs` (an error with the code ETIMEDOUT).
+ */
+export const quietRunner =
+  (timeoutMs: number): RunCommand =>
+  (command, args) =>
+    spawnSync(command, args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: timeoutMs,
+    });
+
+/** The command runner that the check uses: 20 seconds for each command. */
+export const runQuietly: RunCommand = quietRunner(TIMEOUT_MS);
 
 /**
  * The major version of the engine, read from the server version that `docker version` prints,
