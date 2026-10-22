@@ -261,12 +261,13 @@ describe("request IDs in the logs", () => {
       });
 
       expect(response.statusCode).toBe(statusCode);
-      expect(response.json()).toMatchObject({ code });
+      const body = z.object({ code: z.string(), message: z.string() }).parse(response.json());
+      expect(body.code).toBe(code);
       const requestId = response.headers["x-request-id"];
       expect(requestId).toMatch(UUID_V4);
       expect(lines().map((line) => [line.msg, line.reqId])).toEqual([
         ["incoming request", requestId],
-        [response.json<{ message: string }>().message, requestId],
+        [body.message, requestId],
         ["request completed", requestId],
       ]);
     },
