@@ -396,6 +396,12 @@ values such as `query-secret`. Fixes, each with a test that fails without it:
   comment in any of them, and the README's prerequisites and this log's introduction say how to
   make zsh read the comments in the docs' blocks (docs/DECISIONS.md, "The README's command blocks
   hold no comments; the docs say how to make zsh read them").
+- That prerequisite first named only the blocks in `docs/`, but infra/README.md, where the README
+  sends readers for the containers' day-to-day commands, has commented blocks too: pasted into a
+  stock zsh, its `openssl rand -hex 32   # prints a strong password; run it ...` printed "too many
+  arguments" and no password. The prerequisite now names infra/README.md, and `readme.test.ts`
+  fails when another tracked Markdown document outside `docs/` has `#` comments in its command
+  blocks and the prerequisite does not name it.
 - Nit: the comment in `apps/web/next.config.ts` on `transpilePackages` sat above
   `outputFileTracingRoot` (w0.V2.Alpha.6); it now closes the settings.
 - Two advisories against Next.js 16.4.0 reached npm's advisory database during this review:
@@ -432,7 +438,7 @@ How to verify, from the repository root:
 
 ```sh
 pnpm exec vitest run typecheck.test.ts eslint-config.test.ts generated-files.test.ts readme.test.ts
-# "Test Files  4 passed (4)" and "Tests  36 passed (36)"
+# "Test Files  4 passed (4)" and "Tests  37 passed (37)"
 pnpm audit                  # "1 vulnerabilities found", "Severity: 1 high": braces only
 pnpm --filter @apex/web exec next --version   # Next.js v16.4.2
 pnpm --filter @apex/api list fastify          # fastify@5.12.7
@@ -812,7 +818,7 @@ the zsh tests are skipped):
 
 ```sh
 pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 73 skipped (83)"
-pnpm exec vitest run readme.test.ts                    # "Tests  2 passed (2)"
+pnpm exec vitest run readme.test.ts                    # "Tests  3 passed (3)"
 ```
 
 To see a staged test file that no project runs stop a commit, in a scratch clone:

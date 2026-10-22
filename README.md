@@ -53,10 +53,11 @@ docs/         Playbook, architecture, build log, decisions, dependency register 
 
 ## Prerequisites
 
-- macOS, Linux or WSL: the package scripts use a POSIX shell. The command blocks in `docs/` use
-  `#` for comments, which zsh, the default shell on macOS, does not recognise at its prompt: there,
-  run `setopt interactivecomments` first (or add that line to `~/.zshrc`), or zsh passes `#` and
-  the words after it to the command. The blocks in this README hold no comments.
+- macOS, Linux or WSL: the package scripts use a POSIX shell. The command blocks in `docs/` and
+  [infra/README.md](infra/README.md) use `#` for comments, which zsh, the default shell on macOS,
+  does not recognise at its prompt: there, run `setopt interactivecomments` first (or add that line
+  to `~/.zshrc`), or zsh passes `#` and the words after it to the command. The blocks in this
+  README hold no comments.
 - Node.js 24, release 24.15 or later: some dependencies need it (jsdom 30, which the web app's
   tests use), and `pnpm install` refuses an older Node.js. `.nvmrc` and `.node-version` hold only
   the major version, so `nvm install` gets the latest 24, while `nvm use` picks the newest 24

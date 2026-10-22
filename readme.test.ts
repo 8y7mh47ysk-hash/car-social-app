@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
@@ -11,23 +13,56 @@ import { describe, expect, it } from "vitest";
 // blocks hold commands only, with explanations in the text around them. git-hooks.test.ts also
 // pastes the steps of the section "Git hooks" into zsh, on machines that have it.
 
-const readme = await readFile(join(import.meta.dirname, "README.md"), "utf8");
+const repoRoot = import.meta.dirname;
+const run = promisify(execFile);
+const readme = await readFile(join(repoRoot, "README.md"), "utf8");
 
-/** The README's shell code blocks. */
-const shellBlocks = [
-  ...readme.matchAll(/^```(?:sh|bash|shell|zsh|console)\n([\s\S]*?)^```$/gm),
-].map(([, block = ""]) => block);
+/** The shell code blocks of a Markdown document. */
+function shellBlocks(markdown: string): string[] {
+  return [...markdown.matchAll(/^```(?:sh|bash|shell|zsh|console)\n([\s\S]*?)^```$/gm)].map(
+    ([, block = ""]) => block,
+  );
+}
+
+/** The lines of a Markdown document's shell code blocks that hold a `#` comment. */
+function commentedLines(markdown: string): string[] {
+  return shellBlocks(markdown)
+    .flatMap((block) => block.split("\n"))
+    .filter((line) => /(?:^|\s)#/.test(line));
+}
+
+/** The README's section "Prerequisites", up to the next section. */
+const prerequisites = /^## Prerequisites\n([\s\S]*?)^## /m.exec(readme)?.[1] ?? "";
 
 describe("the README's command blocks", () => {
   it("exist", () => {
-    expect(shellBlocks.length).toBeGreaterThan(5);
+    expect(shellBlocks(readme).length).toBeGreaterThan(5);
   });
 
   it("hold no # comments, which zsh would pass to the commands", () => {
-    const commented = shellBlocks
-      .flatMap((block) => block.split("\n"))
-      .filter((line) => /(?:^|\s)#/.test(line));
+    expect(commentedLines(readme)).toEqual([]);
+  });
 
-    expect(commented).toEqual([]);
+  // Other documents keep their comments, which say what each command should print, so the
+  // README's prerequisites must tell zsh users to turn on interactivecomments before they paste
+  // from any of them: the folder docs/ as a whole, every other such document by name.
+  it("warn zsh users about every other document whose command blocks hold # comments", async () => {
+    const { stdout } = await run("git", ["ls-files", "-z", "*.md"], { cwd: repoRoot });
+    const documents = stdout.split("\0").filter((file) => file !== "" && file !== "README.md");
+    const commented: string[] = [];
+    for (const document of documents) {
+      if (commentedLines(await readFile(join(repoRoot, document), "utf8")).length > 0) {
+        commented.push(document);
+      }
+    }
+
+    expect(prerequisites).toContain("setopt interactivecomments");
+    expect(prerequisites).toContain("`docs/`");
+    expect(commented).toContain("docs/BUILD_LOG.md");
+    expect(
+      commented.filter(
+        (document) => !document.startsWith("docs/") && !prerequisites.includes(document),
+      ),
+    ).toEqual([]);
   });
 });

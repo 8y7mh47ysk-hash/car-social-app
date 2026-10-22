@@ -1848,11 +1848,14 @@ Keep entries brief. Details belong in code comments and the build log.
 - Decision: the README's command blocks hold commands only, with the explanations in the text
   around them, and `readme.test.ts` fails on a `#` comment in any of them. The build log keeps its
   comments, which say what each command should print; its introduction and the README's
-  prerequisites say to run `setopt interactivecomments` in zsh first.
+  prerequisites say to run `setopt interactivecomments` in zsh first. The prerequisites cover the
+  folder `docs/` and name every other document with commented blocks (now infra/README.md), and
+  `readme.test.ts` fails when a tracked Markdown document outside `docs/` has such blocks and is
+  not named there.
 - Trade-offs: the build log's blocks still need a reader who has seen that note; rewriting 33
   blocks in eight entries, most of them other engineers', was out of proportion. New README blocks
-  must keep comments out. Other documents with commented blocks, such as infra/README.md, are left
-  to their owners.
+  must keep comments out. Whether other documents with commented blocks, such as infra/README.md,
+  move their comments out of the blocks is left to their owners; until then the README names them.
 
 ### A staged test file makes the hook check that a Vitest project runs it
 
