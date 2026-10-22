@@ -162,6 +162,20 @@ function serializeRequest(value: unknown): {
 }
 
 /**
+ * Replaces Fastify's default `res` serializer, which reads `statusCode` from every value logged
+ * under the key `res`, so `app.log.warn({ res: null })` threw (see serializeRequest). This logs
+ * the status code of a Fastify reply, or of any other value whose `statusCode` is a number (such
+ * as the response to an outgoing call), and nothing else.
+ */
+function serializeResponse(value: unknown): { statusCode?: number } {
+  if (typeof value !== "object" || value === null) {
+    return {};
+  }
+  const statusCode = "statusCode" in value ? value.statusCode : undefined;
+  return typeof statusCode === "number" ? { statusCode } : {};
+}
+
+/**
  * The codes of the errors with which Fastify's router rejects a URL (see sendFrameworkError), and
  * the message logged for each instead of the error's own.
  */
@@ -324,7 +338,7 @@ export async function loggingServerOptions(
       // owner can read `docker compose logs` directly. pino's stdTimeFunctions.isoTime does the
       // same, but pino is Fastify's dependency, not ours.
       timestamp: () => `,"time":"${new Date().toISOString()}"`,
-      serializers: { req: serializeRequest },
+      serializers: { req: serializeRequest, res: serializeResponse },
       hooks: { streamWrite: finishLogLine },
     },
     // Fastify's own requestIdHeader option trusts any value; requestIdFor validates it.

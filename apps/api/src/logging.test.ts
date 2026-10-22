@@ -432,6 +432,46 @@ describe("values logged under req", () => {
   });
 });
 
+// The same holds for `res`: Fastify's own serializer read statusCode from null and threw.
+describe("values logged under res", () => {
+  it.each([
+    ["null", null, {}],
+    ["a number", 7, {}],
+    [
+      "an outgoing call's response",
+      { statusCode: 502, headers: { location: "/elsewhere" } },
+      { statusCode: 502 },
+    ],
+  ])("logs %s without throwing, also as a child logger's binding", async (_name, value, logged) => {
+    const { app, lines } = await buildLoggedApp();
+
+    app.log.info({ res: value }, "outgoing call");
+    app.log.child({ res: value }).info("bound");
+
+    expect(lines()).toEqual([
+      expect.objectContaining({ msg: "outgoing call", res: logged }),
+      expect.objectContaining({ msg: "bound", res: logged }),
+    ]);
+  });
+
+  it("still answers a request whose handler logs a missing response", async () => {
+    const { app, lines } = await buildLoggedApp({ logLevel: "info" });
+    app.get("/upstream", () => {
+      app.log.warn({ res: null }, "upstream gave no response");
+      return { ok: true };
+    });
+
+    const response = await app.inject({ url: "/upstream" });
+
+    expect(response.statusCode).toBe(200);
+    expect(lines().map((line) => [line.msg, line["res"]])).toEqual([
+      ["incoming request", undefined],
+      ["upstream gave no response", {}],
+      ["request completed", { statusCode: 200 }],
+    ]);
+  });
+});
+
 describe("request IDs over a real connection", () => {
   // app.inject() hands the body over at once; a real client's body arrives in network packets,
   // and Fastify parses it in later callbacks. The service log must still get the request's ID.
