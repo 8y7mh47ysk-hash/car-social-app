@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -151,6 +152,24 @@ function envEntries(text: string): Map<string, { value: string; commented: boole
     }
   }
   return entries;
+}
+
+/**
+ * True for the file names Docker Compose reads without being told: compose.yaml, compose.yml,
+ * docker-compose.yaml and docker-compose.yml, and each of them with ".override" before the
+ * extension, which Compose merges on top. It prefers compose.yaml to docker-compose.yml.
+ */
+function isComposeDefaultFile(path: string): boolean {
+  return /(?:^|\/)(?:docker-)?compose(?:\.override)?\.ya?ml$/.test(path);
+}
+
+/** Every path in git's index: the files that are committed or staged. */
+function trackedFiles(): string[] {
+  const result = spawnSync("git", ["ls-files", "-z"], { cwd: repoRoot, encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error(`git ls-files failed: ${result.error?.message ?? result.stderr}`);
+  }
+  return result.stdout.split("\0").filter((path) => path !== "");
 }
 
 const composeStrings = stringsIn(rawCompose);
@@ -332,6 +351,12 @@ describe("docker-compose.yml", () => {
       expect(definition.image, name).toMatch(/^[\w./-]+:[\w.-]+@sha256:[0-9a-f]{64}$/);
     }
   });
+
+  it("is the only Compose file that Compose reads by default", () => {
+    // Compose prefers a compose.yaml to this file and merges a docker-compose.override.yml on top
+    // of it, so a committed one would change what runs without any check here seeing it.
+    expect(trackedFiles().filter(isComposeDefaultFile)).toEqual(["docker-compose.yml"]);
+  });
 });
 
 describe(".env.example", () => {
@@ -407,6 +432,28 @@ describe("the helpers these checks use", () => {
       ["B", { value: "", commented: true }],
       ["C", { value: "", commented: false }],
     ]);
+  });
+
+  it("recognise the file names Compose reads by default, in any folder", () => {
+    for (const path of [
+      "compose.yaml",
+      "compose.yml",
+      "docker-compose.yaml",
+      "docker-compose.yml",
+      "compose.override.yaml",
+      "docker-compose.override.yml",
+      "infra/compose.yaml",
+    ]) {
+      expect(isComposeDefaultFile(path), path).toBe(true);
+    }
+    for (const path of [
+      "compose.prod.yaml",
+      "my-compose.yml",
+      "compose.json",
+      "compose.yaml.bak",
+    ]) {
+      expect(isComposeDefaultFile(path), path).toBe(false);
+    }
   });
 
   it("refuse YAML that Compose may read differently, and keep merge keys as plain keys", () => {
