@@ -1914,3 +1914,22 @@ Keep entries brief. Details belong in code comments and the build log.
   braces up to 3.0.3 (GHSA-vfj7-8cjw-p6xm, high: denial of service through deeply nested
   patterns), which only eslint-config-next's lint tooling uses and for which no fixed release
   exists yet.
+
+### The engines test falls back when a frozen store cannot see new packages
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Charlie (wave w0 review, round 3)
+- Context: "Node.js 24.15 or later, enforced by pnpm at install" installs copies of the workspace
+  offline with `--frozen-store`, so that the test writes nothing to pnpm's store. Right after the
+  upgrade above, the test failed with ERR_PNPM_NO_OFFLINE_TARBALL ("snapshot not present in local
+  store") for packages that were in the store. pnpm 12 keeps the store's index in SQLite. While
+  another process has that index open (on this machine, other engineers' installs), the entries
+  an install has just added stay in the database's write-ahead log, which a frozen store does not
+  read. Reproduced with a throwaway store: with a second connection holding the index open, the
+  frozen install fails, an install without `--frozen-store` succeeds, and once the connection
+  closes the frozen install succeeds too.
+- Decision: when the frozen install fails with ERR_PNPM_NO_OFFLINE_TARBALL, `workspace.test.ts`
+  runs it again without `--frozen-store`. A package that really is missing fails both.
+- Trade-offs: in that case the test records its temporary folder in the store's list of projects,
+  as any install does, and the entry stays after the folder is deleted (81 of the 151 entries in
+  this machine's store already point at deleted clones and worktrees). A store that one process
+  fills, as in CI, never needs the second run.

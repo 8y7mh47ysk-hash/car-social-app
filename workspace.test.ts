@@ -101,12 +101,12 @@ function logLines(output: string): z.infer<typeof logLineSchema>[] {
 }
 
 /**
- * Runs `pnpm install` on the lockfile without the network, install scripts or any write to pnpm's
- * store (which would record the temporary folder there) or to its cache, with pnpm's log as JSON
- * lines (its usual output wraps long messages) and any `extraArgs`. It uses the checkout's store
- * (see storeDir) and pnpmEnv's environment.
+ * Runs `pnpm install` on the lockfile without the network or install scripts, with pnpm's log as
+ * JSON lines (its usual output wraps long messages) and any `extraArgs`. It uses the checkout's
+ * store (see storeDir) and pnpmEnv's environment, and normally writes nothing to that store
+ * (--frozen-store; an ordinary install records its folder there) or to pnpm's cache.
  */
-function install(
+async function install(
   cwd: string,
   extraArgs: readonly string[] = [],
 ): Promise<{ code: number | null; output: string }> {
@@ -114,7 +114,6 @@ function install(
     "install",
     "--frozen-lockfile",
     "--offline",
-    "--frozen-store",
     "--ignore-scripts",
     "--reporter=ndjson",
     // Before it installs, pnpm checks every locked version against the one-day release-age hold,
@@ -127,6 +126,24 @@ function install(
     `--config.store-dir=${storeDir}`,
     ...extraArgs,
   ];
+  const frozen = await runPnpm(cwd, [...args, "--frozen-store"]);
+  // pnpm keeps the store's index in SQLite. While another process has that index open, packages
+  // that an install has just added stay in the database's write-ahead log, which a frozen store
+  // does not read: the install fails with ERR_PNPM_NO_OFFLINE_TARBALL ("snapshot not present in
+  // local store") for packages that are in the store, until no process has the index open. An
+  // install without --frozen-store reads them, and records this folder in the store as any
+  // install does. A package that really is missing fails both.
+  if (logLines(frozen.output).some(({ code }) => code === "ERR_PNPM_NO_OFFLINE_TARBALL")) {
+    return runPnpm(cwd, args);
+  }
+  return frozen;
+}
+
+/** Runs pnpm with `args` in `cwd`; resolves with its exit code and combined output. */
+function runPnpm(
+  cwd: string,
+  args: readonly string[],
+): Promise<{ code: number | null; output: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn("pnpm", args, {
       cwd,

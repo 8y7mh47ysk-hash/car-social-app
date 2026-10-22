@@ -408,6 +408,12 @@ steps of this entry and of instruction 2 quote. Fixes, each with a test that fai
   `pnpm audit` now reports one advisory, in braces up to 3.0.3 (high), which only
   eslint-config-next's lint tooling uses and which has no fixed release (docs/DECISIONS.md,
   "Next.js 16.4.2 and Vitest 4.1.12 for security advisories").
+- Right after that upgrade, `workspace.test.ts` failed with ERR_PNPM_NO_OFFLINE_TARBALL ("snapshot
+  not present in local store") for packages that were in the store. pnpm 12 keeps the store's
+  index in SQLite, and while another process has it open, newly added entries stay in the
+  write-ahead log, which the test's `--frozen-store` install does not read; reproduced with a
+  throwaway store. The test now runs such an install again without `--frozen-store`
+  (docs/DECISIONS.md, "The engines test falls back when a frozen store cannot see new packages").
 
 How to verify, from the repository root:
 
