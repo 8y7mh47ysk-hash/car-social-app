@@ -131,11 +131,29 @@ export function finishLogLine(line: string): string {
  * Replaces Fastify's default `req` serializer, which logs the full URL (query string included),
  * the client-supplied Host and Accept-Version headers and the client's port. Headers and bodies
  * are never logged. `remoteAddress` is the direct peer; behind a proxy it is the proxy until
- * trusted proxies are configured. pino applies it to every value logged under the key `req`, and
- * a value without a `url` makes the log call throw, so log only Fastify requests under that key.
+ * trusted proxies are configured.
+ *
+ * pino applies it to every value logged under the key `req`, not only to Fastify's requests: also
+ * to null, or to an outgoing request's object. So it logs only the fields that are strings and
+ * never throws, because a log call that throws fails the request, or stops the API when it runs
+ * in a timer or an event handler.
  */
-function serializeRequest(request: FastifyRequest) {
-  return { method: request.method, url: loggableUrl(request.url), remoteAddress: request.ip };
+function serializeRequest(value: unknown): {
+  method?: string;
+  url?: string;
+  remoteAddress?: string;
+} {
+  if (typeof value !== "object" || value === null) {
+    return {};
+  }
+  const method = "method" in value ? value.method : undefined;
+  const url = "url" in value ? value.url : undefined;
+  const ip = "ip" in value ? value.ip : undefined;
+  return {
+    ...(typeof method === "string" ? { method } : {}),
+    ...(typeof url === "string" ? { url: loggableUrl(url) } : {}),
+    ...(typeof ip === "string" ? { remoteAddress: ip } : {}),
+  };
 }
 
 /**

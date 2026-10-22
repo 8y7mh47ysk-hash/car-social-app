@@ -398,6 +398,39 @@ describe("request IDs in the logs", () => {
   });
 });
 
+// pino passes every value logged under `req` to the request serializer, not only Fastify's
+// requests. A log call that threw would fail the request, or stop the API from a timer.
+describe("values logged under req", () => {
+  it.each([
+    ["null", null, {}],
+    ["an object without a url", { path: "/v1/cars" }, {}],
+    [
+      "another request's method and URL",
+      { method: "POST", url: "https://api.example.com/v1/cars?key=query-secret" },
+      { method: "POST", url: `https://api.example.com/v1/cars?${REDACTED}` },
+    ],
+  ])("logs %s without throwing", async (_name, value, logged) => {
+    const { app, lines } = await buildLoggedApp();
+
+    app.log.info({ req: value }, "outgoing call");
+
+    expect(lines()).toEqual([expect.objectContaining({ msg: "outgoing call", req: logged })]);
+  });
+
+  it("logs an outgoing Node.js request without throwing", async () => {
+    const { app, lines } = await buildLoggedApp();
+    const outgoing = httpRequest("http://127.0.0.1:9/v1/cars?key=query-secret");
+    outgoing.on("error", () => undefined);
+    onTestFinished(() => {
+      outgoing.destroy();
+    });
+
+    app.log.info({ req: outgoing }, "outgoing call");
+
+    expect(lines()).toEqual([expect.objectContaining({ req: { method: "GET" } })]);
+  });
+});
+
 describe("request IDs over a real connection", () => {
   // app.inject() hands the body over at once; a real client's body arrives in network packets,
   // and Fastify parses it in later callbacks. The service log must still get the request's ID.
