@@ -60,8 +60,13 @@ export interface StartCheckOptions {
 export interface StartCheckResult {
   /** The ports the apps were given, as WEB_PORT and API_PORT. */
   readonly ports: { readonly web: number; readonly api: number };
-  /** What went wrong; undefined when both apps answered and then stopped. */
+  /** What went wrong, one problem per line; undefined when both apps answered and then stopped. */
   readonly problem: string | undefined;
+  /**
+   * What went wrong while stopping the apps (also the last line of `problem`): they needed SIGKILL,
+   * or a process that may still be running holds their output. Undefined otherwise.
+   */
+  readonly stopProblem: string | undefined;
   /** Everything the command printed, on stdout and stderr. */
   readonly output: string;
 }
@@ -151,6 +156,7 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
     return {
       ports,
       problem: `The check was interrupted before \`${commandLine}\` started.`,
+      stopProblem: undefined,
       output: "",
     };
   }
@@ -234,31 +240,40 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
   const closedWithin = async (ms: number): Promise<boolean> =>
     Promise.race([closed.then(() => true), sleep(ms, false, { ref: false })]);
 
+  let stopProblem: string | undefined;
   if (exit === undefined) {
     signalGroup("SIGTERM");
     if (!(await closedWithin(stopTimeoutMs))) {
       signalGroup("SIGKILL");
       if (await closedWithin(stopTimeoutMs)) {
-        problems.push(`The apps did not stop within ${seconds(stopTimeoutMs)} s of SIGTERM.`);
+        stopProblem =
+          `The apps did not stop within ${seconds(stopTimeoutMs)} s of SIGTERM; ` +
+          "SIGKILL stopped them.";
       } else {
         // SIGKILL ends every process of the group, so a process outside it holds the output.
+        // Closing the streams lets this program end without waiting for that process.
         child.stdout.destroy();
         child.stderr.destroy();
-        problems.push(
+        stopProblem =
           `The apps' output was still open ${seconds(stopTimeoutMs)} s after SIGKILL: a process ` +
-            "outside the command's process group holds it, and may still be running.",
-        );
+          "outside the command's process group holds it, and may still be running.";
       }
     }
   }
   // Processes of the group that outlived the command itself, if any.
   signalGroup("SIGKILL");
 
-  return { ports, problem: problems.length === 0 ? undefined : problems.join(" "), output };
+  const all = stopProblem === undefined ? problems : [...problems, stopProblem];
+  return { ports, problem: all.length === 0 ? undefined : all.join("\n"), stopProblem, output };
 }
 
-/** Runs the check as a program: prints its result, or stops early on a stop signal. */
-async function main(): Promise<void> {
+/**
+ * Runs the check as a program: prints its result, or stops early on a stop signal. The tests run
+ * it with shorter time `limits` than the defaults.
+ */
+export async function main(
+  limits: Pick<StartCheckOptions, "timeoutMs" | "stopTimeoutMs"> = {},
+): Promise<void> {
   // A terminal's Ctrl+C, `kill` and a closed terminal reach only this process, not the process
   // group the apps run in. Stop them first, then end by the same signal, as an interrupted
   // program should, so that a calling shell script stops too.
@@ -271,15 +286,18 @@ async function main(): Promise<void> {
   for (const name of STOP_SIGNALS) {
     process.on(name, interrupt);
   }
-  const result = await checkStart({ signal: controller.signal });
+  const result = await checkStart({ ...limits, signal: controller.signal });
   for (const name of STOP_SIGNALS) {
     process.off(name, interrupt);
   }
 
   const [stop] = received;
   if (stop !== undefined) {
+    // "Stopped the apps" only when nothing may be left running, or else what went wrong.
+    const outcome =
+      result.stopProblem === undefined ? ": stopped the apps." : `. ${result.stopProblem}`;
     // Without a listener, Node.js no longer handles the signal, so it ends this process.
-    process.stderr.write(`Interrupted by ${stop}: stopped the apps.\n`, () => {
+    process.stderr.write(`Interrupted by ${stop}${outcome}\n`, () => {
       process.kill(process.pid, stop);
     });
   } else if (result.problem === undefined) {
