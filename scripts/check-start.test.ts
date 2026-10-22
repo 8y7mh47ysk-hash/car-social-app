@@ -16,10 +16,14 @@ import { checkStart } from "./check-start.ts";
 /**
  * The stand-in. It writes its process ID to the file in its second argument, then behaves as its
  * first argument says: one mode, or several joined with "+". "ok" serves {"status":"ok"} on
- * API_PORT's /health and an HTML page on WEB_PORT; "bad-health" answers /health with another
- * body; "no-web" serves only the API; "exit" prints an error and exits with code 3; "stubborn"
- * ignores SIGTERM; "escaped" starts a helper that leaves the process group but keeps the output
- * open for 30 s, and adds the helper's process ID to the file. The stand-in and its helper end by
+ * API_PORT's /health and an HTML page on WEB_PORT. The other modes change that: "bad-health"
+ * answers /health with another body, "health-503" with status 503; "no-web" serves only the API;
+ * "web-500" answers the page with status 500, "web-text" as text/plain, "web-no-end" without
+ * </html>, and "web-hang" never; "exit" prints an error and exits with code 3; "stubborn" ignores
+ * SIGTERM.
+ * Two modes start a helper process and add its process ID to the file: "escaped", one that leaves
+ * the process group but keeps the output open for 30 s, and "left-behind", one that stays in the
+ * group and ignores SIGTERM but does not hold the output. The stand-in and its helpers end by
  * themselves once the process whose ID is the third argument, the test runner, has ended: a test
  * run that is killed midway cannot leave them running. They do not watch the check, so a check
  * that ends without stopping them is still caught.
@@ -62,17 +66,27 @@ if (modes.has("escaped")) {
     stdio: ["ignore", "inherit", "inherit"],
   });
 }
+if (modes.has("left-behind")) {
+  startHelper('process.on("SIGTERM", () => {})', { stdio: "ignore" });
+}
 
 const apiHost = process.env.API_HOST ?? "127.0.0.1";
 const webHost = process.env.WEB_HOST ?? "127.0.0.1";
 createServer((request, response) => {
-  response.writeHead(200, { "content-type": "application/json" });
+  response.writeHead(modes.has("health-503") ? 503 : 200, { "content-type": "application/json" });
   response.end(JSON.stringify({ status: modes.has("bad-health") ? "starting" : "ok" }));
 }).listen(Number(process.env.API_PORT), apiHost);
 if (!modes.has("no-web")) {
+  const type = modes.has("web-text") ? "text/plain" : "text/html";
+  const page = "<!DOCTYPE html><html><body><h1>Apex Garage</h1></body></html>";
   createServer((request, response) => {
-    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    response.end("<!DOCTYPE html><html><body><h1>Apex Garage</h1></body></html>");
+    if (modes.has("web-hang")) {
+      return;
+    }
+    response.writeHead(modes.has("web-500") ? 500 : 200, {
+      "content-type": type + "; charset=utf-8",
+    });
+    response.end(modes.has("web-no-end") ? page.replace("</html>", "") : page);
   }).listen(Number(process.env.WEB_PORT), webHost);
 }
 console.log(\`stand-in started: the API on \${apiHost}, the web app on \${webHost}\`);
@@ -89,6 +103,21 @@ function isRunning(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether the process `pid` ends within `ms`. A process whose parent has ended is reaped by
+ * another process, so it may still be listed for a moment after it was killed.
+ */
+async function endsWithin(pid: number, ms: number): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  while (isRunning(pid)) {
+    if (Date.now() > deadline) {
+      return false;
+    }
+    await sleep(20);
+  }
+  return true;
 }
 
 /**
@@ -161,22 +190,24 @@ async function standInPid(pidFile: string): Promise<number> {
 }
 
 /**
- * Runs the check against the stand-in in `mode`, with short time limits. Returns the result and
- * whether the stand-in's process was still running afterwards.
+ * Runs the check against the stand-in in `mode`, with short time limits. Returns the result,
+ * whether the stand-in's process was still running afterwards, and the process IDs of its
+ * helpers, if any.
  */
 async function checkStandIn(mode: string, onFinished: OnFinished) {
   const { pidFile, command } = prepareStandIn(mode, onFinished);
 
   const result = await checkStart({ command, timeoutMs: 2_000, stopTimeoutMs: 1_000 });
 
-  const [pid] = readPids(pidFile);
+  const [pid, ...helpers] = readPids(pidFile);
   if (pid === undefined) {
     throw new Error(`the stand-in wrote no process ID; the check said: ${String(result.problem)}`);
   }
-  return { result, running: isRunning(pid) };
+  return { result, running: isRunning(pid), helpers };
 }
 
 const apiUrl = (port: number): string => `the API (GET http://127.0.0.1:${String(port)}/health)`;
+const webUrl = (port: number): string => `the web app (GET http://127.0.0.1:${String(port)}/)`;
 
 /** What the check says when a process outside the command's group holds the output. */
 const ESCAPED =
@@ -254,6 +285,21 @@ describe("checkStart", { timeout: 20_000 }, () => {
     expect(Date.now() - started).toBeLessThan(10_000);
   });
 
+  it("kills the processes that the command leaves behind in its group", async ({
+    onTestFinished,
+  }) => {
+    // A process that ignores SIGTERM but does not hold the output does not keep the check
+    // waiting; the SIGKILL to the group at the end stops it.
+    const { result, helpers } = await checkStandIn("left-behind", onTestFinished);
+    const [leftBehind] = helpers;
+    if (leftBehind === undefined) {
+      throw new Error("the stand-in left no helper process behind");
+    }
+
+    expect(result.problem, result.output).toBeUndefined();
+    expect(await endsWithin(leftBehind, 5_000)).toBe(true);
+  });
+
   it("stops the apps, and fails, once its signal is aborted while it waits", async ({
     onTestFinished,
   }) => {
@@ -324,6 +370,46 @@ describe.concurrent("checkStart, when an app answers wrongly", { timeout: 20_000
       ),
     );
     expect(running).toBe(false);
+  });
+
+  it("fails on a status other than 200 from either app, whatever the body", async ({
+    onTestFinished,
+  }) => {
+    const { result } = await checkStandIn("health-503+web-500", onTestFinished);
+
+    expect(result.problem).toBe(
+      `After 2 s, ${apiUrl(result.ports.api)} answered with status 503, and ` +
+        `${webUrl(result.ports.web)} answered with status 500.`,
+    );
+  });
+
+  it.for([
+    [
+      "web-text",
+      "answered with status 200 and content type text/plain; charset=utf-8, not text/html",
+    ],
+    ["web-no-end", "answered with status 200 and an HTML page without </html>"],
+  ] as const)(
+    "fails when the home page is not a whole HTML page (%s)",
+    async ([mode, answer], { onTestFinished }) => {
+      const { result } = await checkStandIn(mode, onTestFinished);
+
+      expect(result.problem).toBe(`After 2 s, ${webUrl(result.ports.web)} ${answer}.`);
+    },
+  );
+
+  it("gives up on a request that gets no answer, and fails within its time limits", async ({
+    onTestFinished,
+  }) => {
+    // Each request may take 2 s, so the check ends at most one request and one pause after its
+    // own 2-second limit.
+    const started = Date.now();
+    const { result } = await checkStandIn("web-hang", onTestFinished);
+
+    expect(result.problem).toMatch(
+      /^After 2 s, the web app \(GET http:\/\/127\.0\.0\.1:\d+\/\) did not answer \(.+\)\.$/u,
+    );
+    expect(Date.now() - started).toBeLessThan(10_000);
   });
 
   it("reports every problem, one per line: no answer, then no stop on SIGTERM", async ({
@@ -412,7 +498,11 @@ describe.concurrent("check-start command", { timeout: 20_000 }, () => {
         // It has ended.
       }
     });
+    let stdout = "";
     let stderr = "";
+    program.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      stdout += chunk;
+    });
     program.stderr.setEncoding("utf8").on("data", (chunk: string) => {
       stderr += chunk;
     });
@@ -425,8 +515,37 @@ describe.concurrent("check-start command", { timeout: 20_000 }, () => {
         resolve({ code, signal, seconds: (Date.now() - started) / 1000 });
       });
     });
-    return { pid, pidFile, ended, stderr: () => stderr };
+    return { pid, pidFile, ended, stdout: () => stdout, stderr: () => stderr };
   }
+
+  it("says so and exits with status 0 when both apps answered and stopped", async ({
+    onTestFinished,
+  }) => {
+    const program = startProgram("ok", onTestFinished);
+
+    expect(await program.ended).toMatchObject({ code: 0, signal: null });
+    expect(program.stdout()).toMatch(
+      new RegExp(
+        "^Both apps started: the API answered GET /health on port \\d+, " +
+          "the web app its home page on port \\d+, and both stopped\\.\\n$",
+        "u",
+      ),
+    );
+    expect(program.stderr()).toBe("");
+  });
+
+  it("exits with status 1, saying what went wrong and what the apps printed", async ({
+    onTestFinished,
+  }) => {
+    const program = startProgram("exit", onTestFinished);
+
+    expect(await program.ended).toMatchObject({ code: 1, signal: null });
+    expect(program.stderr()).toBe(
+      "`pnpm start` exited with code 3 before both apps answered.\n" +
+        "What the apps printed:\napps/api start: the API failed to start\n\n",
+    );
+    expect(program.stdout()).toBe("");
+  });
 
   it("ends once it gives up on a process outside the group that holds the output", async ({
     onTestFinished,

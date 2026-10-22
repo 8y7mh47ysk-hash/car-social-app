@@ -93,12 +93,12 @@ async function freePorts(): Promise<{ web: number; api: number }> {
 }
 
 /**
- * Asks `url` once. Resolves with undefined when the answer passes `accept`, or with a description
- * of what came back (an unexpected answer, or no answer). `signal` cancels the request.
+ * Asks `url` once. Resolves with undefined when `check` finds the answer as expected, or with a
+ * description of what came back (an unexpected answer, or no answer). `signal` cancels the request.
  */
 async function probe(
   url: string,
-  accept: (response: Response) => Promise<boolean>,
+  check: (response: Response) => Promise<string | undefined>,
   signal: AbortSignal | undefined,
 ): Promise<string | undefined> {
   try {
@@ -107,31 +107,35 @@ async function probe(
       headers: { connection: "close" },
       signal: signal === undefined ? timeout : AbortSignal.any([timeout, signal]),
     });
-    if (await accept(response)) {
-      return undefined;
-    }
-    return `answered with status ${String(response.status)} and an unexpected body`;
+    return await check(response);
   } catch (error) {
     return `did not answer (${error instanceof Error ? error.message : String(error)})`;
   }
 }
 
-/** Whether the API's answer to GET /health is a 200 with the expected body. */
-async function isHealthy(response: Response): Promise<boolean> {
+/** What is wrong with the API's answer to GET /health; undefined for a 200 with the right body. */
+async function healthProblem(response: Response): Promise<string | undefined> {
   if (response.status !== 200) {
-    return false;
+    return `answered with status ${String(response.status)}`;
   }
-  try {
-    return healthSchema.safeParse(await response.json()).success;
-  } catch {
-    return false;
-  }
+  const body: unknown = await response.json().catch(() => undefined);
+  return healthSchema.safeParse(body).success
+    ? undefined
+    : "answered with status 200 and an unexpected body";
 }
 
-/** Whether the web app's answer is a 200 HTML page. */
-async function isPage(response: Response): Promise<boolean> {
-  const html = response.headers.get("content-type")?.startsWith("text/html") === true;
-  return response.status === 200 && html && (await response.text()).includes("</html>");
+/** What is wrong with the web app's answer; undefined for a 200 with a whole HTML page. */
+async function pageProblem(response: Response): Promise<string | undefined> {
+  if (response.status !== 200) {
+    return `answered with status ${String(response.status)}`;
+  }
+  const type = response.headers.get("content-type") ?? "none";
+  if (!type.startsWith("text/html")) {
+    return `answered with status 200 and content type ${type}, not text/html`;
+  }
+  return (await response.text()).includes("</html>")
+    ? undefined
+    : "answered with status 200 and an HTML page without </html>";
 }
 
 /** A duration in seconds, for messages: "60" for 60 000 ms, "0.5" for 500 ms. */
@@ -200,8 +204,8 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
 
   const api = { name: "the API", url: `http://${HOST}:${String(ports.api)}/health` };
   const web = { name: "the web app", url: `http://${HOST}:${String(ports.web)}/` };
-  let apiState = await probe(api.url, isHealthy, signal);
-  let webState = await probe(web.url, isPage, signal);
+  let apiState = await probe(api.url, healthProblem, signal);
+  let webState = await probe(web.url, pageProblem, signal);
   const problems: string[] = [];
   const deadline = Date.now() + timeoutMs;
   while (apiState !== undefined || webState !== undefined) {
@@ -222,8 +226,8 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
       break;
     }
     await sleep(POLL_INTERVAL_MS);
-    apiState = apiState === undefined ? undefined : await probe(api.url, isHealthy, signal);
-    webState = webState === undefined ? undefined : await probe(web.url, isPage, signal);
+    apiState = apiState === undefined ? undefined : await probe(api.url, healthProblem, signal);
+    webState = webState === undefined ? undefined : await probe(web.url, pageProblem, signal);
   }
 
   const signalGroup = (stop: NodeJS.Signals): void => {
