@@ -49,7 +49,7 @@ services:
   redis:
     # Redis 8.10.2 on Alpine 3.23 (licence notes in docs/DECISIONS.md). The digest pins this exact
     # multi-platform build: always change the tag and the digest together.
-    image: redis:8.10.2-alpine3.23@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+    image: redis:8.10.2-alpine3.23@sha256:0bf6577d7774e592b29d093e3ac9390eb91e13d72c21e506afce736de5e0eeb0
     restart: unless-stopped
     # Redis reads its settings, the password among them, from the redis-config file (see configs
     # at the end). Keep redis-server as the first word: the image drops root privileges only when
@@ -97,7 +97,7 @@ services:
   # (`docker compose --profile app down`): a plain `docker compose down` leaves them behind.
   api:
     profiles: [app]
-    image: alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+    image: alpine:3.24.3@sha256:b3413572228e34bd1c9245f5565e6cd127005655e8a7899aef33d8e83255c9e6
     command:
       - sh
       - -c
@@ -111,7 +111,7 @@ services:
 
   web:
     profiles: [app]
-    image: alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+    image: alpine:3.24.3@sha256:b3413572228e34bd1c9245f5565e6cd127005655e8a7899aef33d8e83255c9e6
     command:
       - sh
       - -c
