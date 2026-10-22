@@ -13,6 +13,9 @@ const lintable = "*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}";
 /** ESLint and Prettier skip paths that do not exist (deleted files) instead of failing. */
 const skipDeleted = "--no-error-on-unmatched-pattern";
 
+/** Files named the way Vitest names test files, as test-suite.test.ts finds them. */
+const testFiles = "*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}";
+
 export default {
   // 1. Lint, fixing what ESLint can; any warning left fails the commit, as in `pnpm lint`.
   //    --no-warn-ignored skips files that the ESLint config ignores. Then format the result.
@@ -35,4 +38,9 @@ export default {
   //    staged test file; finding no related tests is a pass. A staged file that matches
   //    `forceRerunTriggers` in vitest.config.ts runs every test instead.
   "*": "vitest related --run --passWithNoTests",
+
+  // 5. A staged test file that no Vitest project includes would never run, here or in CI, and
+  //    step 4 would pass with "No test files found". test-suite.test.ts fails when a test file in
+  //    the repository is not run by `pnpm test`, so run it, once, when a test file is staged.
+  [testFiles]: () => "vitest run --project tooling test-suite.test.ts",
 } satisfies Configuration;

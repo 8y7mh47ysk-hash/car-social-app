@@ -258,6 +258,7 @@ describe("pre-commit hook", { timeout: 30_000 }, () => {
   const prettierOther = "prettier --write --ignore-unknown --no-error-on-unmatched-pattern";
   const typecheck = "pnpm typecheck";
   const relatedTests = "vitest related --run --passWithNoTests";
+  const suiteCheck = "vitest run --project tooling test-suite.test.ts";
 
   /**
    * The stand-in for each tool: appends its name and arguments to $STUB_LOG, appends a line to
@@ -500,6 +501,7 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       "src/legacy.jsx",
       "src/module.cts",
       "src/module.mts",
+      "src/view.test.tsx",
       "src/view.tsx",
     ];
     // Dotfiles too: several rerun triggers in vitest.config.ts are dotfiles or in dot folders.
@@ -521,6 +523,24 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       typecheck,
       `${relatedTests} ${staged.join(" ")}`,
       ...staged.map((file) => `A  ${file}`),
+      suiteCheck,
+      ...staged.map((file) => `A  ${file}`),
+    ]);
+  });
+
+  // `vitest related` passes on a test file that no Vitest project includes, which then never runs.
+  it("checks once that the staged test files run in a Vitest project", async () => {
+    const repo = await createRepo();
+    await repo.write("src/app.test.ts", "test\n");
+    await repo.write("src/view.spec.tsx", "test\n");
+    await repo.git("add", "--all");
+
+    const result = await repo.preCommit();
+
+    expect(result.code, result.output).toBe(0);
+    expect((await repo.calls()).filter((call) => call.startsWith("vitest"))).toEqual([
+      `${relatedTests} src/app.test.ts src/view.spec.tsx`,
+      suiteCheck,
     ]);
   });
 

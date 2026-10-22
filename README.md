@@ -210,16 +210,18 @@ are not checked.
   order, it runs ESLint with `--fix` and then Prettier on the staged files (fixes are added to the
   commit; any ESLint warning fails), `pnpm typecheck` for the whole repository when a staged file
   is TypeScript, JSON or a pnpm workspace file, and `vitest related` for the unit tests that
-  import a staged file. Staging a `package.json`, a pnpm lockfile or workspace file, a tsconfig,
-  a Vitest config or setup file, a PostCSS config, a git hook or its config, the API's entrypoint
-  (`apps/api/src/server.ts`, which its tests start as a separate process) or a file that tests
-  read instead of importing (`docker-compose.yml`, an `.env.example` template, a `.gitignore`, a
-  CI workflow, `eslint.config.mjs`, `.nvmrc` or `.node-version`) runs every test instead. So does
-  an env file, which only `git add --force` can stage, and `env-files.test.ts` then fails the
-  commit. This README is the exception: `git-hooks.test.ts` runs the recovery steps below from
-  it, but a README change runs no tests here, only in CI. Deleted files count as staged, so
-  deleting a module that is still imported fails the type check. A failing step does not stop the
-  others, so one run shows every problem.
+  import a staged file. When a test file is staged, it also checks that `pnpm test` runs it
+  (`test-suite.test.ts`): a test file that no Vitest project includes would never run. Staging a
+  `package.json`, a pnpm lockfile or workspace file, a tsconfig, a Vitest config or setup file, a
+  PostCSS config, a git hook or its config, the API's entrypoint (`apps/api/src/server.ts`, which
+  its tests start as a separate process) or a file that tests read instead of importing
+  (`docker-compose.yml`, an `.env.example` template, a `.gitignore`, a CI workflow,
+  `eslint.config.mjs`, `.nvmrc` or `.node-version`) runs every test instead. So does an env file,
+  which only `git add --force` can stage, and `env-files.test.ts` then fails the commit. This
+  README is the exception: `git-hooks.test.ts` runs the recovery steps below from it, but a README
+  change runs no tests here, only in CI. Deleted files count as staged, so deleting a module that
+  is still imported fails the type check. A failing step does not stop the others, so one run
+  shows every problem.
 - **pre-merge-commit** ([`.husky/pre-merge-commit`](.husky/pre-merge-commit)) runs the same
   checks on what a merge brings in when `git merge` (or a `git pull` that merges) commits without
   conflicts; git runs pre-commit only for commits you make with `git commit`.
