@@ -1788,7 +1788,7 @@ pnpm exec vitest run scripts/check-docker.test.ts scripts/package-scripts.test.t
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm --filter @apex/api test   # all pass: "Tests  308 passed (308)" after round 3 of the review
+pnpm --filter @apex/api test   # all pass: "Tests  312 passed (312)" after round 3 of the review
 pnpm lint                      # exits with code 0
 pnpm typecheck                 # shared, api and web each report "Done"
 ```
@@ -1902,7 +1902,8 @@ Delta reviewed this instruction and changed:
     and raw bodies logged as strings (a webhook body, #91) are free text that redaction cannot
     see into;
   - only Fastify requests may be logged under the key `req`: anything without a `url` makes the
-    log call throw;
+    log call throw (no longer needed since round 3: any value can be logged under `req` or
+    `res`);
   - integers beyond 2^53 (BigInt values) come out of the redaction pass rounded: log them as
     strings.
 
@@ -1913,7 +1914,7 @@ pnpm --filter @apex/api exec vitest run src/lib/redact.test.ts src/logging.test.
 pnpm --filter @apex/api exec vitest run src/server.test.ts -t "pino-pretty|redacted JSON line"
 ```
 
-The first ends with `Tests  189 passed (189)`, the second with `Tests  4 passed | 23 skipped (27)`
+The first ends with `Tests  193 passed (193)`, the second with `Tests  4 passed | 23 skipped (27)`
 (rounds 2 and 3 added tests to both files).
 
 **Review fixes (wave w0, round 2)**
@@ -1955,7 +1956,7 @@ pnpm --filter @apex/api exec vitest run src/server.test.ts -t "LOG_FORMAT=pretty
 pnpm exec vitest run api-console.test.ts
 ```
 
-They end with `Tests  189 passed (189)`, `Tests  4 passed | 23 skipped (27)` and
+They end with `Tests  193 passed (193)`, `Tests  4 passed | 23 skipped (27)` and
 `Tests  4 passed (4)` (round 3 added tests to the first two files). To see the pino-pretty
 messages for yourself, from `apps/api`:
 
@@ -1992,7 +1993,9 @@ Bravo reviewed this instruction and changed:
 - A value logged under the key `req` that is not a Fastify request (null, an object without a
   `url`, an outgoing `http.ClientRequest`) made the log call throw a TypeError, which fails a
   request or, from a timer, stops the API. The request serializer now logs only the string fields
-  it finds.
+  it finds. Fastify's own serializer for the key `res` threw the same way for null:
+  `app.log.warn({ res: null }, ...)` in a handler turned its response into a 500. The API now has
+  its own, which logs a `statusCode` that is a number and nothing else.
 - `LOG_FORMAT=pretty` wrote through `process.stdout`, which on macOS only queues what a full pipe
   cannot take. After a crash, `process.exit()` dropped that queue: with the reader 2 s behind, 325
   of 3,000 lines arrived and the crash line did not. When the reader went away (`| head`), the API
@@ -2014,7 +2017,7 @@ pnpm --filter @apex/api exec vitest run src/lib/redact.test.ts src/lib/logger.te
 pnpm --filter @apex/api exec vitest run src/server.test.ts -t "reader"
 ```
 
-They end with `Tests  210 passed (210)` and `Tests  4 passed | 23 skipped (27)`. With the API
+They end with `Tests  214 passed (214)` and `Tests  4 passed | 23 skipped (27)`. With the API
 running as above (`pnpm --filter @apex/api dev`), in terminal 2:
 
 ```sh
