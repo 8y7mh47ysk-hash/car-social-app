@@ -414,14 +414,24 @@ steps of this entry and of instruction 2 quote. Fixes, each with a test that fai
   write-ahead log, which the test's `--frozen-store` install does not read; reproduced with a
   throwaway store. The test now runs such an install again without `--frozen-store`
   (docs/DECISIONS.md, "The engines test falls back when a frozen store cannot see new packages").
+- A later `pnpm audit` found one more advisory: GHSA-389g-gv7q-r4x8 (low) against Fastify
+  `>=5.12.2 <5.12.6`, and the lockfile held 5.12.5. A route's `headers` schema that allows or
+  refuses header names through `propertyNames` with `enum` or `const` in their usual case, such as
+  `X-Debug-Override`, never matched, because Node.js lowercases header names, so a refused header
+  reached the handler. The API has no such schema (it validates with Zod), but the first route that
+  added one would have been exposed. `apps/api/package.json` now asks for `fastify` `^5.12.7`, the
+  latest release (13 October, past the one-day hold; it differs from the fixed 5.12.6 only in its
+  version number), the lockfile changes only Fastify, and the API's 261 tests pass on it
+  (docs/DECISIONS.md, "Fastify 5.12.7 for a security advisory").
 
 How to verify, from the repository root:
 
 ```sh
 pnpm exec vitest run typecheck.test.ts eslint-config.test.ts generated-files.test.ts readme.test.ts
 # "Test Files  4 passed (4)" and "Tests  36 passed (36)"
-pnpm audit                  # "1 vulnerabilities found", "Severity: 1 high": braces, none in next
+pnpm audit                  # "1 vulnerabilities found", "Severity: 1 high": braces only
 pnpm --filter @apex/web exec next --version   # Next.js v16.4.2
+pnpm --filter @apex/api list fastify          # fastify@5.12.7
 ```
 
 To see the strict check catch a weakened tsconfig, add `"noImplicitAny": false` to the

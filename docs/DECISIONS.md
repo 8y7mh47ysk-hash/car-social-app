@@ -1933,3 +1933,19 @@ Keep entries brief. Details belong in code comments and the build log.
   as any install does, and the entry stays after the folder is deleted (81 of the 151 entries in
   this machine's store already point at deleted clones and worktrees). A store that one process
   fills, as in CI, never needs the second run.
+
+### Fastify 5.12.7 for a security advisory
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Charlie (wave w0 review, round 3)
+- Context: after "Next.js 16.4.2 and Vitest 4.1.12 for security advisories", a later `pnpm audit`
+  listed GHSA-389g-gv7q-r4x8 (low) against Fastify `>=5.12.2 <5.12.6`; the lockfile held 5.12.5.
+  Fastify lowercases the header names in a route's `headers` schema but not those inside
+  `propertyNames` `enum` or `const`, so an allow or deny list of header names written in their
+  usual case never matches. The API has no such schema yet: it validates with Zod.
+- Decision: `apps/api/package.json` asks for `fastify` `^5.12.7`, the latest release (13 October,
+  past the one-day hold). 5.12.6 holds the fix and 5.12.7 changes only the version number. The
+  lockfile changes only Fastify.
+- Trade-offs: none worth keeping 5.12.5 for; the release also carries 5.x backports (a FIFO cache
+  for parsed content types, string bodies decoded once, request child loggers whose level is not
+  reset), and the API's tests, logging tests included, pass on it. `pnpm audit` remains a manual
+  check until instruction 106 adds dependency scanning to CI.
