@@ -53,7 +53,10 @@ docs/         Playbook, architecture, build log, decisions, dependency register 
 
 ## Prerequisites
 
-- macOS, Linux or WSL: the package scripts use a POSIX shell.
+- macOS, Linux or WSL: the package scripts use a POSIX shell. The command blocks in `docs/` use
+  `#` for comments, which zsh, the default shell on macOS, does not recognise at its prompt: there,
+  run `setopt interactivecomments` first (or add that line to `~/.zshrc`), or zsh passes `#` and
+  the words after it to the command. The blocks in this README hold no comments.
 - Node.js 24, release 24.15 or later: some dependencies need it (jsdom 30, which the web app's
   tests use), and `pnpm install` refuses an older Node.js. `.nvmrc` and `.node-version` hold only
   the major version, so `nvm install` gets the latest 24, while `nvm use` picks the newest 24
@@ -68,9 +71,11 @@ docs/         Playbook, architecture, build log, decisions, dependency register 
 ## Quick start
 
 ```sh
-pnpm install   # also installs the git hooks (see "Git hooks" below)
+pnpm install
 pnpm dev
 ```
+
+`pnpm install` also installs the git hooks (see "Git hooks" below). Then:
 
 - Web app: <http://127.0.0.1:3000>
 - API: <http://127.0.0.1:4000/health> returns `{"status":"ok"}`
@@ -82,11 +87,17 @@ Press Ctrl+C to stop both. Both servers listen on 127.0.0.1 only. To use other p
 ## Local services
 
 PostgreSQL (with pgvector) and Redis run in Docker, defined in
-[docker-compose.yml](docker-compose.yml):
+[docker-compose.yml](docker-compose.yml). Create the root `.env` from its template, readable by
+your user only, and set both passwords in it (the file says how):
 
 ```sh
-cp .env.example .env && chmod 600 .env   # then set both passwords in it (see the file)
-docker compose up -d --wait              # starts both and waits until they are healthy
+cp .env.example .env && chmod 600 .env
+```
+
+Then start both and wait until they are healthy:
+
+```sh
+docker compose up -d --wait
 ```
 
 Both listen on 127.0.0.1 only (ports 5432 and 6379). Day-to-day commands, connection details and
