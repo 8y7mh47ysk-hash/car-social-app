@@ -209,20 +209,27 @@ async function standInPid(pidFile: string): Promise<number> {
 }
 
 /**
- * Runs the check against the stand-in in `mode`, with short time limits. Returns the result,
- * whether the stand-in's process was still running afterwards, and the process IDs of its
+ * Runs the check against the stand-in in `mode`, with short time `limits`: 2 s for the apps to
+ * answer and 1 s for each stop signal by default. Returns the result, how many seconds the check
+ * took, whether the stand-in's process was still running afterwards, and the process IDs of its
  * helpers, if any.
  */
-async function checkStandIn(mode: string, onFinished: OnFinished) {
+async function checkStandIn(
+  mode: string,
+  onFinished: OnFinished,
+  limits: { timeoutMs: number; stopTimeoutMs: number } = { timeoutMs: 2_000, stopTimeoutMs: 1_000 },
+) {
   const { pidFile, command } = prepareStandIn(mode, onFinished);
 
-  const result = await checkStart({ command, timeoutMs: 2_000, stopTimeoutMs: 1_000 });
+  const started = Date.now();
+  const result = await checkStart({ command, ...limits });
+  const seconds = (Date.now() - started) / 1000;
 
   const [pid, ...helpers] = readPids(pidFile);
   if (pid === undefined) {
     throw new Error(`the stand-in wrote no process ID; the check said: ${String(result.problem)}`);
   }
-  return { result, running: isRunning(pid), helpers };
+  return { result, seconds, running: isRunning(pid), helpers };
 }
 
 const apiUrl = (port: number): string => `the API (GET http://127.0.0.1:${String(port)}/health)`;
@@ -278,16 +285,23 @@ describe("checkStart", { timeout: 20_000 }, () => {
     expect(Date.now() - started).toBeLessThan(2_000);
   });
 
-  it("fails, and kills the apps, when they do not stop after SIGTERM", async ({
+  it("fails, and kills the apps, when they do not stop within its time limit after SIGTERM", async ({
     onTestFinished,
   }) => {
-    const { result, running } = await checkStandIn("stubborn", onTestFinished);
+    // The apps answer at once and SIGKILL ends them at once, so the check takes the 4 s that it
+    // gives them to stop and a little more: less than 7 s, where twice that limit would take 8.
+    const { result, seconds, running } = await checkStandIn("stubborn", onTestFinished, {
+      timeoutMs: 10_000,
+      stopTimeoutMs: 4_000,
+    });
 
     expect(result.problem).toBe(
-      "The apps did not stop within 1 s of SIGTERM; SIGKILL stopped them.",
+      "The apps did not stop within 4 s of SIGTERM; SIGKILL stopped them.",
     );
     expect(result.stopProblem).toBe(result.problem);
     expect(running).toBe(false);
+    expect(seconds).toBeGreaterThanOrEqual(4);
+    expect(seconds).toBeLessThan(7);
   });
 
   it("stops waiting, and says why, when a process outside the group keeps the output open", async ({
@@ -397,8 +411,12 @@ describe.concurrent("checkStart, when an app answers wrongly", { timeout: 20_000
     expect(running).toBe(false);
   });
 
-  it("fails when the web app does not answer, and names only it", async ({ onTestFinished }) => {
-    const { result, running } = await checkStandIn("no-web", onTestFinished);
+  it("fails when the web app does not answer within the time limit, and names only it", async ({
+    onTestFinished,
+  }) => {
+    // Requests to a port that nothing listens on fail at once, so the check waits out its 2-second
+    // limit and stops then, not seconds later.
+    const { result, seconds, running } = await checkStandIn("no-web", onTestFinished);
 
     expect(result.problem).toMatch(
       new RegExp(
@@ -408,6 +426,8 @@ describe.concurrent("checkStart, when an app answers wrongly", { timeout: 20_000
       ),
     );
     expect(running).toBe(false);
+    expect(seconds).toBeGreaterThanOrEqual(2);
+    expect(seconds).toBeLessThan(5);
   });
 
   it("fails on a status other than 200 from either app, whatever the body", async ({
@@ -556,12 +576,17 @@ describe.concurrent("check-start command", { timeout: 20_000 }, () => {
     return { pid, pidFile, ended, stdout: () => stdout, stderr: () => stderr };
   }
 
-  it("says so and exits with status 0 when both apps answered and stopped", async ({
+  it("says so and exits with status 0 as soon as both apps answered and stopped", async ({
     onTestFinished,
   }) => {
+    // With the default limits: a timer that still waited for the 10 s stop limit would keep
+    // Node.js, and so the program, running until then.
     const program = startProgram("ok", onTestFinished);
 
-    expect(await program.ended).toMatchObject({ code: 0, signal: null });
+    const ended = await program.ended;
+
+    expect(ended).toMatchObject({ code: 0, signal: null });
+    expect(ended.seconds).toBeLessThan(8);
     expect(program.stdout()).toMatch(
       new RegExp(
         "^Both apps started: the API answered GET /health on port \\d+, " +

@@ -212,10 +212,11 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
 
   const api = { name: "the API", url: `http://${HOST}:${String(ports.api)}/health` };
   const web = { name: "the web app", url: `http://${HOST}:${String(ports.web)}/` };
+  // Counted from the start of the command, so the first requests (2 s each at most) count too.
+  const deadline = Date.now() + timeoutMs;
   let apiState = await probe(api.url, healthProblem, signal);
   let webState = await probe(web.url, pageProblem, signal);
   const problems: string[] = [];
-  const deadline = Date.now() + timeoutMs;
   while (apiState !== undefined || webState !== undefined) {
     if (interrupted()) {
       problems.push("The check was interrupted before both apps answered.");
