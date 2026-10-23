@@ -2275,7 +2275,9 @@ pnpm exec vitest run scripts/check-docker.test.ts   # "Tests  35 passed (35)"
   Phase 0 was merged, the entrypoint passes instruction 4's `LOG_LEVEL` as `logLevel`.
 - `eslint.config.mjs`: `console` is an error in `apps/api/src` except `server.ts`, so API code
   cannot log around the logger with it. Writing to `process.stdout` or `process.stderr` directly
-  would also skip the logger, and no rule catches that.
+  would also skip the logger, and no rule catches that. (Corrected at the round-3 integration: the
+  rule reports direct `console` calls only; `globalThis.console.log(...)` and a copy of `console`,
+  such as `const { log } = console`, pass it. It catches mistakes, not intent.)
 - Tests: unit tests for each module; `apps/api/src/logging.test.ts` for the whole app (every line
   of a request carries the same ID, including a service's line written without the request;
   concurrent requests; a body that arrives in pieces over a real connection; two requests on one

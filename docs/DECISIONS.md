@@ -915,7 +915,9 @@ Keep entries brief. Details belong in code comments and the build log.
   ESLint forbids `console` in `apps/api/src` (except `server.ts`, which may print before the
   logger exists), so code cannot log around this path with it. (Corrected in round 2 of the wave
   w0 review. This said every line takes this path, but writing to `process.stdout` or
-  `process.stderr` directly would not, and no rule catches that.)
+  `process.stderr` directly would not, and no rule catches that. Corrected again at the round-3
+  integration: the rule reports direct `console` calls only, so `globalThis.console.log(...)` or a
+  copy of `console`, such as `const { log } = console`, also gets round it.)
 - Trade-offs: parsing and re-serialising each line costs about 3.3 µs instead of pino's 0.5 µs
   (measured on this Apple M5), about 5.5 µs per request for Fastify's two request lines: nothing
   next to a real route, but worth revisiting if profiling (#119) says otherwise. Free text cannot
