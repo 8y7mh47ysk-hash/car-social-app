@@ -1009,21 +1009,29 @@ API_PORT=99999 LOG_LEVEL=loud pnpm --filter @apex/api start
 # then pnpm reports "Command failed with exit code 1"
 ```
 
-The API reads `apps/api/.env`, and the shell wins over it. The first line moves an
-`apps/api/.env` that you already have out of the way (`apps/api/.env.mine`, also gitignored):
+The API reads `apps/api/.env`, and the shell wins over it. The first line sets an `apps/api/.env`
+that you already have aside, in a new folder `apps/api/.env.backup` (gitignored, like every
+`.env.*` name). If that folder already exists, because these lines ran before without the clean-up
+below, `mkdir` says "File exists" and the first backup is kept. The next two lines write a copy of
+the template that sets port 4010, only while the backup folder exists.
 
 ```sh
-[ -e apps/api/.env ] && mv apps/api/.env apps/api/.env.mine
-cp apps/api/.env.example apps/api/.env && chmod 600 apps/api/.env
-echo "API_PORT=4010" >> apps/api/.env
-pnpm --filter @apex/api dev                  # logs "Server listening at http://127.0.0.1:4010"
-curl http://127.0.0.1:4010/health            # second terminal: {"status":"ok"}
+mkdir apps/api/.env.backup && { [ ! -e apps/api/.env ] || mv apps/api/.env apps/api/.env.backup/; }
+[ -d apps/api/.env.backup ] && cp apps/api/.env.example apps/api/.env && chmod 600 apps/api/.env
+[ -d apps/api/.env.backup ] && echo "API_PORT=4010" >> apps/api/.env
+pnpm --filter @apex/api dev
 ```
 
-Press Ctrl+C, then run `LOG_LEVEL=warn pnpm --filter @apex/api dev`: the API still answers on
-port 4010, but logs nothing for the start or for requests (those lines are at info level). Press
-Ctrl+C, delete the file and put yours back:
-`rm apps/api/.env; [ -e apps/api/.env.mine ] && mv apps/api/.env.mine apps/api/.env`.
+The API logs "Server listening at http://127.0.0.1:4010", and in a second terminal
+`curl http://127.0.0.1:4010/health` prints `{"status":"ok"}`. Press Ctrl+C, then run
+`LOG_LEVEL=warn pnpm --filter @apex/api dev`: the API still answers on port 4010, but logs nothing
+for the start or for requests (those lines are at info level). Press Ctrl+C, then clean up. This
+line deletes the copy, puts your own file back if you had one and removes the backup folder; once
+that is done, it does nothing, so running it twice is safe:
+
+```sh
+[ ! -d apps/api/.env.backup ] || { rm -f apps/api/.env; [ ! -e apps/api/.env.backup/.env ] || mv apps/api/.env.backup/.env apps/api/.env; rmdir apps/api/.env.backup; }
+```
 
 The web app's guard and phase checks:
 `pnpm exec vitest run --project web --reporter=verbose` lists
