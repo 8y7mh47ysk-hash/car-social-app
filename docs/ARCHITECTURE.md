@@ -125,9 +125,9 @@ flowchart TB
 
 | Component                       | What it does                                                                                                                                               | Status                                                      |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Web app (`apps/web`)            | Next.js App Router app. A placeholder page today; Phase 1 adds the design system and shell. It is to become an installable PWA with offline support (#64). | Built #1                                                    |
-| API (`apps/api`)                | Fastify HTTP API: `/health` today; routes, validation and OpenAPI from Phase 2. Logs JSON lines with request IDs.                                          | Built #1, #8                                                |
-| Shared code (`packages/shared`) | Zod schemas, types and helpers used by the apps; the typed API client later (#29).                                                                         | Built #1                                                    |
+| Web app (`apps/web`)            | Next.js App Router app. A placeholder page today; Phase 1 adds the design system and shell. It is to become an installable PWA with offline support (#64). | Built #1, #4                                                |
+| API (`apps/api`)                | Fastify HTTP API: `/health` today; routes, validation and OpenAPI from Phase 2. Logs JSON lines with request IDs.                                          | Built #1, #4, #8                                            |
+| Shared code (`packages/shared`) | Zod schemas, types and helpers used by the apps; the typed API client later (#29).                                                                         | Built #1, #4                                                |
 | Design system (`packages/ui`)   | Tokens and components shared by the web app, the admin console and the mobile app.                                                                         | Planned #9                                                  |
 | Mobile app (`apps/mobile`)      | Expo app for background GPS journeys and push notifications, sharing types and the API client (#134-#136).                                                 | Planned #134                                                |
 | Admin console (`apps/admin`)    | The owner's console: config store, feature flags, audit log, approved remote actions (#189-#211).                                                          | Planned #189                                                |
@@ -423,19 +423,19 @@ logs (#201).
 
 ## Code layout
 
-| Path                 | Component                                                   | Status       |
-| -------------------- | ----------------------------------------------------------- | ------------ |
-| `apps/web`           | Web app (Next.js)                                           | Built #1     |
-| `apps/api`           | API (Fastify); later also the AI gateway and job processors | Built #1, #8 |
-| `packages/shared`    | Shared Zod schemas, types and helpers                       | Built #1     |
-| `infra/`             | Deployment and operations files                             | Built #1, #3 |
-| `docker-compose.yml` | Local PostgreSQL and Redis, placeholders for the apps       | Built #3     |
-| `.github/`           | CI workflow (GitHub Actions)                                | Built #5     |
-| `.husky/`            | Git hooks that check each commit                            | Built #2     |
-| `scripts/`           | Scripts that CI and the `docker:*` commands run             | Built #5, #7 |
-| `packages/ui`        | Design tokens and components                                | Planned #9   |
-| `apps/mobile`        | Mobile app (Expo)                                           | Planned #134 |
-| `apps/admin`         | Admin console                                               | Planned #189 |
+| Path                 | Component                                                   | Status           |
+| -------------------- | ----------------------------------------------------------- | ---------------- |
+| `apps/web`           | Web app (Next.js)                                           | Built #1, #4     |
+| `apps/api`           | API (Fastify); later also the AI gateway and job processors | Built #1, #4, #8 |
+| `packages/shared`    | Shared Zod schemas, types and helpers                       | Built #1, #4     |
+| `infra/`             | Deployment and operations files                             | Built #1, #3     |
+| `docker-compose.yml` | Local PostgreSQL and Redis, placeholders for the apps       | Built #3         |
+| `.github/`           | CI workflow (GitHub Actions)                                | Built #5         |
+| `.husky/`            | Git hooks that check each commit                            | Built #2         |
+| `scripts/`           | Scripts that CI and the `docker:*` commands run             | Built #5, #7     |
+| `packages/ui`        | Design tokens and components                                | Planned #9       |
+| `apps/mobile`        | Mobile app (Expo)                                           | Planned #134     |
+| `apps/admin`         | Admin console                                               | Planned #189     |
 
 ## Open questions
 
