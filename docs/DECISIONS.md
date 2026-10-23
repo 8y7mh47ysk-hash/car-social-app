@@ -1512,6 +1512,7 @@ Keep entries brief. Details belong in code comments and the build log.
   of env-file names to keep in step with `.gitignore` and the test. In watch mode, saving an env
   file reruns every test. `git commit --no-verify` still skips the hook, and CI still runs the
   test.
+- Superseded by: The pre-commit hook runs env-files.test.ts for an env file staged in any folder
 
 ### The start check stops the apps when it is interrupted
 
@@ -1764,3 +1765,28 @@ Keep entries brief. Details belong in code comments and the build log.
   `docker compose` commands are not checked and fail with Compose's own message; infra/README.md
   gives the minimum. Current Docker Desktop, OrbStack and Docker's own Linux packages are far
   newer, so the check is for old distribution packages.
+
+### The pre-commit hook runs env-files.test.ts for an env file staged in any folder
+
+- Date: 2026-10-11 · Instruction: #2, #4 · Author: Echo (wave w0 review, round 3)
+- Context: replaces "A staged env file makes the pre-commit hook run every test", which made env
+  files Vitest rerun triggers "in any folder". Vitest matches its triggers with picomatch's
+  default options, under which `**` never enters a folder whose name starts with a dot: after
+  `git add --force .devcontainer/devcontainer.env`, the hook found no test to run and the commit
+  went through in 2 seconds (round-3 open item w0.V2.Charlie.1). Another glob for dot folders
+  would still miss a dot folder inside a dot folder, and a staged env file in any other folder
+  ran the whole suite (about 30 seconds) only to fail on one test.
+- Decision: `lint-staged.config.ts` gets a fifth task for the names `.gitignore` gives env files,
+  `{.env,.env.*,*.env,.envrc}`. lint-staged matches a pattern without a slash against the file
+  name in every folder, dot folders included (it passes `dot: true` and `matchBase` to
+  picomatch), and the task runs `vitest run --project tooling env-files.test.ts` once, which
+  fails while git tracks an env file other than a template. The env-file trigger leaves
+  `vitest.config.ts`, because no test reads an env file. `git-hooks.test.ts` checks the task for
+  six names, three of them in dot folders, and `env-files.test.ts` checks that its committed-file
+  check recognises every name `.gitignore` must ignore, in dot folders too.
+- Trade-offs: the task's pattern is still a list of names, next to `.gitignore`'s rules and the
+  test's own pattern; a new kind of env-file name must be added to all three, and each has a test
+  case per pattern, not one shared list. A staged template matches `.env.*` and runs the check
+  too, which costs about a quarter of a second. `git commit --no-verify` still skips the hook, and
+  CI still runs the test. The secret scanning planned next looks at contents, which this check
+  does not.

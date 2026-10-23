@@ -362,9 +362,10 @@ output; and a dev script without `--watch` stops restarting on a change.
   `forceRerunTriggers` so that staging dependency, tsconfig, Vitest, hook or hook-config files
   runs every test. Since Phase 0 was merged, so does staging a file that other instructions'
   tests read instead of importing: `docker-compose.yml`, an `.env.example` template, a
-  `.gitignore`, a CI workflow or (since the wave w0 review) `eslint.config.mjs`. Since the
-  round-2 review of instruction 4, so does an env file staged with `git add --force`, and since
-  the round-2 review of this instruction, a PostCSS config.
+  `.gitignore`, a CI workflow or (since the wave w0 review) `eslint.config.mjs`, and since the
+  round-2 review of this instruction, a PostCSS config. An env file staged with `git add --force`
+  ran every test from the round-2 review of instruction 4; since round 3 it runs only
+  `env-files.test.ts`, through a lint-staged task of its own (see #4).
 - `git-hooks.test.ts` (54 tests): 28 commit messages through the real commit-msg hook and
   commitlint config; 10 pre-commit scenarios that run the real lint-staged with this
   repository's config in scratch git repositories, with stand-ins for ESLint, Prettier, pnpm and
@@ -380,7 +381,7 @@ Run from the repository root:
 ```sh
 pnpm install --frozen-lockfile          # a fresh install prints ". prepare$ husky"
 git config --get core.hooksPath         # prints .husky/_
-pnpm exec vitest run git-hooks.test.ts  # "Tests  76 passed (76)" since the wave w0 round-2 review
+pnpm exec vitest run git-hooks.test.ts  # "Tests  79 passed (79)" since the wave w0 round-3 review
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
@@ -505,7 +506,7 @@ instruction 4 and two merge tests from the round's integration (see below). How 
 the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts   # "Tests  64 passed (64)"; 76 since the round-2 review
+pnpm exec vitest run git-hooks.test.ts   # "Tests  64 passed (64)"; 79 since the round-3 review
 ```
 
 To see a merge stopped by the checks, in a scratch clone (a branch committed with `--no-verify`
@@ -574,7 +575,7 @@ Found while merging the round's five branches, and from the reviewers' hand-offs
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  7 passed | 69 skipped (76)"
+pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  7 passed | 72 skipped (79)"
 pnpm exec vitest run typecheck.test.ts -t "root type check"  # "Tests  2 passed | 12 skipped (14)"
 ```
 
@@ -635,7 +636,7 @@ fresh clone of this round's final branch, with 610 tests, at a load average of 3
 4.7 to 5.1 s). How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  6 passed | 70 skipped (76)"
+pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  6 passed | 73 skipped (79)"
 ```
 
 No owner actions.
@@ -993,7 +994,7 @@ git check-ignore -v --no-index apps/api/.env.example apps/web/.env.example
 git check-ignore -v --no-index infra/postgres.env .envrc
 # .gitignore:22:*.env	infra/postgres.env
 # .gitignore:23:.envrc	.envrc
-pnpm exec vitest run env-files.test.ts   # "Tests  28 passed (28)"
+pnpm exec vitest run env-files.test.ts   # "Tests  30 passed (30)" since round 3 of the review
 ```
 
 The API refuses invalid settings, names each one and never prints a value (after `pnpm build`):
@@ -1129,7 +1130,7 @@ How to verify the fixes:
 pnpm exec vitest run packages/shared/src/env.test.ts       # "Tests  54 passed (54)"
 pnpm exec vitest run apps/web/src/env                      # "Tests  33 passed (33)"
 pnpm exec vitest run apps/api/src/config.test.ts apps/api/src/server.test.ts  # "Tests  54 passed (54)" (46 before round 2)
-pnpm exec vitest run env-access.test.ts env-files.test.ts  # "Tests  92 passed (92)" (61 before round 2)
+pnpm exec vitest run env-access.test.ts env-files.test.ts  # "Tests  94 passed (94)" (61 before round 2, 92 before round 3)
 ```
 
 To repeat the build check by hand: add `SESSION_SECRET: z.string().min(32)` to
@@ -1196,7 +1197,7 @@ How to verify the fixes:
 ```sh
 pnpm exec vitest run env-access.test.ts               # "Tests  64 passed (64)"
 pnpm exec vitest run apps/api/src/env-file.test.ts    # "Tests  6 passed (6)"
-pnpm exec vitest run git-hooks.test.ts -t "runs every test when"  # "Tests  21 passed | 55 skipped (76)"
+pnpm exec vitest run git-hooks.test.ts -t "runs every test when"  # "Tests  21 passed | 55 skipped (76)"; 17 of 79 since round 3
 mkdir -p apps/web/src/app/probe
 printf '"use client";\n\nexport { serverEnvSchema } from "../../env/server-schema";\n' \
   > apps/web/src/app/probe/leak.tsx
@@ -1208,7 +1209,7 @@ rm apps/api/src/probe.ts
 ```
 
 The hook refusing an env file (the commit fails, so nothing else you have staged is committed;
-it takes as long as `pnpm test`):
+it took as long as `pnpm test` until round 3, and takes a few seconds since):
 
 ```sh
 printf 'SECRET=x\n' > infra/probe.env && git add --force infra/probe.env
