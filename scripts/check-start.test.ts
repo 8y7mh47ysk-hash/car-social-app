@@ -283,14 +283,18 @@ describe("checkStart", { timeout: 20_000 }, () => {
   it("fails at once when the command stops before both apps answer, keeping its output", async ({
     onTestFinished,
   }) => {
-    const started = Date.now();
-    const { result } = await checkStandIn("exit", onTestFinished);
+    // A 15-second limit for the apps: noticing the exit at once takes a small part of it, even on
+    // a busy machine, while a check that noticed it only at the limit would take all of it.
+    const { result, seconds } = await checkStandIn("exit", onTestFinished, {
+      timeoutMs: 15_000,
+      stopTimeoutMs: 1_000,
+    });
 
     expect(result.problem).toMatch(
       /^`.+ exit .+` exited with code 3 before both apps answered\.$/u,
     );
     expect(result.output).toContain("the API failed to start");
-    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(seconds).toBeLessThan(7.5);
   });
 
   it("fails, and kills the apps, when they do not stop within its time limit after SIGTERM", async ({
