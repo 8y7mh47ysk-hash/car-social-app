@@ -1064,8 +1064,11 @@ None for this instruction.
   (see "Review fixes (wave w0, round 1)").
 - `WEB_HOST` and `WEB_PORT` work only from the shell, for example `WEB_PORT=3010 pnpm dev`:
   Next.js opens the port before it reads `.env` files or its config. Next.js's CLI rejects a
-  non-numeric port ("'abc' is not a non-negative number"); an out-of-range one fails with Node's
-  `ERR_SOCKET_BAD_PORT` and a stack trace.
+  non-numeric port ("'abc' is not a non-negative number") and exits with code 1, and so does a
+  host it cannot resolve ("Failed to start server"). An out-of-range port makes Next.js print
+  Node's `ERR_SOCKET_BAD_PORT` as an "Unhandled Rejection", after which `next dev` keeps running
+  without serving anything and `next start` exits with code 0 (corrected in round 3 of the wave w0
+  review, see below).
 - No API variable is required yet, because each has a safe default. The first required ones (such
   as the database URL in Phase 2) will stop the API in the same way when missing; the
   packages/shared tests cover that path.

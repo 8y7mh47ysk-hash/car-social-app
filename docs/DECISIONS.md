@@ -587,8 +587,10 @@ Keep entries brief. Details belong in code comments and the build log.
   Next.js CLI (instruction 1). Next.js opens the port before it reads `.env` files or its config,
   so neither can set them, and a check in `next.config.ts` would run after the port is open.
 - Decision: keep them as shell variables, documented in `apps/web/.env.example` and the README,
-  and leave them out of the web env schemas. Next.js's CLI rejects a non-numeric port, and an
-  out-of-range port or a bad host fails to bind.
+  and leave them out of the web env schemas. Next.js's CLI rejects a non-numeric port, and a bad
+  host fails to bind; both exit with code 1. An out-of-range port fails to bind too, but then
+  `next dev` keeps running without serving anything and `next start` exits with code 0 (fact
+  corrected in round 3 of the wave w0 review).
 - Trade-offs: unlike `apps/api/.env`, `apps/web/.env` cannot set the port, and a bad value gets
   Next.js's or Node's error rather than ours. A wrapper script that validates them and then
   starts Next.js would fix both, at the cost of another process that must forward signals and
