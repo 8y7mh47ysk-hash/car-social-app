@@ -662,23 +662,32 @@ describe("secrets in the logs", () => {
     expect(output()).not.toContain("query-secret");
   });
 
-  // Fastify's warnings about a reply sent twice quote the raw request URL in their messages.
-  it("hides the query string of a raw request URL that a message quotes", async () => {
-    const { app, output, lines } = await buildLoggedApp({ logLevel: "info" });
-    app.get("/twice", (_request, reply) => {
-      void reply.send({ first: true });
-      void reply.send({ second: true });
-    });
-    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+  // Fastify's warnings about a reply sent twice quote the raw request URL in their messages (and
+  // so in err.message and err.stack). Node.js also accepts targets that start with "*".
+  it.each([
+    ["GET", '/twice?q="&token=query-secret', `"/twice?${REDACTED}`],
+    ["OPTIONS", "*?token=query-secret", `"*?${REDACTED}`],
+    ["GET", "*x?token=query-secret", `"*x?${REDACTED}`],
+    ["GET", "*#access_token=query-secret", `"*#${REDACTED}`],
+  ])(
+    "hides the query string of a raw request URL that a message quotes: %s %s",
+    async (method, target, quoted) => {
+      const { app, output, lines } = await buildLoggedApp({ logLevel: "info" });
+      app.all("/*", (_request, reply) => {
+        void reply.send({ first: true });
+        void reply.send({ second: true });
+      });
+      const address = await app.listen({ host: "127.0.0.1", port: 0 });
 
-    await sendRaw(
-      new URL(address),
-      'GET /twice?q="&token=query-secret HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n',
-    );
+      await sendRaw(
+        new URL(address),
+        `${method} ${target} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`,
+      );
 
-    expect(lines().some((line) => line.msg.includes(`"/twice?${REDACTED}`))).toBe(true);
-    expect(output()).not.toContain("query-secret");
-  });
+      expect(lines().some((line) => line.level === 40 && line.msg.includes(quoted))).toBe(true);
+      expect(output()).not.toContain("query-secret");
+    },
+  );
 
   // Node.js attaches the raw bytes of a request it cannot parse to the error that Fastify logs at
   // trace level, so they hold every header the client sent, cookies included.

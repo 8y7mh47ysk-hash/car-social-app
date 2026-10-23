@@ -101,8 +101,9 @@ function droppedLine(): string {
  * 1. replaces the value of every sensitive key, at any depth, with "[Redacted]", even when the
  *    value is an object or an array (see isSensitiveKey);
  * 2. hides URL credentials, query strings and fragments in every string value, the message
- *    included (see redactUrls), and cuts every string value to MAX_LOGGED_STRING_LENGTH
- *    characters. Object keys, and the number of keys and items, are left as they are;
+ *    included (see redactUrls for which "?" and "#" start a query string in free text), and then
+ *    cuts every string value to MAX_LOGGED_STRING_LENGTH characters. Object keys, and the number
+ *    of keys and items, are left as they are;
  * 3. adds the ID of the request whose code is running to a line that has none. Lines from
  *    Fastify's per-request loggers (`request.log`) already carry their own request's ID; this
  *    covers every other logger (`app.log` and children made from it), so a service that is never

@@ -175,6 +175,14 @@ describe("redactUrls", () => {
       'Reply was already sent, did you forget to "return reply" in the "/cars?q="&token=abc" (GET) route?',
       `Reply was already sent, did you forget to "return reply" in the "/cars?${REDACTED} (GET) route?`,
     ],
+    // A "*" counts like a "/": Node.js also accepts request targets that start with "*".
+    [
+      'Reply was already sent, did you forget to "return reply" in "*?token=abc" (OPTIONS)?',
+      `Reply was already sent, did you forget to "return reply" in "*?${REDACTED} (OPTIONS)?`,
+    ],
+    ["*x?token=abc", `*x?${REDACTED}`],
+    ['"**#access_token=abc"', `"**#${REDACTED}`],
+    ["why?*?token=abc", `why?*?${REDACTED}`],
   ])("hides the query string and fragment in %j", (text, expected) => {
     expect(redactUrls(text)).toBe(expected);
   });
@@ -192,6 +200,11 @@ describe("redactUrls", () => {
     "a/b",
     "/health",
     "/health?",
+    "*",
+    "5 * 3 = 15?",
+    "rated 4*?",
+    // With no "/" or "*" before it, a "?" is not taken to start a query string (see redactUrls).
+    "example.com?key=abc",
   ])("leaves %j alone", (text) => {
     expect(redactUrls(text)).toBe(text);
   });
@@ -211,6 +224,7 @@ describe("redactUrls", () => {
     ["many schemes", `${"a://".repeat(1_000_000)}@`],
     ["many @ signs", `x://${"@".repeat(200_000)}/`],
     ["many slashes and question marks", "/?".repeat(200_000)],
+    ["many stars and a question mark", `${"*".repeat(400_000)}?#`],
   ])("handles %s in linear time", (_name, text) => {
     expect(redactUrls(text).length).toBeLessThanOrEqual(text.length + REDACTED.length);
   });
@@ -233,8 +247,11 @@ describe("redactUrl", () => {
     ["/search?q=a`b&token=abc", `/search?${REDACTED}`],
     ['/search?q="&token=abc', `/search?${REDACTED}`],
     ["/search?q=<>&token=abc", `/search?${REDACTED}`],
-    // Without a "/" before the "?", which redactUrls needs in free text.
+    // Node.js also accepts targets that start with "*".
     ["*?token=abc", `*?${REDACTED}`],
+    ["*x?token=abc", `*x?${REDACTED}`],
+    // Unlike redactUrls, it needs no "/" or "*" before the "?".
+    ["?token=abc", `?${REDACTED}`],
     ["http://u:p@example.com?token=abc", `http://${REDACTED}@example.com?${REDACTED}`],
     ["http://apex:it's-a-secret@example.com/", `http://${REDACTED}@example.com/`],
     ["http://example.com?email=a@b&token=abc", `http://${REDACTED}`],
@@ -247,7 +264,7 @@ describe("redactUrl", () => {
 // secret somewhere in each. Each test seeds its own generator, so every run of a test, alone or
 // with the others, checks the same texts.
 describe("URL redaction on random text", () => {
-  const pieces = ["a", "b", "/", ":", "?", "#", "@", "://", "'", '"', "=", "&", ",", ".", "%"];
+  const pieces = ["a", "b", "/", "*", ":", "?", "#", "@", "://", "'", '"', "=", "&", ",", ".", "%"];
   const ROUNDS = 20_000;
 
   /**
@@ -292,12 +309,21 @@ describe("URL redaction on random text", () => {
     return false;
   }
 
-  it("never shows a secret in user information, or after a ? or # that a / comes before", () => {
+  /** Where a query string starts in free text, by redactUrls's rule; -1 for nowhere. */
+  function queryStartInText(text: string): number {
+    for (let index = 0; index < text.length; index += 1) {
+      if ("?#".includes(text.charAt(index)) && /[*/]/.test(text.slice(0, index))) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  it("never shows a secret in user information, or after a ? or # that a / or * comes before", () => {
     const shown: string[] = [];
     for (const { text, secretAt } of randomTexts(7)) {
-      const slash = text.indexOf("/");
-      const query = slash === -1 ? -1 : text.slice(slash).search(/[?#]/);
-      const afterQuery = query !== -1 && slash + query < secretAt;
+      const query = queryStartInText(text);
+      const afterQuery = query !== -1 && query < secretAt;
       if ((afterQuery || inUserInfo(text, secretAt)) && redactUrls(text).includes("secret")) {
         shown.push(text);
       }
