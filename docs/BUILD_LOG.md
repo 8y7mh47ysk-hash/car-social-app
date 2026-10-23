@@ -829,7 +829,8 @@ and a documentation change passed in 1.0 s. Fixes, each with a test that fails w
 Run times measured again in a fresh clone of this branch, with 716 tests, committing from a
 non-interactive shell, three rounds of each at a load average of 2 to 7 while other work used the
 machine: a documentation change 0.9 to 1.2 s, a source change with related tests 5.8 to 6.0 s,
-and a change that runs every test 30.9 to 31.1 s. The README gives these figures.
+and a change that runs every test 30.9 to 31.1 s. The README gave these figures until the
+round's integration measured again (see below).
 
 How to verify, from the repository root (the counts are those on a machine with zsh; without it,
 the zsh tests are skipped):
@@ -865,6 +866,11 @@ No owner actions.
   runs it gives the merged count. The "What changed" list above now names the new tasks and the
   `.nvmrc` and `.node-version` triggers, and the README's hook section names the Compose files,
   which it had left out.
+- Run times measured again on `main` after the merges, with 818 tests, in a fresh clone,
+  committing from a non-interactive shell, three rounds of each at a load average of 1.6 to 6.2: a
+  documentation change 0.8 s (3.0 s for the clone's first commit), a source change with related
+  tests 4.9 s (6.6 s the first time), and a change that runs every test 33.0 to 34.5 s. The README
+  gives these figures.
 
 ## #3 - Docker Compose services
 

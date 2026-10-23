@@ -301,9 +301,9 @@ backup: pick the entry that names your branch. Two worktrees committing at the s
 occasionally leave a stray `lint-staged automatic backup` entry behind; it is only a copy, and
 safe to drop.
 
-Typical run times on an Apple M5, measured in round 3 of the wave w0 review (716 tests) while
-other work used the machine: about 1 s for a documentation change, about 6 s for a source change
-with related tests, and about 31 s when every test runs.
+Typical run times on an Apple M5, measured after round 3 of the wave w0 review was merged (818
+tests) while other work used the machine: about 1 s for a documentation change, about 5 s for a
+source change with related tests, and about 34 s when every test runs.
 
 Hooks also run from scripts and IDEs. They need `node` and `pnpm` on `PATH`; if a GUI git client
 cannot find them, set `PATH` in `~/.config/husky/init.sh`, which husky reads before every hook.
