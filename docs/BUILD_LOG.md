@@ -1228,6 +1228,67 @@ git commit -m "chore: try to commit an env file"   # fails: env-files.test.ts, "
 git rm --cached --quiet infra/probe.env && rm infra/probe.env
 ```
 
+**Review fixes (wave w0, round 3)**
+
+Echo reviewed this instruction with a docs-and-decisions focus: every claim about it in the
+README, this log, DECISIONS, DEPENDENCIES, ARCHITECTURE and the templates was checked against the
+code, the lockfile and real runs. In a fresh clone of `main`, the steps above ran as written (the
+API on port 4050 instead of 4010) and gave the results they describe, apart from the totals of
+`pnpm test` (see the note at the top of this log). So did `next start` without a temporary
+required server variable, the recovery of `pnpm dev` once a bad `apps/api/.env` was fixed, the
+ESLint probes, and a temporary required `NEXT_PUBLIC_` variable, which `pnpm typecheck` needed
+too. In a fresh clone of the review branch, the hook refused env files force-added in
+`.apex-probe/`, `.devcontainer/` and `infra/`, each in one or two seconds. Fixes, each with a test
+that fails without it unless it says otherwise:
+
+- The pre-commit hook let an env file in a dot folder into a commit: after
+  `git add --force .devcontainer/devcontainer.env`, `git commit` went through in 2 seconds,
+  because Vitest's rerun triggers never look inside a folder whose name starts with a dot. A new
+  task in `lint-staged.config.ts` runs `env-files.test.ts` whenever a file named like an env file
+  (`.env`, `.env.*`, `*.env`, `.envrc`) is staged in any folder; lint-staged's matching enters dot
+  folders. The env-file trigger left `vitest.config.ts`, so such a commit now fails in seconds
+  instead of after every test. `git-hooks.test.ts` checks six names, three in dot folders, in
+  place of the four trigger cases; `env-files.test.ts` checks that its committed-file check
+  recognises env files in every folder.
+- The steps above that show the API reading `apps/api/.env` lost a developer's own file when the
+  first lines ran twice before the clean-up: the second run moved the copy of the template over
+  the backup. They also left that copy (with `API_PORT=4010`) behind when the developer had no
+  file and the first lines ran twice, and deleted the developer's restored file when the clean-up
+  line ran twice. The backup now goes into a folder that `mkdir` creates only on the first run,
+  and the clean-up does nothing once that folder is gone. `build-log.test.ts` runs both blocks of
+  this log twice, in sh and in zsh, with and without a file of the developer's.
+- The README and `apps/web/.env.example` said which command checks which web variables, but not
+  that `pnpm typecheck`, and so the pre-commit hook and CI, checks the `NEXT_PUBLIC_` ones: its
+  `next typegen` loads the config as `next build` does. Both say so now. Documentation only.
+- `env-access.test.ts` failed a full `pnpm test` on the busy machine: its first test loads the
+  whole ESLint config and timed out at 5,040 ms against Vitest's 5 s limit. The config now loads
+  once, before the tests, with 30 s. Not testable as such; the slowest test now takes about 15 ms.
+- The note above on `WEB_PORT` said that an out-of-range port fails. Next.js prints the error, but
+  `next dev` keeps running without serving anything and `next start` exits with code 0; the note
+  and DECISIONS ("WEB_HOST and WEB_PORT stay shell variables") now say so. Documentation only.
+- ARCHITECTURE.md's status columns left instruction 4 out of the web app, the API and
+  packages/shared. Documentation only. `eslint.config.mjs` and DECISIONS add
+  `process.getBuiltinModule("process")` to the routes that the env lint rules let through.
+
+How to verify the fixes: these two commands report `Tests  7 passed | 72 skipped (79)` and
+`Tests  35 passed (35)`.
+
+```sh
+pnpm exec vitest run git-hooks.test.ts -t "env file"
+pnpm exec vitest run env-files.test.ts build-log.test.ts
+```
+
+The hook refusing an env file in a dot folder: the `git commit` below fails within a second or
+two, and the failure of `env-files.test.ts` names `.apex-probe/probe.env`. Nothing else you have
+staged is committed, and the last line removes the file again.
+
+```sh
+mkdir .apex-probe && printf 'SECRET=x\n' > .apex-probe/probe.env
+git add --force .apex-probe/probe.env
+git commit -m "chore: try to commit an env file in a dot folder"
+git rm --cached --quiet .apex-probe/probe.env && rm .apex-probe/probe.env && rmdir .apex-probe
+```
+
 ## #5 - GitHub Actions CI
 
 **What changed**
