@@ -1,5 +1,5 @@
 import { ESLint, Linter } from "eslint";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 // Instruction 4: application code reads environment variables only through its app's env module,
@@ -8,6 +8,13 @@ import { z } from "zod";
 // config gives a file, then run them on each way code can reach the environment or the schema.
 
 const eslint = new ESLint({ cwd: import.meta.dirname });
+
+// The first file's config loads the whole ESLint config (typescript-eslint, Next.js's and
+// jsx-a11y's plugins): under a second on an idle machine, but more than Vitest's 5 s limit for a
+// test while the full suite and other work load it. Later files reuse it, so load it once here.
+beforeAll(async () => {
+  await eslint.calculateConfigForFile("apps/api/src/server.ts");
+}, 30_000);
 
 const ENV_RULES = ["no-restricted-properties", "no-restricted-imports", "no-restricted-syntax"];
 
