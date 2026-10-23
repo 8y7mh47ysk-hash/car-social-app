@@ -137,7 +137,9 @@ is missing or invalid, the app stops with an error that names every problem with
 printing a value. The API checks its variables as it starts; in `pnpm dev` it then waits, and
 starts again when you save a fixed `apps/api/.env`. The web app checks its variables when Next.js
 needs them: `pnpm dev` checks all of them, `pnpm build` the `NEXT_PUBLIC_` ones that it copies
-into the browser's JavaScript, and `pnpm start` the server ones.
+into the browser's JavaScript, and `pnpm start` the server ones. `pnpm typecheck` checks the
+`NEXT_PUBLIC_` ones too, because its `next typegen` loads the config as `next build` does, so a
+required one must also be set wherever the type check runs, the pre-commit hook and CI included.
 
 Settings can also live in a gitignored `.env` file next to the app: copy the app's template to
 create one, and make the copy readable by your user only (`chmod 600`, as for the root `.env`),
@@ -145,11 +147,11 @@ because settings can include secrets. Until `apps/api/.env` exists, the API prin
 notice ".env not found. Continuing without it." as it starts (twice in `pnpm dev`); that is
 expected.
 
-| File            | Read by                                                       | Template                |
-| --------------- | ------------------------------------------------------------- | ----------------------- |
-| `.env`          | Docker Compose, for `docker-compose.yml` (see Local services) | `.env.example`          |
-| `apps/api/.env` | The API, in `pnpm dev` and `pnpm start`                       | `apps/api/.env.example` |
-| `apps/web/.env` | Next.js, in `pnpm dev`, `pnpm build`, `pnpm start`            | `apps/web/.env.example` |
+| File            | Read by                                                                 | Template                |
+| --------------- | ----------------------------------------------------------------------- | ----------------------- |
+| `.env`          | Docker Compose, for `docker-compose.yml` (see Local services)           | `.env.example`          |
+| `apps/api/.env` | The API, in `pnpm dev` and `pnpm start`                                 | `apps/api/.env.example` |
+| `apps/web/.env` | Next.js, in `pnpm dev`, `pnpm build`, `pnpm start` and `pnpm typecheck` | `apps/web/.env.example` |
 
 Variables set in the shell win over the files: if an error names a variable that the file sets
 correctly, the shell has exported its own value (check with `printenv LOG_LEVEL`, for example,
@@ -219,12 +221,13 @@ are not checked.
   PostCSS config, a git hook or its config, the API's entrypoint (`apps/api/src/server.ts`, which
   its tests start as a separate process) or a file that tests read instead of importing
   (`docker-compose.yml`, an `.env.example` template, a `.gitignore`, a CI workflow,
-  `eslint.config.mjs`, `.nvmrc` or `.node-version`) runs every test instead. So does an env file,
-  which only `git add --force` can stage, and `env-files.test.ts` then fails the commit. This
-  README is the exception: `git-hooks.test.ts` runs the recovery steps below from it, but a README
-  change runs no tests here, only in CI. Deleted files count as staged, so deleting a module that
-  is still imported fails the type check. A failing step does not stop the others, so one run
-  shows every problem.
+  `eslint.config.mjs`, `.nvmrc` or `.node-version`) runs every test instead. This README is the
+  exception: `git-hooks.test.ts` runs the recovery steps below from it, but a README change runs
+  no tests here, only in CI. A staged env file (`.env`, `.env.*`, `*.env` or `.envrc`, in any
+  folder, dot folders such as `.devcontainer/` included), which only `git add --force` can stage,
+  runs `env-files.test.ts`, which then fails the commit. Deleted files count as staged, so
+  deleting a module that is still imported fails the type check. A failing step does not stop the
+  others, so one run shows every problem.
 - **pre-merge-commit** ([`.husky/pre-merge-commit`](.husky/pre-merge-commit)) runs the same
   checks on what a merge brings in when `git merge` (or a `git pull` that merges) commits without
   conflicts; git runs pre-commit only for commits you make with `git commit`.

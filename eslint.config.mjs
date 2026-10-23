@@ -100,8 +100,8 @@ export default defineConfig(
   // needs to import it (with import() either) or reach it through globalThis; banning those closes
   // the routes to `env` that the property rule cannot see, such as `import { env } from
   // "node:process"`. Code that passes `process` around as a value (`const proc = process`,
-  // `Reflect.get(process, "env")`, `process[name]`) still gets through: these rules catch
-  // mistakes, not intent. env-access.test.ts checks them.
+  // `Reflect.get(process, "env")`, `process[name]`, `process.getBuiltinModule("process")`) still
+  // gets through: these rules catch mistakes, not intent. env-access.test.ts checks them.
   {
     files: ["apps/*/src/**", "packages/*/src/**"],
     ignores: ["apps/api/src/server.ts", "apps/web/src/env/public.ts", "apps/web/src/env/server.ts"],

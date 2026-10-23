@@ -89,6 +89,17 @@ function ignoreDecisions(paths: readonly string[]): Map<string, Decision> {
   return decisions;
 }
 
+/**
+ * Whether git must never track `path`: an env file, in any folder, under one of the names that
+ * .gitignore ignores, apart from the .env.example templates.
+ */
+function mustNotBeCommitted(path: string): boolean {
+  return (
+    /(?:^|\/)(?:[^/]*\.env|\.env\.[^/]*|\.envrc)$/.test(path) &&
+    !/(?:^|\/)\.env\.example$/.test(path)
+  );
+}
+
 /** Every path in the index, that is, every file that is committed or staged. */
 function trackedPaths(): string[] {
   const result = spawnSync("git", ["ls-files", "-z"], { cwd: repoRoot, encoding: "utf8" });
@@ -123,10 +134,25 @@ describe("env files in the repository", () => {
   });
 
   it("are never committed, apart from the templates", () => {
-    const committed = trackedPaths().filter((path) =>
-      /(?:^|\/)(?:[^/]*\.env|\.env\.[^/]*|\.envrc)$/.test(path),
-    );
+    expect(trackedPaths().filter(mustNotBeCommitted)).toEqual([]);
+  });
 
-    expect(committed.filter((path) => !/(?:^|\/)\.env\.example$/.test(path))).toEqual([]);
+  // The pre-commit hook runs this file when an env file is staged in any folder, so the check
+  // above must recognise them all: every name that .gitignore must ignore, also in dot folders.
+  it("would refuse an env file in any folder", () => {
+    const envFiles = [
+      ...ENV_FILES,
+      ".devcontainer/devcontainer.env",
+      ".vscode/.env.local",
+      ".config/.secrets/.postgres.env",
+    ];
+
+    expect(envFiles.filter((path) => !mustNotBeCommitted(path))).toEqual([]);
+  });
+
+  it("would let the templates and the env modules be committed", () => {
+    const allowed = [...TEMPLATES, "packages/shared/src/env.ts", "apps/web/src/env/server.ts"];
+
+    expect(allowed.filter(mustNotBeCommitted)).toEqual([]);
   });
 });

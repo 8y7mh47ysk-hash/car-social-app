@@ -591,8 +591,10 @@ Keep entries brief. Details belong in code comments and the build log.
   Next.js CLI (instruction 1). Next.js opens the port before it reads `.env` files or its config,
   so neither can set them, and a check in `next.config.ts` would run after the port is open.
 - Decision: keep them as shell variables, documented in `apps/web/.env.example` and the README,
-  and leave them out of the web env schemas. Next.js's CLI rejects a non-numeric port, and an
-  out-of-range port or a bad host fails to bind.
+  and leave them out of the web env schemas. Next.js's CLI rejects a non-numeric port, and a bad
+  host fails to bind; both exit with code 1. An out-of-range port fails to bind too, but then
+  `next dev` keeps running without serving anything and `next start` exits with code 0 (fact
+  corrected in round 3 of the wave w0 review).
 - Trade-offs: unlike `apps/api/.env`, `apps/web/.env` cannot set the port, and a bad value gets
   Next.js's or Node's error rather than ours. A wrapper script that validates them and then
   starts Next.js would fix both, at the cost of another process that must forward signals and
@@ -1472,7 +1474,8 @@ Keep entries brief. Details belong in code comments and the build log.
   modules still passes. The config's comment now names the routes that remain.
 - Trade-offs: code that passes `process` around as a value still gets through: an alias,
   `Reflect.get(process, "env")`, `process[name]`, `createRequire(import.meta.url)("process")`,
-  and an `import()` whose source is computed. Each takes intent rather than a slip, and review
+  `process.getBuiltinModule("process")` (added in round 3 of the wave w0 review), and an
+  `import()` whose source is computed. Each takes intent rather than a slip, and review
   catches it. Selectors see syntax, not scopes: a ban on the bare name `process` would also hit a
   local variable of that name, and listing every allowed use (`process.exitCode`,
   `typeof process`, a property named `process`) makes a long, fragile selector. A rule of our own
@@ -1517,6 +1520,7 @@ Keep entries brief. Details belong in code comments and the build log.
   of env-file names to keep in step with `.gitignore` and the test. In watch mode, saving an env
   file reruns every test. `git commit --no-verify` still skips the hook, and CI still runs the
   test.
+- Superseded by: The pre-commit hook runs env-files.test.ts for an env file staged in any folder
 
 ### The start check stops the apps when it is interrupted
 
@@ -2112,3 +2116,28 @@ Keep entries brief. Details belong in code comments and the build log.
   the lag and the build tools but adds a Dockerfile and its builds to maintain, which the original
   entry rejected while no Docker engine was available to build and test one. Instruction 106's
   update checks should compare against the official image's rebuilds, not only pgvector's tags.
+
+### The pre-commit hook runs env-files.test.ts for an env file staged in any folder
+
+- Date: 2026-10-11 · Instruction: #2, #4 · Author: Echo (wave w0 review, round 3)
+- Context: replaces "A staged env file makes the pre-commit hook run every test", which made env
+  files Vitest rerun triggers "in any folder". Vitest matches its triggers with picomatch's
+  default options, under which `**` never enters a folder whose name starts with a dot: after
+  `git add --force .devcontainer/devcontainer.env`, the hook found no test to run and the commit
+  went through in 2 seconds (round-3 open item w0.V2.Charlie.1). Another glob for dot folders
+  would still miss a dot folder inside a dot folder, and a staged env file in any other folder
+  ran the whole suite (about 30 seconds) only to fail on one test.
+- Decision: `lint-staged.config.ts` gets a fifth task for the names `.gitignore` gives env files,
+  `{.env,.env.*,*.env,.envrc}`. lint-staged matches a pattern without a slash against the file
+  name in every folder, dot folders included (it passes `dot: true` and `matchBase` to
+  picomatch), and the task runs `vitest run --project tooling env-files.test.ts` once, which
+  fails while git tracks an env file other than a template. The env-file trigger leaves
+  `vitest.config.ts`, because no test reads an env file. `git-hooks.test.ts` checks the task for
+  six names, three of them in dot folders, and `env-files.test.ts` checks that its committed-file
+  check recognises every name `.gitignore` must ignore, in dot folders too.
+- Trade-offs: the task's pattern is still a list of names, next to `.gitignore`'s rules and the
+  test's own pattern; a new kind of env-file name must be added to all three, and each has a test
+  case per pattern, not one shared list. A staged template matches `.env.*` and runs the check
+  too, which costs about a quarter of a second. `git commit --no-verify` still skips the hook, and
+  CI still runs the test. The secret scanning planned next looks at contents, which this check
+  does not.
