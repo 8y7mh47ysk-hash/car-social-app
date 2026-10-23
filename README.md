@@ -125,7 +125,9 @@ is missing or invalid, the app stops with an error that names every problem with
 printing a value. The API checks its variables as it starts; in `pnpm dev` it then waits, and
 starts again when you save a fixed `apps/api/.env`. The web app checks its variables when Next.js
 needs them: `pnpm dev` checks all of them, `pnpm build` the `NEXT_PUBLIC_` ones that it copies
-into the browser's JavaScript, and `pnpm start` the server ones.
+into the browser's JavaScript, and `pnpm start` the server ones. `pnpm typecheck` checks the
+`NEXT_PUBLIC_` ones too, because its `next typegen` loads the config as `next build` does, so a
+required one must also be set wherever the type check runs, the pre-commit hook and CI included.
 
 Settings can also live in a gitignored `.env` file next to the app: copy the app's template to
 create one, and make the copy readable by your user only (`chmod 600`, as for the root `.env`),
@@ -133,11 +135,11 @@ because settings can include secrets. Until `apps/api/.env` exists, the API prin
 notice ".env not found. Continuing without it." as it starts (twice in `pnpm dev`); that is
 expected.
 
-| File            | Read by                                                       | Template                |
-| --------------- | ------------------------------------------------------------- | ----------------------- |
-| `.env`          | Docker Compose, for `docker-compose.yml` (see Local services) | `.env.example`          |
-| `apps/api/.env` | The API, in `pnpm dev` and `pnpm start`                       | `apps/api/.env.example` |
-| `apps/web/.env` | Next.js, in `pnpm dev`, `pnpm build`, `pnpm start`            | `apps/web/.env.example` |
+| File            | Read by                                                                 | Template                |
+| --------------- | ----------------------------------------------------------------------- | ----------------------- |
+| `.env`          | Docker Compose, for `docker-compose.yml` (see Local services)           | `.env.example`          |
+| `apps/api/.env` | The API, in `pnpm dev` and `pnpm start`                                 | `apps/api/.env.example` |
+| `apps/web/.env` | Next.js, in `pnpm dev`, `pnpm build`, `pnpm start` and `pnpm typecheck` | `apps/web/.env.example` |
 
 Variables set in the shell win over the files: if an error names a variable that the file sets
 correctly, the shell has exported its own value (check with `printenv LOG_LEVEL`, for example,
