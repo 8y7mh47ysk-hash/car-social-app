@@ -76,6 +76,15 @@ describe("finishLogLine", () => {
     });
   });
 
+  // Redacted, this string just fits. Cut first, it would end inside the password, before the "@"
+  // that shows it to be one, and the start of the password would be logged.
+  it("hides a URL's credentials before it cuts the string", () => {
+    const start = "x".repeat(MAX_LOGGED_STRING_LENGTH - 30);
+    const entry = { msg: `${start} postgres://apex:cut-secret-cut-secret@db/apex` };
+
+    expect(finish(entry)).toEqual({ msg: `${start} postgres://${REDACTED}@db/apex` });
+  });
+
   it.each([
     ["text that is not JSON", "password=hunter2\n"],
     ["a JSON array", '["hunter2"]\n'],
