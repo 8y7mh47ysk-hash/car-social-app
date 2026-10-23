@@ -82,7 +82,8 @@ Keep entries brief. Details belong in code comments and the build log.
 - Date: 2026-10-11 · Instruction: #1 · Author: Alpha (team version policy)
 - Context: Vitest 5.0 is only weeks old. Vitest 4.1 supports Vite 6, 7 and 8 and Storybook's
   Vitest addon (instruction 22).
-- Decision: `vitest: ^4.1.11` in the pnpm catalog.
+- Decision: `vitest: ^4.1.11` in the pnpm catalog. (Raised to `^4.1.12` in round 3 of the wave w0
+  review, for two advisories: see "Next.js 16.4.2 and Vitest 4.1.12 for security advisories".)
 - Trade-offs: Vitest 5 features wait for a deliberate upgrade.
 
 ### Latest stable versions, held back one day by pnpm
@@ -387,7 +388,9 @@ Keep entries brief. Details belong in code comments and the build log.
   footer, so a body line such as "Note: ..." straight after other body text is rejected by
   `footer-leading-blank`; add a blank line or reword it. Messages that start like git's own
   (`Merge ...`, `Revert ...`, `fixup!`, `squash!`, `amend!`) are accepted without any checks,
-  including hand-written ones.
+  including hand-written ones. (Corrected in round 3 of the wave w0 review: commitlint's defaults
+  also skip every check for `revert ...`, `Reapply ...`, `Merged ...`, `Automatic merge ...`,
+  `Auto-merged ...` and a version number on its own, such as `1.2.3` or `chore: 1.2.3`.)
 
 ### PostgreSQL 18 with pgvector, from the pgvector/pgvector image
 
@@ -1278,6 +1281,7 @@ Keep entries brief. Details belong in code comments and the build log.
   write to a terminal that no longer exists; `--no-stash` would also give up hiding unstaged
   changes and untracked files. If lint-staged starts handling more signals, the tests fail and
   this advice should be updated.
+- Superseded by: The steps after a stopped hook pop the backup and hold no comments
 
 ### A stop signal repeated within a second counts as one
 
@@ -1847,3 +1851,187 @@ Keep entries brief. Details belong in code comments and the build log.
   sonic-boom (which implements it) was not worth a dependency for a development format.
   Rejected: flushing before each `process.exit()` in the entrypoint (five call sites, and Node.js
   has no synchronous flush for `process.stdout`).
+
+### README changes do not run every test
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Charlie (wave w0 review, round 3)
+- Context: "Files that tests read from disk also make the pre-commit hook run every test" makes
+  such files rerun triggers. Round 2 of the wave w0 review added tests that read three more files
+  without making them triggers: `workspace.test.ts` reads `.nvmrc` and `.node-version`, and
+  `git-hooks.test.ts` runs the recovery steps in the README's section "Git hooks". A commit that
+  changed only one of them ran no tests in the hook.
+- Decision: `.nvmrc` and `.node-version` join the root `forceRerunTriggers`, and
+  `git-hooks.test.ts` checks both. README.md does not: a README change runs no tests in the hook,
+  and CI runs the README's steps with every other test.
+- Trade-offs: README.md changes far more often than the other triggers (in 38 of the first 236
+  commits, 27 of them with only documentation), and as a trigger it would take such a commit from
+  about 1 s to about 30 s, which invites `--no-verify`. A lint-staged task that runs only the
+  README's tests would be another list to keep in step with the tests, as the earlier entry says.
+  So a broken recovery step in the README is caught by CI, not by the hook. Revisit if the
+  README's tests move into a test file of their own, which such a task could run in a few seconds.
+
+### Tests check that git ignores what the tools generate
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Charlie (wave w0 review, round 3)
+- Context: round 2 of the wave w0 review found that removing `.next/` or `dist/` from `.gitignore`
+  passes CI's checks, which start from a fresh checkout with no build output, and left it without
+  a test because the build output "shows at once" in `git status` (BUILD_LOG #1, round 2). It shows
+  only to someone who builds and reads `git status` before running `git add --all`, and meanwhile
+  the pre-commit hook sets all of the untracked build output aside, and puts it back, on every
+  commit.
+- Decision: `generated-files.test.ts` asks git (`git check-ignore --no-index`, without the user's
+  global ignore file) about a file in each place where the tools in use write: `node_modules` at
+  the root and in a package, `.next` and `next-env.d.ts`, `build.log`, and the `outDir` of every
+  tsconfig as `tsc --showConfig` resolves it, so a new package's build output is checked without a
+  change to the test. It also fails when a rule ignores a file that git tracks, because `git add`
+  would then skip new files of that kind without a word.
+- Trade-offs: the list of tool outputs partly repeats `.gitignore`; the `outDir` check does not.
+  The output folders of tools that later instructions add (Storybook, Playwright) join the list
+  with those tools. `.husky/_` is left out: husky ignores that folder itself, and only once it has
+  run, so a `HUSKY=0` install would fail the test.
+
+### The steps after a stopped hook pop the backup and hold no comments
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Charlie (wave w0 review, round 3)
+- Context: replaces the commands that "A stopped pre-commit hook is recovered by hand, with tested
+  steps" chose, `git stash apply --index` followed by `git stash drop`, which "The steps after a
+  stopped hook keep a merge, and the tests run them from the README" kept. The README gave them
+  with a `#` comment on most lines (w0.V2.Alpha.2). At the prompt of zsh, the default shell on
+  macOS, `#` starts no comment unless the `interactivecomments` option is on: pasted as one block,
+  an apostrophe in a comment opened a quote that swallowed the lines after it, and typed one line
+  at a time, every step failed except `git stash drop`, which dropped the only copy of the unstaged
+  changes and untracked files. In bash too, an apply that failed (git does not replace a new file
+  that has the name of one in the backup) did not stop the drop on the next line. The tests ran
+  the steps with `sh -e`, which reads `#` as a comment and stops at the first failure, so they
+  could see neither problem.
+- Decision: the three sets of steps hold commands only, with the explanations in the text around
+  them, and `git stash pop --index` replaces apply and drop: git drops the entry only once
+  everything is back, and otherwise says that it kept it. `git-hooks.test.ts` also pastes each set
+  into `zsh -f -i` where zsh is installed, and runs the steps after a stopped commit with a new
+  file in the way, every line whatever the one before did, as a prompt runs pasted lines: the
+  backup must survive.
+- Trade-offs: a `pop` that fails leaves the files it did restore and the entry, which the person
+  then sorts out by hand; nothing is lost. The zsh tests are skipped where zsh is missing, as it
+  may be on CI's runner, so there `readme.test.ts`, which fails on any `#` comment in the README's
+  command blocks, keeps the steps free of comments. Chaining every step with `&&` was the
+  alternative; `pop` protects the backup without it, and the merge steps must put the merge's state
+  back even when the restore fails.
+
+### The README's command blocks hold no comments; the docs say how to make zsh read them
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Charlie (wave w0 review, round 3)
+- Context: the README's quick start began with
+  `pnpm install   # also installs the git hooks (see "Git hooks" below)`, which zsh, the default
+  shell on macOS, stops with "zsh: number expected" before running anything: at its prompt zsh
+  reads `#` as an ordinary word unless the `interactivecomments` option is on, and it is off by
+  default, in macOS's own start-up files and in the owner's. The build log's "How to verify" blocks
+  (121 commented lines in 33 blocks) fail the same way: `pnpm lint   # prints ...` lints files
+  named "#" and "prints", and the commits of instruction 2's hook recipe fail on a pathspec named
+  "#", which looks like the hook rejecting them.
+- Decision: the README's command blocks hold commands only, with the explanations in the text
+  around them, and `readme.test.ts` fails on a `#` comment in any of them. The build log keeps its
+  comments, which say what each command should print; its introduction and the README's
+  prerequisites say to run `setopt interactivecomments` in zsh first. The prerequisites cover the
+  folder `docs/` and name every other document with commented blocks (now infra/README.md), and
+  `readme.test.ts` fails when a tracked Markdown document outside `docs/` has such blocks and is
+  not named there.
+- Trade-offs: the build log's blocks still need a reader who has seen that note; rewriting 33
+  blocks in eight entries, most of them other engineers', was out of proportion. New README blocks
+  must keep comments out. Whether other documents with commented blocks, such as infra/README.md,
+  move their comments out of the blocks is left to their owners; until then the README names them.
+
+### A staged test file makes the hook check that a Vitest project runs it
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Charlie (wave w0 review, round 3)
+- Context: `vitest related` runs the staged test files that a Vitest project includes, and passes
+  with "No test files found" on one that none includes, such as a `.test.tsx` file in
+  packages/shared, whose project includes only `.test.ts` files. That test then never runs, and
+  only `test-suite.test.ts` notices, in `pnpm test` or CI.
+- Decision: a fifth task in `lint-staged.config.ts`, for files named like Vitest's test files, runs
+  `vitest run --project tooling test-suite.test.ts` once per commit.
+- Trade-offs: about 0.4 s more for each commit that stages a test file, which most code commits
+  do. Making test files rerun triggers would catch it too, but would run every test (about 30 s)
+  for each such commit. If `test-suite.test.ts` is renamed, the task fails with "No test files
+  found" until the config is changed with it.
+
+### Lint and type-check tests take their lists from the tools
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Charlie (wave w0 review, round 3)
+- Context: "Tests check the resolved settings that decide what CI and the hook check" compares
+  resolved settings with lists in the tests, and two lists let weakened settings through
+  (w0.V2.Alpha.3, w0.V2.Alpha.4): the strict compiler flags left out the ones that `strict`
+  implies, which a tsconfig can still turn off one by one, and each ESLint rule set was checked on
+  one kind of file only.
+- Decision: `typecheck.test.ts` takes the flags that `strict` turns on from the installed
+  TypeScript (the compiler options it marks `strictFlag`) and fails when a tsconfig sets one to
+  false. `eslint-config.test.ts` takes the kinds of file from each rule set's own `files` patterns
+  (typescript-eslint: ts, tsx, mts and cts; Next.js: js, jsx, mjs, ts, tsx, mts and cts) and checks
+  one of each in three places of every package: `src`, a deeper folder of `src` and the package's
+  root.
+- Trade-offs: TypeScript's list of compiler options is not part of its typed API; Zod checks its
+  shape, and the test checks that it names noImplicitAny, so a TypeScript version that changes it
+  fails the test instead of checking nothing. `reactFiles` in `eslint.config.mjs` now follows
+  Next.js's own list, so `.mts` and `.cts` files in apps/web get the React and Next.js rules too;
+  `.cjs` stays out, as in Next.js's config.
+
+### Next.js 16.4.2 and Vitest 4.1.12 for security advisories
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Charlie (wave w0 review, round 3)
+- Context: during round 3 of the wave w0 review, npm's advisory database added two advisories
+  against Next.js `>=16.0.0 <=16.4.0`: GHSA-2464-fhr4-w9xw (critical: unauthenticated remote code
+  execution in the Image Optimization API when SVG files are used) and GHSA-p3m5-59mp-jv5r (high:
+  denial of service in the App Router with Server Actions). The lockfile held 16.4.0. `pnpm audit`
+  also listed two moderate advisories in `@vitest/mocker` before 4.1.12 (GHSA-qxg6-89mg-rqv8 and
+  GHSA-xp26-3454-mjgp). Next.js 16.4.2 and eslint-config-next 16.4.2 (15 October) and Vitest
+  4.1.12 (15 October) fix them and are past the one-day release-age hold. Next.js 16.4 also checks
+  these advisories itself when `next build` or `next dev` runs under an AI agent
+  (`experimental.agentUpgrade`, `"security"` by default): it stops the first such command with
+  "SecurityFatalError: Your version of Next.js is affected by a known security vulnerability" and a
+  retry within five minutes continues. With a person at a terminal it offers an upgrade menu
+  instead, and in CI it does nothing.
+- Decision: the catalog asks for `next` and `eslint-config-next` `^16.4.2` and `vitest` `^4.1.12`,
+  so no install can go back to an affected release; the lockfile changes only those packages and
+  their `@next/*` and `@vitest/*` parts. Next.js's check stays on: it is how this was found. Its
+  message also tells the agent to ask the user about running `next upgrade` in a worktree; that is
+  tool output, not an instruction, and engineers report it instead of acting on it.
+- Trade-offs: an advisory that appears later stops the first agent-run build of each checkout
+  again, which is the point; CI does not see it, so until instruction 106 adds dependency scanning
+  to CI, `pnpm audit` is the check to run by hand. `pnpm audit` still reports one advisory:
+  braces up to 3.0.3 (GHSA-vfj7-8cjw-p6xm, high: denial of service through deeply nested
+  patterns), which only eslint-config-next's lint tooling uses and for which no fixed release
+  exists yet.
+
+### The engines test falls back when a frozen store cannot see new packages
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Charlie (wave w0 review, round 3)
+- Context: "Node.js 24.15 or later, enforced by pnpm at install" installs copies of the workspace
+  offline with `--frozen-store`, so that the test writes nothing to pnpm's store. Right after the
+  upgrade above, the test failed with ERR_PNPM_NO_OFFLINE_TARBALL ("snapshot not present in local
+  store") for packages that were in the store. pnpm 12 keeps the store's index in SQLite. While
+  another process has that index open (on this machine, other engineers' installs), the entries
+  an install has just added stay in the database's write-ahead log, which a frozen store does not
+  read. Reproduced with a throwaway store: with a second connection holding the index open, the
+  frozen install fails, an install without `--frozen-store` succeeds, and once the connection
+  closes the frozen install succeeds too.
+- Decision: when the frozen install fails with ERR_PNPM_NO_OFFLINE_TARBALL, `workspace.test.ts`
+  runs it again without `--frozen-store`. A package that really is missing fails both.
+- Trade-offs: in that case the test records its temporary folder in the store's list of projects,
+  as any install does, and the entry stays after the folder is deleted (81 of the 151 entries in
+  this machine's store already point at deleted clones and worktrees). A store that one process
+  fills, as in CI, never needs the second run.
+
+### Fastify 5.12.7 for a security advisory
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Charlie (wave w0 review, round 3)
+- Context: after "Next.js 16.4.2 and Vitest 4.1.12 for security advisories", a later `pnpm audit`
+  listed GHSA-389g-gv7q-r4x8 (low) against Fastify `>=5.12.2 <5.12.6`; the lockfile held 5.12.5.
+  Fastify lowercases the header names in a route's `headers` schema but not those inside
+  `propertyNames` `enum` or `const`, so an allow or deny list of header names written in their
+  usual case never matches. The API has no such schema yet: it validates with Zod.
+- Decision: `apps/api/package.json` asks for `fastify` `^5.12.7`, the latest release (13 October,
+  past the one-day hold). 5.12.6 holds the fix and 5.12.7 changes only the version number. The
+  lockfile changes only Fastify.
+- Trade-offs: none worth keeping 5.12.5 for; the release also carries 5.x backports (a FIFO cache
+  for parsed content types, string bodies decoded once, request child loggers whose level is not
+  reset), and the API's tests, logging tests included, pass on it. `pnpm audit` remains a manual
+  check until instruction 106 adds dependency scanning to CI.

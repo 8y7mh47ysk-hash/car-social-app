@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessByStdio } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
   chmod,
@@ -14,7 +14,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
-import type { Readable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
@@ -79,7 +79,9 @@ function hookEnv(
 }
 
 /** Resolves with a started command's exit code and combined output once it has exited. */
-function finished(child: ChildProcessByStdio<null, Readable, Readable>): Promise<Result> {
+function finished(
+  child: ChildProcessByStdio<Writable | null, Readable, Readable>,
+): Promise<Result> {
   return new Promise((resolve, reject) => {
     let output = "";
     const collect = (chunk: string): void => {
@@ -103,6 +105,46 @@ function run(
 ): Promise<Result> {
   return finished(spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] }));
 }
+
+/**
+ * Pastes `script` at the prompt of an interactive zsh that has only zsh's own defaults (-f: no
+ * start-up files) and returns its exit code and output. zsh runs in a session of its own, without
+ * a terminal: an interactive zsh takes over any terminal it finds, which stops it, and the test
+ * with it, when the tests run in a terminal.
+ */
+function pasteIntoZsh(cwd: string, env: NodeJS.ProcessEnv, script: string): Promise<Result> {
+  const child = spawn("zsh", ["-f", "-i"], {
+    cwd,
+    env,
+    detached: true,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const group = child.pid;
+  // If the test fails first, zsh and whatever it started must not outlive it.
+  onTestFinished(() => {
+    try {
+      if (group !== undefined) {
+        process.kill(-group, "SIGKILL");
+      }
+    } catch {
+      // The group has already exited.
+    }
+  });
+  child.stdin.end(script);
+  return finished(child);
+}
+
+/** Whether this machine has zsh, the default shell on macOS (Linux CI runners may not). */
+const hasZsh = spawnSync("zsh", ["-f", "-c", "exit 0"]).status === 0;
+
+/**
+ * How a shell script runs: "script" with `sh -e`, which stops at the first command that fails;
+ * "pasted-sh" and "pasted-zsh" as lines pasted at a shell's prompt, where each line runs even when
+ * the one before it failed. At its prompt, zsh also reads `#` as an ordinary word, not as the start
+ * of a comment, unless its interactivecomments option is on (it is off by default, and macOS does
+ * not turn it on).
+ */
+type ShellMode = "script" | "pasted-sh" | "pasted-zsh";
 
 describe("commit-msg hook", { timeout: 20_000 }, () => {
   const coAuthoredBy = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>";
@@ -231,6 +273,7 @@ describe("pre-commit hook", { timeout: 30_000 }, () => {
   const prettierOther = "prettier --write --ignore-unknown --no-error-on-unmatched-pattern";
   const typecheck = "pnpm typecheck";
   const relatedTests = "vitest related --run --passWithNoTests";
+  const suiteCheck = "vitest run --project tooling test-suite.test.ts";
 
   /**
    * The stand-in for each tool: appends its name and arguments to $STUB_LOG, appends a line to
@@ -276,8 +319,8 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
      * runs them from then on.
      */
     readonly installHooks: () => Promise<void>;
-    /** Runs a shell script in the repository with `sh -e` and returns its result. */
-    readonly shell: (script: string) => Promise<Result>;
+    /** Runs a shell script in the repository, as `mode` says, and returns its result. */
+    readonly shell: (script: string, mode: ShellMode) => Promise<Result>;
     /**
      * Runs `git merge --no-ff --no-edit <branch>` and returns its result. The options name a
      * stand-in that fails.
@@ -395,7 +438,10 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
           throw new Error(`the prepare script failed:\n${installed.output}`);
         }
       },
-      shell: (script) => run("sh", ["-e", "-c", script], root, env),
+      shell: (script, mode) =>
+        mode === "pasted-zsh"
+          ? pasteIntoZsh(root, env, script)
+          : run("sh", mode === "script" ? ["-e", "-c", script] : ["-c", script], root, env),
       merge: (branch, { fail = "" } = {}) =>
         run("git", ["merge", "--no-ff", "--no-edit", branch], root, { ...env, STUB_FAIL: fail }),
       finishMerge: ({ fail = "" } = {}) =>
@@ -469,9 +515,11 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       "src/legacy.jsx",
       "src/module.cts",
       "src/module.mts",
+      "src/view.test.tsx",
       "src/view.tsx",
     ];
-    const other = ["src/data.json", "src/theme.css"];
+    // Dotfiles too: several rerun triggers in vitest.config.ts are dotfiles or in dot folders.
+    const other = [".github/workflows/ci.yml", ".nvmrc", "src/data.json", "src/theme.css"];
     for (const file of [...code, ...other]) {
       await repo.write(file, "content\n");
     }
@@ -489,6 +537,24 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       typecheck,
       `${relatedTests} ${staged.join(" ")}`,
       ...staged.map((file) => `A  ${file}`),
+      suiteCheck,
+      ...staged.map((file) => `A  ${file}`),
+    ]);
+  });
+
+  // `vitest related` passes on a test file that no Vitest project includes, which then never runs.
+  it("checks once that the staged test files run in a Vitest project", async () => {
+    const repo = await createRepo();
+    await repo.write("src/app.test.ts", "test\n");
+    await repo.write("src/view.spec.tsx", "test\n");
+    await repo.git("add", "--all");
+
+    const result = await repo.preCommit();
+
+    expect(result.code, result.output).toBe(0);
+    expect((await repo.calls()).filter((call) => call.startsWith("vitest"))).toEqual([
+      `${relatedTests} src/app.test.ts src/view.spec.tsx`,
+      suiteCheck,
     ]);
   });
 
@@ -696,7 +762,7 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
 
     /** Picks the README's code block with the steps after a stopped commit. */
     const commitSteps = (block: string): boolean =>
-      block.includes("git stash apply --index") && !block.includes("MERGE_HEAD");
+      block.includes("git reset --hard") && !block.includes("MERGE_HEAD");
     /** Picks the README's code block with the steps after a stopped commit that ends a merge. */
     const mergeCommitSteps = (block: string): boolean => block.includes("MERGE_HEAD");
     /** Picks the README's code block that runs a stopped `git merge` again. */
@@ -704,10 +770,15 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
 
     /**
      * Runs the steps in the README's code block that `which` picks, from its section "Git hooks",
-     * with the placeholders filled in: `stash@{n}` and `<id>` name the hook's backup, the
-     * repository's only stash entry, and `<branch>` the branch that was being merged.
+     * as `mode` says, with the placeholders filled in: `stash@{n}` and `<id>` name the hook's
+     * backup, the repository's only stash entry, and `<branch>` the branch that was being merged.
+     * Run as a script, every step must succeed.
      */
-    async function runReadmeSteps(repo: Repo, which: (block: string) => boolean): Promise<void> {
+    async function runReadmeSteps(
+      repo: Repo,
+      which: (block: string) => boolean,
+      mode: ShellMode,
+    ): Promise<void> {
       const blocks = gitHooksReadmeBlocks.filter(which);
       expect(blocks, "the README's code blocks that match").toHaveLength(1);
       let script = blocks[0] ?? "";
@@ -718,8 +789,10 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
         expect(id, "the hook's backup in the stash").toBeDefined();
         script = script.replaceAll("stash@{n}", "stash@{0}").replaceAll("<id>", id ?? "");
       }
-      const result = await repo.shell(script.replaceAll("<branch>", "feature"));
-      expect(result.code, result.output).toBe(0);
+      const result = await repo.shell(script.replaceAll("<branch>", "feature"), mode);
+      if (mode === "script") {
+        expect(result.code, result.output).toBe(0);
+      }
     }
 
     /** lint-staged's working folders in the repository's git folder: one per unfinished run. */
@@ -796,65 +869,108 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
         );
         expect(await workingFolders(repo)).toHaveLength(1);
 
-        await runReadmeSteps(repo, commitSteps);
+        await runReadmeSteps(repo, commitSteps, "script");
 
         await expectAsBefore(repo);
         expect(await workingFolders(repo)).toEqual([]);
       },
     );
 
-    // git reset --hard and git stash apply both end a merge in progress: without the README's
-    // merge steps, the commit after them has only one parent.
-    it("keeps a merge in progress when the README's merge steps restore the commit that ends it", async () => {
-      const repo = await prepareMerge({ conflict: true });
-      expect((await repo.merge("feature")).code).not.toBe(0);
-      await repo.write("README.md", "# Test\n\nMore, and from the feature.\n");
-      await repo.git("add", "README.md");
-      await repo.write("src/app.ts", "export const app = 2;\n");
-      await repo.write("notes.txt", "draft\n");
-      const merging = ["M  README.md", " M src/app.ts", "M  src/util.ts", "?? notes.txt"];
-      expect(await repo.status()).toEqual(merging);
+    // On a Mac the steps get pasted into zsh, macOS's default shell.
+    it.skipIf(!hasZsh)("restores everything with the README's steps pasted into zsh", async () => {
+      const { repo } = await stopCommit("SIGKILL");
 
-      // The hook that `git commit` runs to finish the merge, stopped as a closed terminal stops it.
-      const hook = repo.startPreCommit("pnpm");
-      await signalDuringTypeCheck(repo, hook.group, "SIGHUP");
-      await hook.result;
-      await runReadmeSteps(repo, mergeCommitSteps);
+      await runReadmeSteps(repo, commitSteps, "pasted-zsh");
 
-      expect(await repo.status()).toEqual(merging);
-      await repo.git("rev-parse", "--quiet", "--verify", "MERGE_HEAD");
-      expect(await repo.git("stash", "list")).toBe("");
+      await expectAsBefore(repo);
       expect(await workingFolders(repo)).toEqual([]);
-      const result = await repo.finishMerge();
-      expect(result.code, result.output).toBe(0);
-      expect((await repo.git("log", "-1", "--format=%p")).trim().split(" ")).toHaveLength(2);
-      expect(await repo.status()).toEqual([" M src/app.ts", "?? notes.txt"]);
     });
+
+    // Pasted at a prompt, each step runs even when the one before it failed, so the backup must
+    // be dropped only by the step that puts it back, and only once that has worked.
+    it("keeps the backup when the README's steps cannot put everything back", async () => {
+      const { repo } = await stopCommit("SIGKILL");
+      // A new file of the user's with the name of a file in the backup, which git will not replace.
+      await repo.write("notes.txt", "mine\n");
+
+      await runReadmeSteps(repo, commitSteps, "pasted-sh");
+
+      expect(await readFile(join(repo.root, "notes.txt"), "utf8")).toBe("mine\n");
+      expect(await repo.git("stash", "list")).toMatch(
+        /^stash@\{0\}: On main: lint-staged automatic backup \(\w+\)\n$/,
+      );
+      // A stash entry's third parent holds the untracked files it set aside.
+      expect(await repo.git("show", "stash@{0}^3:notes.txt")).toBe("draft\n");
+    });
+
+    // git reset --hard and git stash pop both end a merge in progress: without the README's merge
+    // steps, the commit after them has only one parent.
+    it.for([
+      ["run as a script", "script"],
+      ["pasted into zsh", "pasted-zsh"],
+    ] as const)(
+      "keeps a merge in progress when the README's merge steps, %s, restore the commit that ends it",
+      async ([, mode], { skip }) => {
+        skip(mode === "pasted-zsh" && !hasZsh, "zsh is not installed");
+        const repo = await prepareMerge({ conflict: true });
+        expect((await repo.merge("feature")).code).not.toBe(0);
+        await repo.write("README.md", "# Test\n\nMore, and from the feature.\n");
+        await repo.git("add", "README.md");
+        await repo.write("src/app.ts", "export const app = 2;\n");
+        await repo.write("notes.txt", "draft\n");
+        const merging = ["M  README.md", " M src/app.ts", "M  src/util.ts", "?? notes.txt"];
+        expect(await repo.status()).toEqual(merging);
+
+        // The hook that `git commit` runs to finish the merge, stopped as a closed terminal does.
+        const hook = repo.startPreCommit("pnpm");
+        await signalDuringTypeCheck(repo, hook.group, "SIGHUP");
+        await hook.result;
+        await runReadmeSteps(repo, mergeCommitSteps, mode);
+
+        expect(await repo.status()).toEqual(merging);
+        await repo.git("rev-parse", "--quiet", "--verify", "MERGE_HEAD");
+        expect(await repo.git("stash", "list")).toBe("");
+        expect(await workingFolders(repo)).toEqual([]);
+        const result = await repo.finishMerge();
+        expect(result.code, result.output).toBe(0);
+        expect((await repo.git("log", "-1", "--format=%p")).trim().split(" ")).toHaveLength(2);
+        expect(await repo.status()).toEqual([" M src/app.ts", "?? notes.txt"]);
+      },
+    );
 
     // Stopping `git merge` itself, as a closed terminal does, stops it before it records the merge.
-    it("merges again after git merge was stopped during its checks, as the README says", async () => {
-      const repo = await prepareMerge();
-      await repo.write("src/app.ts", "export const app = 2;\n");
-      await repo.write("notes.txt", "draft\n");
-      const head = await repo.git("rev-parse", "HEAD");
+    it.for([
+      ["run as a script", "script"],
+      ["pasted into zsh", "pasted-zsh"],
+    ] as const)(
+      "merges again after git merge was stopped during its checks, with the README's steps %s",
+      async ([, mode], { skip }) => {
+        skip(mode === "pasted-zsh" && !hasZsh, "zsh is not installed");
+        const repo = await prepareMerge();
+        await repo.write("src/app.ts", "export const app = 2;\n");
+        await repo.write("notes.txt", "draft\n");
+        const head = await repo.git("rev-parse", "HEAD");
 
-      const merge = repo.startMerge("feature", "pnpm");
-      await signalDuringTypeCheck(repo, merge.group, "SIGHUP");
-      await merge.result;
-      expect(existsSync(join(repo.root, ".git", "MERGE_HEAD"))).toBe(false);
-      expect(await repo.git("rev-parse", "HEAD")).toBe(head);
-      await runReadmeSteps(repo, commitSteps);
-      // No merge is in progress, so its change is staged as if it were the user's own.
-      expect(await repo.status()).toEqual([" M src/app.ts", "M  src/util.ts", "?? notes.txt"]);
+        const merge = repo.startMerge("feature", "pnpm");
+        await signalDuringTypeCheck(repo, merge.group, "SIGHUP");
+        await merge.result;
+        expect(existsSync(join(repo.root, ".git", "MERGE_HEAD"))).toBe(false);
+        expect(await repo.git("rev-parse", "HEAD")).toBe(head);
+        await runReadmeSteps(repo, commitSteps, mode);
+        // No merge is in progress, so its change is staged as if it were the user's own.
+        expect(await repo.status()).toEqual([" M src/app.ts", "M  src/util.ts", "?? notes.txt"]);
 
-      await runReadmeSteps(repo, mergeAgainSteps);
+        await runReadmeSteps(repo, mergeAgainSteps, mode);
 
-      expect((await repo.git("log", "-1", "--format=%p")).trim().split(" ")).toHaveLength(2);
-      expect(await repo.git("show", "HEAD:src/util.ts")).toBe("export const util = 2;\n");
-      expect(await repo.status()).toEqual([" M src/app.ts", "?? notes.txt"]);
-      expect(await readFile(join(repo.root, "src/app.ts"), "utf8")).toBe("export const app = 2;\n");
-      expect(await repo.git("stash", "list")).toBe("");
-    });
+        expect((await repo.git("log", "-1", "--format=%p")).trim().split(" ")).toHaveLength(2);
+        expect(await repo.git("show", "HEAD:src/util.ts")).toBe("export const util = 2;\n");
+        expect(await repo.status()).toEqual([" M src/app.ts", "?? notes.txt"]);
+        expect(await readFile(join(repo.root, "src/app.ts"), "utf8")).toBe(
+          "export const app = 2;\n",
+        );
+        expect(await repo.git("stash", "list")).toBe("");
+      },
+    );
   });
 });
 
@@ -887,13 +1003,16 @@ describe("the pre-commit hook's test step", { timeout: 60_000 }, () => {
     ".husky/pre-commit",
     "commitlint.config.mjs",
     "lint-staged.config.ts",
-    // Files that the infra, env-file, CI workflow and env-access tests read instead of importing.
+    // Files that the infra, env-file, CI workflow, env-access and workspace tests read instead of
+    // importing.
     "docker-compose.yml",
     ".env.example",
     "apps/web/.env.example",
     ".gitignore",
     ".github/workflows/ci.yml",
     "eslint.config.mjs",
+    ".nvmrc",
+    ".node-version",
     // Env files, staged only with `git add --force`: env-files.test.ts then fails the commit.
     "apps/api/.env",
     "apps/web/.env.local",

@@ -5,9 +5,10 @@ import jsxA11y from "eslint-plugin-jsx-a11y";
 import { defineConfig, globalIgnores } from "eslint/config";
 import tseslint from "typescript-eslint";
 
-// Files that get the Next.js, React, React Hooks and jsx-a11y rules. When another React
-// package is added (e.g. packages/ui), add its files here.
-const reactFiles = ["apps/web/**/*.{js,jsx,mjs,ts,tsx}"];
+// Files that get the Next.js, React, React Hooks and jsx-a11y rules: every kind of file that
+// Next.js's own config lints (it leaves out .cjs). When another React package is added (e.g.
+// packages/ui), add its files here. eslint-config.test.ts checks them.
+const reactFiles = ["apps/web/**/*.{js,jsx,mjs,ts,tsx,mts,cts}"];
 
 const envModuleRule =
   "Read environment variables through the app's env module (docs/DECISIONS.md).";

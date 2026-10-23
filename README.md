@@ -53,7 +53,11 @@ docs/         Playbook, architecture, build log, decisions, dependency register 
 
 ## Prerequisites
 
-- macOS, Linux or WSL: the package scripts use a POSIX shell.
+- macOS, Linux or WSL: the package scripts use a POSIX shell. The command blocks in `docs/` and
+  [infra/README.md](infra/README.md) use `#` for comments, which zsh, the default shell on macOS,
+  does not recognise at its prompt: there, run `setopt interactivecomments` first (or add that line
+  to `~/.zshrc`), or zsh passes `#` and the words after it to the command. The blocks in this
+  README hold no comments.
 - Node.js 24, release 24.15 or later: some dependencies need it (jsdom 30, which the web app's
   tests use), and `pnpm install` refuses an older Node.js. `.nvmrc` and `.node-version` hold only
   the major version, so `nvm install` gets the latest 24, while `nvm use` picks the newest 24
@@ -68,9 +72,11 @@ docs/         Playbook, architecture, build log, decisions, dependency register 
 ## Quick start
 
 ```sh
-pnpm install   # also installs the git hooks (see "Git hooks" below)
+pnpm install
 pnpm dev
 ```
+
+`pnpm install` also installs the git hooks (see "Git hooks" below). Then:
 
 - Web app: <http://127.0.0.1:3000>
 - API: <http://127.0.0.1:4000/health> returns `{"status":"ok"}`
@@ -82,11 +88,17 @@ Press Ctrl+C to stop both. Both servers listen on 127.0.0.1 only. To use other p
 ## Local services
 
 PostgreSQL (with pgvector) and Redis run in Docker, defined in
-[docker-compose.yml](docker-compose.yml):
+[docker-compose.yml](docker-compose.yml). Create the root `.env` from its template, readable by
+your user only, and set both passwords in it (the file says how):
 
 ```sh
-cp .env.example .env && chmod 600 .env   # then set both passwords in it (see the file)
-docker compose up -d --wait              # starts both and waits until they are healthy
+cp .env.example .env && chmod 600 .env
+```
+
+Then start both and wait until they are healthy:
+
+```sh
+docker compose up -d --wait
 ```
 
 Both listen on 127.0.0.1 only (ports 5432 and 6379). Day-to-day commands, connection details and
@@ -201,14 +213,18 @@ are not checked.
   order, it runs ESLint with `--fix` and then Prettier on the staged files (fixes are added to the
   commit; any ESLint warning fails), `pnpm typecheck` for the whole repository when a staged file
   is TypeScript, JSON or a pnpm workspace file, and `vitest related` for the unit tests that
-  import a staged file. Staging a `package.json`, a pnpm lockfile or workspace file, a tsconfig,
-  a Vitest config or setup file, a PostCSS config, a git hook or its config, the API's entrypoint
-  (`apps/api/src/server.ts`, which its tests start as a separate process) or a file that tests
-  read instead of importing (`docker-compose.yml`, an `.env.example` template, a `.gitignore`, a
-  CI workflow or `eslint.config.mjs`) runs every test instead. So does an env file, which only
-  `git add --force` can stage, and `env-files.test.ts` then fails the commit. Deleted files count
-  as staged, so deleting a module that is still imported fails the type check. A failing step does
-  not stop the others, so one run shows every problem.
+  import a staged file. When a test file is staged, it also checks that `pnpm test` runs it
+  (`test-suite.test.ts`): a test file that no Vitest project includes would never run. Staging a
+  `package.json`, a pnpm lockfile or workspace file, a tsconfig, a Vitest config or setup file, a
+  PostCSS config, a git hook or its config, the API's entrypoint (`apps/api/src/server.ts`, which
+  its tests start as a separate process) or a file that tests read instead of importing
+  (`docker-compose.yml`, an `.env.example` template, a `.gitignore`, a CI workflow,
+  `eslint.config.mjs`, `.nvmrc` or `.node-version`) runs every test instead. So does an env file,
+  which only `git add --force` can stage, and `env-files.test.ts` then fails the commit. This
+  README is the exception: `git-hooks.test.ts` runs the recovery steps below from it, but a README
+  change runs no tests here, only in CI. Deleted files count as staged, so deleting a module that
+  is still imported fails the type check. A failing step does not stop the others, so one run
+  shows every problem.
 - **pre-merge-commit** ([`.husky/pre-merge-commit`](.husky/pre-merge-commit)) runs the same
   checks on what a merge brings in when `git merge` (or a `git pull` that merges) commits without
   conflicts; git runs pre-commit only for commits you make with `git commit`.
@@ -231,45 +247,50 @@ While the pre-commit hook runs, it keeps a backup of your changes in the git sta
 named `lint-staged automatic backup (<id>)`. Only Ctrl+C (SIGINT) lets it tidy up. If it is
 stopped in any other way (a closed terminal, an editor or tool that cancels the commit or gives up
 waiting, `kill`), your unstaged changes and untracked files stay in that entry and the working tree
-holds only what was staged. To get everything back exactly as it was, staged and unstaged:
+holds only what was staged. To get everything back exactly as it was, staged and unstaged, find
+the entry with `git stash list`, then run these steps with its number (`n` in `stash@{n}`) and
+`<id>` filled in, before you edit anything:
 
 ```sh
-git stash list                      # find "lint-staged automatic backup (<id>)": stash@{n}
-d=$(git rev-parse --git-dir)        # this worktree's git folder
-git reset --hard                    # the backup also holds what was staged
-git stash apply --index stash@{n}   # restores the staged, unstaged and untracked files
-git stash drop stash@{n}
-rm -rf "$d/lint-staged/<id>"        # the hook's working files
+d=$(git rev-parse --git-dir)
+git reset --hard
+git stash pop --index stash@{n}
+rm -rf "$d/lint-staged/<id>"
 ```
 
-These are the steps the hook itself takes after a failed check. Run them before you edit again,
-because `git reset --hard` discards changes made since the hook stopped. A plain `git stash pop`
-is not enough: it stops with a merge conflict on any file that was partly staged.
+`git reset --hard` empties the working tree, because the backup also holds what was staged; it
+also discards anything changed since the hook stopped. `git stash pop --index` puts back the
+staged, unstaged and untracked files and only then drops the entry: if it cannot put everything
+back (for example because a new file of yours has the name of one in the backup), it says so and
+keeps the entry, so nothing is lost. The last step deletes the hook's working files from this
+worktree's git folder. These are the steps the hook itself takes after a failed check. Without
+`git reset --hard` first, `git stash pop` stops with a merge conflict on any partly staged file.
 
 If that commit was finishing a merge (`git status` said "All conflicts fixed but you are still
-merging"), `git reset --hard` and `git stash apply` both end the merge, and the next commit would
-quietly leave out the merged branch. So set the merge's state aside around them, as the hook does:
+merging"), `git reset --hard` and `git stash pop` both end the merge, and the next commit would
+quietly leave out the merged branch. So copy the merge's state aside first and put it back after,
+as the hook does; once `mv` has run, the merge is in progress again:
 
 ```sh
-git stash list                      # find "lint-staged automatic backup (<id>)": stash@{n}
-d=$(git rev-parse --git-dir) && mkdir "$d/merge-state"
+d=$(git rev-parse --git-dir)
+mkdir "$d/merge-state"
 cp "$d/MERGE_HEAD" "$d/MERGE_MSG" "$d/MERGE_MODE" "$d/merge-state/"
 git reset --hard
-git stash apply --index stash@{n}
-mv "$d/merge-state/"* "$d/" && rmdir "$d/merge-state"   # the merge is in progress again
-git stash drop stash@{n}
+git stash pop --index stash@{n}
+mv "$d/merge-state/"* "$d/"
+rmdir "$d/merge-state"
 rm -rf "$d/lint-staged/<id>"
 ```
 
 If `git merge` or `git pull` itself was stopped while the hook ran (closing the terminal stops
 both), git never recorded the merge. After the first set of steps, the merge's changes are staged
 as if they were yours, and committing them would leave out the merged branch. git refuses to merge
-with changes staged, so all of them came from the merge: drop them, keeping your own unstaged
-changes and untracked files, and merge again.
+with changes staged, so all of them came from the merge: drop them with `git reset --merge`, which
+keeps your own unstaged changes and untracked files, then merge again (or run the `git pull` again):
 
 ```sh
-git reset --merge                   # drops the staged changes, keeps your own
-git merge <branch>                  # or run the git pull again
+git reset --merge
+git merge <branch>
 ```
 
 All worktrees of a repository share one stash list, so the top entry may be another worktree's
@@ -277,9 +298,9 @@ backup: pick the entry that names your branch. Two worktrees committing at the s
 occasionally leave a stray `lint-staged automatic backup` entry behind; it is only a copy, and
 safe to drop.
 
-Typical run times on an Apple M5, measured after round 2 of the wave w0 review was merged
-(698 tests) while other work used the machine: about 1 s for a documentation change, about 5 s
-for a source change with related tests, and about 27 s when every test runs.
+Typical run times on an Apple M5, measured in round 3 of the wave w0 review (716 tests) while
+other work used the machine: about 1 s for a documentation change, about 6 s for a source change
+with related tests, and about 31 s when every test runs.
 
 Hooks also run from scripts and IDEs. They need `node` and `pnpm` on `PATH`; if a GUI git client
 cannot find them, set `PATH` in `~/.config/husky/init.sh`, which husky reads before every hook.
@@ -315,7 +336,11 @@ Co-Authored-By: Name <email@example.com>
   So does a line that starts with one word, a space and `#`, such as `the #6 entry ...`: when a
   body line wraps there, rewrap it or write "instruction 6" instead.
 - Messages that git writes itself are accepted as they are: merges, reverts, and `fixup!`,
-  `squash!` and `amend!` commits.
+  `squash!` and `amend!` commits. commitlint skips every check for any message that starts like
+  one of them, even one written by hand (`Merge branch ...`, `Revert ...`, `revert ...`,
+  `Reapply ...`), and also for `Merged ...`, `Automatic merge ...`, `Auto-merged ...` and a
+  version number on its own (`1.2.3`, `v1.2.3`, `chore: 1.2.3`). Write your own as
+  `revert: ...` or `chore(release): ...` so they are checked.
 
 To check a message without committing: `printf 'feat: add x\n' | pnpm exec commitlint`.
 
