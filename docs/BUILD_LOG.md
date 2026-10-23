@@ -452,6 +452,18 @@ To see the strict check catch a weakened tsconfig, add `"noImplicitAny": false` 
 The new tests change no count that the verify steps of the other instructions quote; instruction
 2's round-3 note lists the hook tests' counts. No owner actions.
 
+**Integration fixes (wave w0, round 3)**
+
+- The same round's review of instruction 3 took the `#` comments out of infra/README.md's command
+  blocks, so the README's prerequisites no longer name it (the note above says they do). Naming a
+  document exempts it from the `readme.test.ts` check, so the check now fails if comments come
+  back there. docs/DECISIONS.md has the fact correction ("The README's command blocks hold no
+  comments; the docs say how to make zsh read them").
+- After the round's merges, the first command of the round-1 note and of the round-2 note reports
+  52 tests: 46 before the round, one more in `workspace.test.ts` from the review of instruction 5,
+  four in `apps/api/src/server.test.ts` from the review of instruction 8 and one in
+  `typecheck.test.ts` from this review (each branch counted only its own).
+
 ## #2 - Git hooks and conventional commits
 
 **What changed**

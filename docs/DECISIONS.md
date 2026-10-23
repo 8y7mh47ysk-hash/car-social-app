@@ -1940,7 +1940,9 @@ Keep entries brief. Details belong in code comments and the build log.
   prerequisites say to run `setopt interactivecomments` in zsh first. The prerequisites cover the
   folder `docs/` and name every other document with commented blocks (now infra/README.md), and
   `readme.test.ts` fails when a tracked Markdown document outside `docs/` has such blocks and is
-  not named there.
+  not named there. (Corrected at the round-3 integration: the same round's review of instruction 3
+  took the comments out of infra/README.md's blocks, so the prerequisites name no other document
+  now. Naming a document also exempts it from that test.)
 - Trade-offs: the build log's blocks still need a reader who has seen that note; rewriting 33
   blocks in eight entries, most of them other engineers', was out of proportion. New README blocks
   must keep comments out. Whether other documents with commented blocks, such as infra/README.md,
