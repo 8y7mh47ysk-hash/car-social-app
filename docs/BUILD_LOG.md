@@ -1232,14 +1232,16 @@ git rm --cached --quiet infra/probe.env && rm infra/probe.env
 
 Echo reviewed this instruction with a docs-and-decisions focus: every claim about it in the
 README, this log, DECISIONS, DEPENDENCIES, ARCHITECTURE and the templates was checked against the
-code, the lockfile and real runs. In a fresh clone of `main`, the steps above ran as written (the
-API on port 4050 instead of 4010) and gave the results they describe, apart from the totals of
-`pnpm test` (see the note at the top of this log). So did `next start` without a temporary
-required server variable, the recovery of `pnpm dev` once a bad `apps/api/.env` was fixed, the
-ESLint probes, and a temporary required `NEXT_PUBLIC_` variable, which `pnpm typecheck` needed
-too. In a fresh clone of the review branch, the hook refused env files force-added in
-`.apex-probe/`, `.devcontainer/` and `infra/`, each in one or two seconds. Fixes, each with a test
-that fails without it unless it says otherwise:
+code, the lockfile and real runs. In a fresh clone of `main`, the steps above ran (the API on
+port 4050 instead of 4010) and gave the results they describe, apart from the totals of
+`pnpm test` (see the note at the top of this log) and the faults below in the steps that set
+`apps/api/.env` aside. So did `next start` without a temporary required server variable, the
+recovery of `pnpm dev` once a bad `apps/api/.env` was fixed, the ESLint probes, and a temporary
+required `NEXT_PUBLIC_` variable, which `pnpm typecheck` needed too. In a fresh clone of the review
+branch, the new steps set a file of the developer's aside and put it back intact, also when run
+twice, and the hook refused env files force-added in `.apex-probe/`, `.devcontainer/` and
+`infra/`, each in one or two seconds. Fixes, each with a test that fails without it unless it says
+otherwise:
 
 - The pre-commit hook let an env file in a dot folder into a commit: after
   `git add --force .devcontainer/devcontainer.env`, `git commit` went through in 2 seconds,
