@@ -231,6 +231,7 @@ describe("pre-commit hook", { timeout: 30_000 }, () => {
   const prettierOther = "prettier --write --ignore-unknown --no-error-on-unmatched-pattern";
   const typecheck = "pnpm typecheck";
   const relatedTests = "vitest related --run --passWithNoTests";
+  const envCheck = "vitest run --project tooling env-files.test.ts";
 
   /**
    * The stand-in for each tool: appends its name and arguments to $STUB_LOG, appends a line to
@@ -507,6 +508,56 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       expect(await repo.calls()).toContain(typecheck);
     },
   );
+
+  /** The stand-ins' Vitest calls, without the `git status` lines that each one logs. */
+  async function vitestCalls(repo: Repo): Promise<string[]> {
+    return (await repo.calls()).filter((call) => call.startsWith("vitest"));
+  }
+
+  // git ignores env files, so only `git add --force` stages one; env-files.test.ts then fails the
+  // commit. Vitest's rerun triggers never look inside a dot folder, but lint-staged does.
+  it.for([
+    "apps/api/.env",
+    "infra/postgres.env",
+    ".envrc",
+    ".devcontainer/devcontainer.env",
+    ".vscode/.env.local",
+    ".config/.secrets/.postgres.env",
+  ])("checks that git tracks no env file when %s is staged", async (file) => {
+    const repo = await createRepo();
+    await repo.write(file, "SECRET=x\n");
+    await repo.git("add", "--force", file);
+
+    const result = await repo.preCommit();
+
+    expect(result.code, result.output).toBe(0);
+    expect(await vitestCalls(repo)).toEqual([`${relatedTests} ${file}`, envCheck]);
+  });
+
+  it("checks for env files once, however many are staged, and not for env modules", async () => {
+    const repo = await createRepo();
+    const envFiles = [".env", "apps/web/.env.production"];
+    const envModules = ["apps/web/src/env/server.ts", "packages/shared/src/env.ts"];
+    for (const file of [...envFiles, ...envModules]) {
+      await repo.write(file, "content\n");
+    }
+    await repo.git("add", "--force", ...envFiles, ...envModules);
+
+    expect((await repo.preCommit()).code).toBe(0);
+    expect(await vitestCalls(repo)).toEqual([
+      `${relatedTests} ${[...envFiles, ...envModules].sort().join(" ")}`,
+      envCheck,
+    ]);
+
+    const modulesOnly = await createRepo();
+    for (const file of envModules) {
+      await modulesOnly.write(file, "content\n");
+    }
+    await modulesOnly.git("add", ...envModules);
+
+    expect((await modulesOnly.preCommit()).code).toBe(0);
+    expect(await vitestCalls(modulesOnly)).toEqual([`${relatedTests} ${envModules.join(" ")}`]);
+  });
 
   it("checks a commit that only deletes a file", async () => {
     const repo = await createRepo();
@@ -894,11 +945,6 @@ describe("the pre-commit hook's test step", { timeout: 60_000 }, () => {
     ".gitignore",
     ".github/workflows/ci.yml",
     "eslint.config.mjs",
-    // Env files, staged only with `git add --force`: env-files.test.ts then fails the commit.
-    "apps/api/.env",
-    "apps/web/.env.local",
-    "infra/postgres.env",
-    ".envrc",
   ])("runs every test when %s is staged", async (file) => {
     const result = await relatedTests(file);
 

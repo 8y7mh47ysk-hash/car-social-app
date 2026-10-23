@@ -13,6 +13,9 @@ const lintable = "*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}";
 /** ESLint and Prettier skip paths that do not exist (deleted files) instead of failing. */
 const skipDeleted = "--no-error-on-unmatched-pattern";
 
+/** Env files, by the names that .gitignore ignores (the .env.example templates match too). */
+const envFiles = "{.env,.env.*,*.env,.envrc}";
+
 export default {
   // 1. Lint, fixing what ESLint can; any warning left fails the commit, as in `pnpm lint`.
   //    --no-warn-ignored skips files that the ESLint config ignores. Then format the result.
@@ -35,4 +38,11 @@ export default {
   //    staged test file; finding no related tests is a pass. A staged file that matches
   //    `forceRerunTriggers` in vitest.config.ts runs every test instead.
   "*": "vitest related --run --passWithNoTests",
+
+  // 5. Env files hold settings and secrets, so git ignores them and only `git add --force` stages
+  //    one. When one is staged, run env-files.test.ts, once: it fails if git tracks an env file
+  //    other than a template, which stops the commit. lint-staged matches a pattern without a slash
+  //    against file names in every folder, dot folders such as .devcontainer/ included, where
+  //    Vitest's rerun triggers never look.
+  [envFiles]: () => "vitest run --project tooling env-files.test.ts",
 } satisfies Configuration;
