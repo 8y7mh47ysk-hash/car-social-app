@@ -479,6 +479,7 @@ Keep entries brief. Details belong in code comments and the build log.
 - Trade-offs: `start_interval` needs Compose 2.20.2 and Docker Engine 25 or later, which any
   current Docker Desktop or OrbStack meets. `pg_isready` only shows that the server accepts
   connections, not that migrations have run; readiness of the app itself is instruction 33.
+- Superseded by: The Redis health check reads the password from Redis's config file
 
 ### App placeholders: Alpine stubs in the "app" profile, no Dockerfiles yet
 
@@ -2035,3 +2036,79 @@ Keep entries brief. Details belong in code comments and the build log.
   for parsed content types, string bodies decoded once, request child loggers whose level is not
   reset), and the API's tests, logging tests included, pass on it. `pnpm audit` remains a manual
   check until instruction 106 adds dependency scanning to CI.
+
+### The Redis health check reads the password from Redis's config file
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Delta (wave w0 review, round 3)
+- Context: replaces "Health checks that mean "ready": pg_isready over TCP and redis-cli -e",
+  whose Redis check took the password from `REDISCLI_AUTH` in the container's environment. That
+  copy is fixed when Compose creates the container, while Compose 5 writes Redis's config file
+  again each time it starts the container from the compose file. After `docker compose stop`, a
+  new `REDIS_PASSWORD` in `.env` and `docker compose start`, Redis had the new password and the
+  check the old one, so the service turned unhealthy (w0.V2.Bravo.3; seen again in round 3 on
+  Docker Engine 29.9.2 with Compose 5.6.1, which reads the compose file for `start` unless a
+  project name is given with `-p`).
+- Decision: the check is
+  `REDISCLI_AUTH="$(sed -n 's/^requirepass //p' /usr/local/etc/redis/redis.conf)" redis-cli -e ping`
+  (CMD-SHELL): it reads the password from the file that redis-server read, and passes it in the
+  environment, never on a command line. `REDISCLI_AUTH` stays in the container's environment, for
+  `docker compose exec redis redis-cli` and because it is what makes `docker compose up -d`
+  recreate the container when the password changes: Compose compares a service's settings, and a
+  change in a config's `content` alone does not count. The rest of the replaced entry holds:
+  `pg_isready` over TCP, `-e`, and the timings.
+- Trade-offs: after `stop` and `start` with a new password, `docker compose exec redis redis-cli`
+  keeps the old one until `docker compose up -d`; infra/README.md says to change the password
+  with `up -d`. The check takes the rest of the `requirepass` line as the password, so a password
+  that Redis parses differently (with quotes or spaces) fails it; `.env.example` asks for letters
+  and digits only, and the tests pin the config file's content. Tried and rejected in round 3:
+  dropping `REDISCLI_AUTH` altogether, so that only the config file holds the password; in the VM
+  `docker compose up -d` then left Redis on the old password, because nothing in the service's
+  settings had changed. Instruction 104 meets the same Compose behaviour if it moves passwords
+  into secrets or configs: changing one must still recreate the containers that use it.
+
+### The compose tests accept only the settings they check
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Delta (wave w0 review, round 3)
+- Context: `infra/compose.test.ts` validated `docker-compose.yml` with a loose Zod schema that
+  read only the settings it checked, so any other setting passed: an `env_file` holding
+  `POSTGRES_HOST_AUTH_METHOD=trust` (w0.V2.Bravo.2), extra lines in Redis's config file
+  (w0.V2.Bravo.1), `extends`, a top-level `include`, `cap_add`, `pid: host`, volume options, and a
+  YAML merge key, which the `yaml` package keeps as a plain `<<` key while Compose merges it. In a
+  VM (Docker Engine 29.9.2, Compose 5.6.1) a merge key gave PostgreSQL logins without a password
+  from another container, and another published Redis on every interface of the VM. A committed
+  `compose.yaml` (which Compose prefers to `docker-compose.yml`) or `docker-compose.override.yml`
+  (which it merges on top) also changed what runs without any test noticing.
+- Decision: strict Zod schemas (`z.strictObject`) for the whole file: exactly the four services,
+  each with exactly its settings, health checks with exactly their keys, named volumes without
+  options and the one config. A file outside that shape, or one the YAML parser warns about (an
+  unknown tag such as Compose's `!reset`), fails the whole test file with a message that names the
+  setting. Redis's config content is compared exactly. A test asks git that no other file with a
+  name Compose reads by default is tracked, and the root `vitest.config.ts` makes staging one run
+  every test, as it does for `docker-compose.yml`.
+- Trade-offs: every new service or setting (networks in #103, secrets in #104, MinIO in #121)
+  must be added to the schema together with a test for its value: deliberate friction. Rejected:
+  a list of forbidden settings (a merge key, `extends` or a new Compose feature gets round it),
+  and running `docker compose config` in the tests (Docker is not installed everywhere the tests
+  run; CI's Compose step does run it).
+
+### The pgvector image lags the official postgres image's security rebuilds
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Delta (wave w0 review, round 3)
+- Context: "PostgreSQL 18 with pgvector, from the pgvector/pgvector image" describes the image as
+  the official `postgres` image plus one extension. pgvector rebuilds its images only now and
+  then: the pinned `0.8.7-pg18-trixie` build is from 0.8.7's release day, 2026-10-01, and is still
+  the newest, while the official `postgres:18.6-trixie` is also rebuilt for Debian's security
+  updates, last on 2026-10-21. In the round-3 review's VM, the pinned image still had packages
+  that trixie's security suite has since replaced (`liblzma5` and `xz-utils` 5.8.1-1+deb13u1, not
+  +deb13u2; `libpcre2-8-0` 10.46-1~deb13u2, not ~deb13u3), which the official image already had,
+  and build tools that the official image does not ship (binutils, cpp, dpkg-dev, python3).
+- Decision: keep `pgvector/pgvector`, and move the digest to each newer `0.8.x-pg18-trixie` build
+  as soon as pgvector publishes one. Whether instruction 102, which builds the hardened images,
+  should build this one too (the official image plus PGDG's `postgresql-18-pgvector` package,
+  rebuilt with each official release) is the owner's decision; it is an owner action in
+  BUILD_LOG #3.
+- Trade-offs: until then the database container can lag Debian's security fixes by weeks; the
+  ports are on 127.0.0.1 only, which limits who can reach PostgreSQL. Our own image would remove
+  the lag and the build tools but adds a Dockerfile and its builds to maintain, which the original
+  entry rejected while no Docker engine was available to build and test one. Instruction 106's
+  update checks should compare against the official image's rebuilds, not only pgvector's tags.

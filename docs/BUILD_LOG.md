@@ -475,8 +475,10 @@ The new tests change no count that the verify steps of the other instructions qu
   runs every test. Since Phase 0 was merged, so does staging a file that other instructions'
   tests read instead of importing: `docker-compose.yml`, an `.env.example` template, a
   `.gitignore`, a CI workflow or (since the wave w0 review) `eslint.config.mjs`. Since the
-  round-2 review of instruction 4, so does an env file staged with `git add --force`, and since
-  the round-2 review of this instruction, a PostCSS config.
+  round-2 review of instruction 4, so does an env file staged with `git add --force`, since
+  the round-2 review of this instruction, a PostCSS config, and since the round-3 review of
+  instruction 3, another file that Docker Compose reads by default (`compose.yaml`,
+  `docker-compose.override.yml` and their variants), which `infra/compose.test.ts` refuses.
 - `git-hooks.test.ts` (54 tests): 28 commit messages through the real commit-msg hook and
   commitlint config; 10 pre-commit scenarios that run the real lint-staged with this
   repository's config in scratch git repositories, with stand-ins for ESLint, Prettier, pnpm and
@@ -866,7 +868,7 @@ Without Docker (this is what ran on the build machine):
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm exec vitest run --project infra   # "Tests  26 passed (26)" since the wave w0 review, round 2
+pnpm exec vitest run --project infra   # "Tests  40 passed (40)" since the wave w0 review, round 3
 pnpm test                              # every test passes; when #3 was finished: "Test Files  6
                                        # passed (6)" and "Tests  44 passed (44)"
 pnpm typecheck && pnpm lint            # both exit with code 0
@@ -1092,7 +1094,7 @@ two throwaway Debian 13 VMs (Lima 2.2.1, Docker Engine 29.9.1, Compose 5.6.0):
 How to verify the fixes:
 
 ```sh
-pnpm exec vitest run --project infra   # "Tests  26 passed (26)"
+pnpm exec vitest run --project infra   # "Tests  26 passed (26)" then; 40 since round 3
 pnpm test && pnpm typecheck && pnpm lint && pnpm format:check   # all exit with code 0
 ```
 
@@ -1109,6 +1111,95 @@ file, and the password and the append-only file still apply.
   source. Documentation only.
 - The `docker:*` scripts now refuse a Compose older than 2.23.1, which `docker-compose.yml` needs
   since the round-2 review (see instruction 7's integration note).
+
+**Review fixes (wave w0, round 3)**
+
+Delta reviewed this instruction, took it over and checked it again: with the containers running
+in three throwaway Debian 13 VMs (Lima 2.2.1, Docker Engine 29.9.2, Compose 5.6.1, every command
+as the docs give it), and on the build machine with the Compose 5.6.1 parser and both compose-spec
+JSON Schemas (Ajv 8.20.0; valid as written and after interpolation, and a misspelt key rejected).
+
+- Fixed (open items w0.V2.Bravo.1 and w0.V2.Bravo.2, and more of the same kind): the tests read
+  only the settings they checked, so others passed. On `main`, 26 of 35 deliberate breakages
+  passed every test: extra lines in Redis's config file (`user default on nopass` opens Redis
+  without a password), an `env_file`, and new in this round a YAML merge key (`<<`, which the
+  `yaml` package keeps as a plain key while Compose merges it), `extends`, a top-level `include`,
+  `cap_add`, `pid: host`, volume options, `working_dir`, an optional dependency, logging options
+  and a committed `compose.yaml` or `docker-compose.override.yml`, which Compose reads instead of
+  or on top of `docker-compose.yml`. In the VM, `<<: {env_file: ...}` with
+  `POSTGRES_HOST_AUTH_METHOD=trust` let another container log in to PostgreSQL without a
+  password, and `<<: {network_mode: host}` put Redis on every interface of the VM. A list of
+  forbidden settings would not help: a merge key gets round it. The tests now validate the whole
+  file with strict Zod schemas (exactly the services and settings they check), refuse YAML that
+  the parser warns about (such as Compose's `!reset` tag), compare Redis's config file exactly and
+  ask git that no other file Compose reads by default is tracked; staging such a file runs every
+  test (`vitest.config.ts`, checked by `git-hooks.test.ts`). The check that keeps secrets blank
+  in the template and without defaults also covers names with PASS, KEY or CREDENTIAL now. Of 108
+  breakages (this round's, round 2's and earlier ones), every one that applies to the file fails a
+  test except the health-check interval, unpinned on purpose; 12 written for older versions of the
+  file no longer apply, and their equivalents fail. Decision: "The compose tests accept only the
+  settings they check".
+- Fixed (open item w0.V2.Bravo.3): after `docker compose stop`, a new `REDIS_PASSWORD` in `.env`
+  and `docker compose start`, Compose 5 wrote the new password into Redis's config file while the
+  health check kept the container's `REDISCLI_AUTH`, so Redis turned unhealthy (reproduced in the
+  VM with `main`'s file; Compose reads the compose file for `start` unless given `-p`, which is why
+  a first try with `-p` did not show it). The check now reads the password from the config file:
+  after the same steps it stays healthy, and `docker compose up -d` recreates the container with
+  the new password. `REDISCLI_AUTH` stays: without it, `up -d` kept the old password, because
+  Compose does not notice a change in a config's content (tried in the VM). `.env.example` said
+  Redis takes its password whenever its container is created; it now says to apply a new one with
+  `docker compose up -d`, and infra/README.md says what `restart` and `start` do. A watcher
+  running as `nobody` found the password on no command line in 1,511 scans over restarts and health
+  checks. (The VMs ran the check before its long line was folded in the YAML; the Compose 5.6.1
+  parser reads both forms as the same command.) Decision: "The Redis health check reads the
+  password from Redis's config file".
+- Fixed (docs): `.env.example` said only that hex passwords need no quoting. In the VM a password
+  with a space stopped Redis, which then printed the whole password in its log at every restart (7
+  lines in 12 seconds), and a double-quoted value holding `\n` added a line to Redis's config:
+  `user default on nopass ~* &* +@all` left Redis open without a password, still healthy. Compose
+  also reads `$` as a variable and an unquoted ` #` as a comment, so either silently shortens a
+  password. The template now asks for letters and digits only and says why. Nothing enforces it:
+  `.env` is the developer's own file.
+- Fixed (security updates): the Redis and Alpine images predated Alpine's releases of 2026-10-21
+  (OpenSSL 3.5.9 for the advisory of 2026-09-29, a musl fix and new ca-certificates after a
+  compromised intermediate CA). `redis:8.10.2-alpine3.23` moved to its rebuild of 2026-10-22 (same
+  tag, new digest) and the placeholders to `alpine:3.24.3`. In the VM the Redis rebuild has the
+  same entrypoint (identical SHA-256), Redis version (8.10.2, a new build of it) and modules; only
+  Alpine's packages changed. The images were a few hours to a day old when pinned, against the
+  one-day wait that pnpm applies to npm packages; the security fixes were judged worth it.
+- Fixed (docs): `infra/README.md`'s command blocks held `#` comments, which zsh, the default shell
+  on macOS, passes to the commands when pasted: `openssl rand -hex 32   # prints ...` printed "too
+  many arguments" and no password, and `tee` wrote files named after the comment's words (pasted
+  into an interactive zsh started with `zsh -f`). The blocks now hold commands only.
+- Recorded: the pinned `pgvector/pgvector` build (2026-10-01, still the newest) lacks Debian
+  security updates that the official `postgres:18.6-trixie` (rebuilt 2026-10-21) has (`xz-utils`
+  and `liblzma5`, `libpcre2-8-0`) and ships build tools the official image does not. Decision:
+  "The pgvector image lags the official postgres image's security rebuilds"; owner action below.
+
+How to verify the fixes:
+
+```sh
+pnpm exec vitest run --project infra   # "Tests  40 passed (40)"
+pnpm exec vitest run --project tooling git-hooks.test.ts -t "compose"
+# "Tests  3 passed": staging docker-compose.yml, compose.yaml or docker-compose.override.yml
+# runs every test
+pnpm test && pnpm typecheck && pnpm lint && pnpm format:check   # all exit with code 0
+```
+
+With Docker, from the repository root, after the commands under "How to verify" above:
+
+```sh
+docker compose stop redis
+# put a new password in .env as REDIS_PASSWORD, for example the output of openssl rand -hex 32
+docker compose start redis
+sleep 30; docker compose ps redis        # "(healthy)": the check uses the password Redis has
+docker compose up -d --wait              # recreates redis with the new password
+docker compose exec redis redis-cli ping # PONG
+```
+
+Owner action: decide whether instruction 102 should build our own PostgreSQL image (the official
+`postgres` image plus PGDG's `postgresql-18-pgvector` package) instead of using
+`pgvector/pgvector`, which lags the official image's security rebuilds (see the decision above).
 
 ## #4 - Typed environment loader
 

@@ -51,6 +51,10 @@ export default defineConfig({
       // Env files, which git ignores: only `git add --force` stages one, and env-files.test.ts,
       // which lists what git tracks, then fails the commit.
       `${root}**/{.env,.env.*,*.env,.envrc}`,
+      // Other files that Docker Compose reads without being told, such as compose.yaml or
+      // docker-compose.override.yml: infra/compose.test.ts, which lists what git tracks, then
+      // fails the commit.
+      `${root}**/{compose,docker-compose}{,.override}.{yml,yaml}`,
     ],
   },
 });

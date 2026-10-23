@@ -1018,6 +1018,10 @@ describe("the pre-commit hook's test step", { timeout: 60_000 }, () => {
     "apps/web/.env.local",
     "infra/postgres.env",
     ".envrc",
+    // Files that Compose would read instead of, or on top of, docker-compose.yml:
+    // infra/compose.test.ts then fails the commit.
+    "compose.yaml",
+    "docker-compose.override.yml",
   ])("runs every test when %s is staged", async (file) => {
     const result = await relatedTests(file);
 
