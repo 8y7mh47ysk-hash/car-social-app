@@ -244,16 +244,40 @@ describe("redactUrl", () => {
 });
 
 // The rules of both functions, checked on random runs of text made of URL characters with a
-// secret somewhere in each. The generator is seeded, so every run checks the same texts.
+// secret somewhere in each. Each test seeds its own generator, so every run of a test, alone or
+// with the others, checks the same texts.
 describe("URL redaction on random text", () => {
   const pieces = ["a", "b", "/", ":", "?", "#", "@", "://", "'", '"', "=", "&", ",", ".", "%"];
-  let seed = 7;
-  const random = (n: number): number => {
-    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
-    return seed % n;
-  };
-  const randomText = (): string =>
-    Array.from({ length: random(10) }, () => pieces[random(pieces.length)]).join("");
+  const ROUNDS = 20_000;
+
+  /**
+   * `ROUNDS` texts, each a random run of pieces, the word "secret" and another random run, with
+   * the secret's offset. The generator is a linear congruential one in exact 32-bit integer
+   * arithmetic, of which only the high bits are used: in floating point the product loses its
+   * low bits, and the low bits of such a generator repeat quickly (an earlier version drew only
+   * 2,339 different texts in 20,000 rounds).
+   */
+  function randomTexts(seed: number): { text: string; secretAt: number }[] {
+    let state = seed;
+    const random = (n: number): number => {
+      state = (Math.imul(state, 1_103_515_245) + 12_345) >>> 0;
+      return (state >>> 16) % n;
+    };
+    const randomText = (): string =>
+      Array.from({ length: random(10) }, () => pieces[random(pieces.length)]).join("");
+    return Array.from({ length: ROUNDS }, () => {
+      const before = randomText();
+      return { text: `${before}secret${randomText()}`, secretAt: before.length };
+    });
+  }
+
+  it("draws mostly different texts", () => {
+    for (const seed of [7, 8]) {
+      const texts = randomTexts(seed).map(({ text }) => text);
+
+      expect(new Set(texts).size).toBeGreaterThan(ROUNDS * 0.95);
+    }
+  });
 
   /** Whether the secret at `at` is in the user information of a URL with "://". */
   function inUserInfo(text: string, at: number): boolean {
@@ -270,13 +294,11 @@ describe("URL redaction on random text", () => {
 
   it("never shows a secret in user information, or after a ? or # that a / comes before", () => {
     const shown: string[] = [];
-    for (let round = 0; round < 20_000; round += 1) {
-      const before = randomText();
-      const text = `${before}secret${randomText()}`;
+    for (const { text, secretAt } of randomTexts(7)) {
       const slash = text.indexOf("/");
       const query = slash === -1 ? -1 : text.slice(slash).search(/[?#]/);
-      const afterQuery = query !== -1 && slash + query < before.length;
-      if ((afterQuery || inUserInfo(text, before.length)) && redactUrls(text).includes("secret")) {
+      const afterQuery = query !== -1 && slash + query < secretAt;
+      if ((afterQuery || inUserInfo(text, secretAt)) && redactUrls(text).includes("secret")) {
         shown.push(text);
       }
     }
@@ -286,12 +308,10 @@ describe("URL redaction on random text", () => {
 
   it("never shows a secret in a request URL's user information, query string or fragment", () => {
     const shown: string[] = [];
-    for (let round = 0; round < 20_000; round += 1) {
-      const before = randomText();
-      const text = `${before}secret${randomText()}`;
+    for (const { text, secretAt } of randomTexts(8)) {
       const query = text.search(/[?#]/);
-      const afterQuery = query !== -1 && query < before.length;
-      if ((afterQuery || inUserInfo(text, before.length)) && redactUrl(text).includes("secret")) {
+      const afterQuery = query !== -1 && query < secretAt;
+      if ((afterQuery || inUserInfo(text, secretAt)) && redactUrl(text).includes("secret")) {
         shown.push(text);
       }
     }
