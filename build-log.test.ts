@@ -13,6 +13,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 
 const repoRoot = import.meta.dirname;
 const buildLog = await readFile(join(repoRoot, "docs", "BUILD_LOG.md"), "utf8");
+const apiTemplate = await readFile(join(repoRoot, "apps", "api", ".env.example"), "utf8");
 
 /** The build log's entry for instruction `n`, from its heading to the next entry's. */
 function entry(n: number): string {
@@ -64,8 +65,7 @@ describe("BUILD_LOG #4: the steps that show the API reading apps/api/.env", () =
     const folder = await mkdtemp(join(tmpdir(), "apex-build-log-"));
     onTestFinished(() => rm(folder, { recursive: true, force: true }));
     await mkdir(join(folder, "apps", "api"), { recursive: true });
-    const template = await readFile(join(repoRoot, "apps", "api", ".env.example"), "utf8");
-    await writeFile(join(folder, "apps", "api", ".env.example"), template);
+    await writeFile(join(folder, "apps", "api", ".env.example"), apiTemplate);
     if (own !== undefined) {
       await writeFile(join(folder, "apps", "api", ".env"), own, { mode: 0o600 });
     }
@@ -75,9 +75,7 @@ describe("BUILD_LOG #4: the steps that show the API reading apps/api/.env", () =
   /** The copy that the steps write: the template plus the port line, readable by its owner only. */
   async function expectCopy(folder: string): Promise<void> {
     const file = join(folder, "apps", "api", ".env");
-    expect(await readFile(file, "utf8")).toMatch(
-      /^# Template for apps\/api\/\.env[\s\S]*\nAPI_PORT=4010\n$/,
-    );
+    expect(await readFile(file, "utf8")).toBe(`${apiTemplate}API_PORT=4010\n`);
     expect((await stat(file)).mode & 0o777).toBe(0o600);
   }
 
