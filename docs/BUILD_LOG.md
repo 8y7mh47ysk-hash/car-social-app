@@ -1951,6 +1951,22 @@ NODE_ENV=staging node scripts/check-start.ts; echo "status $?"
 # "⚠ You are using a non-standard "NODE_ENV" value ..." lines, what the apps printed, "status 1"
 ```
 
+**Integration fixes (wave w0, round 3)**
+
+- The start check's test "fails at once when the command stops before both apps answer, keeping
+  its output" gave the apps 2 seconds and expected the whole check to take less, and it failed
+  once on a busy machine (2,923 ms; w0.V2.Bravo.4). The review of instruction 3 wrote a patch
+  against this review's version of the test, applied after the merge (`fc5cb16`): the apps get 15
+  seconds and the check must end within 7.5. Run again at the integration, a check that notices
+  the exit only at its limit fails it with "expected 15.252 to be less than 7.5".
+- Three full test runs of this round took 934 to 967 s instead of about 35 s, with tests and
+  hooks failing on their time limits (5 to 60 seconds) after up to 900 s: one in this review, one
+  in the review of instruction 8 and the integration's first. They were not slow. macOS's power log
+  (`pmset -g log`) shows the Mac, its lid closed, asleep during each of them ("Maintenance Sleep",
+  901 to 902 s, and 32 s more in one), and the time asleep accounts for each run's extra time. No
+  time limit can absorb that, so no test changes for it; long runs need a Mac that stays awake. The
+  comment in `workspace.test.ts` that put its clean-up's time-out down to swapping now says so.
+
 ## #6 - Architecture and decision docs
 
 **What changed**
