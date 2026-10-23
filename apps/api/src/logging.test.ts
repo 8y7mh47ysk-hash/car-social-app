@@ -261,12 +261,13 @@ describe("request IDs in the logs", () => {
       });
 
       expect(response.statusCode).toBe(statusCode);
-      expect(response.json()).toMatchObject({ code });
+      const body = z.object({ code: z.string(), message: z.string() }).parse(response.json());
+      expect(body.code).toBe(code);
       const requestId = response.headers["x-request-id"];
       expect(requestId).toMatch(UUID_V4);
       expect(lines().map((line) => [line.msg, line.reqId])).toEqual([
         ["incoming request", requestId],
-        [response.json<{ message: string }>().message, requestId],
+        [body.message, requestId],
         ["request completed", requestId],
       ]);
     },
@@ -395,6 +396,79 @@ describe("request IDs in the logs", () => {
     await app.inject({ url: "/health" });
 
     expect(output).toBe("");
+  });
+});
+
+// pino passes every value logged under `req` to the request serializer, not only Fastify's
+// requests. A log call that threw would fail the request, or stop the API from a timer.
+describe("values logged under req", () => {
+  it.each([
+    ["null", null, {}],
+    ["an object without a url", { path: "/v1/cars" }, {}],
+    [
+      "another request's method and URL",
+      { method: "POST", url: "https://api.example.com/v1/cars?key=query-secret" },
+      { method: "POST", url: `https://api.example.com/v1/cars?${REDACTED}` },
+    ],
+  ])("logs %s without throwing", async (_name, value, logged) => {
+    const { app, lines } = await buildLoggedApp();
+
+    app.log.info({ req: value }, "outgoing call");
+
+    expect(lines()).toEqual([expect.objectContaining({ msg: "outgoing call", req: logged })]);
+  });
+
+  it("logs an outgoing Node.js request without throwing", async () => {
+    const { app, lines } = await buildLoggedApp();
+    const outgoing = httpRequest("http://127.0.0.1:9/v1/cars?key=query-secret");
+    outgoing.on("error", () => undefined);
+    onTestFinished(() => {
+      outgoing.destroy();
+    });
+
+    app.log.info({ req: outgoing }, "outgoing call");
+
+    expect(lines()).toEqual([expect.objectContaining({ req: { method: "GET" } })]);
+  });
+});
+
+// The same holds for `res`: Fastify's own serializer read statusCode from null and threw.
+describe("values logged under res", () => {
+  it.each([
+    ["null", null, {}],
+    ["a number", 7, {}],
+    [
+      "an outgoing call's response",
+      { statusCode: 502, headers: { location: "/elsewhere" } },
+      { statusCode: 502 },
+    ],
+  ])("logs %s without throwing, also as a child logger's binding", async (_name, value, logged) => {
+    const { app, lines } = await buildLoggedApp();
+
+    app.log.info({ res: value }, "outgoing call");
+    app.log.child({ res: value }).info("bound");
+
+    expect(lines()).toEqual([
+      expect.objectContaining({ msg: "outgoing call", res: logged }),
+      expect.objectContaining({ msg: "bound", res: logged }),
+    ]);
+  });
+
+  it("still answers a request whose handler logs a missing response", async () => {
+    const { app, lines } = await buildLoggedApp({ logLevel: "info" });
+    app.get("/upstream", () => {
+      app.log.warn({ res: null }, "upstream gave no response");
+      return { ok: true };
+    });
+
+    const response = await app.inject({ url: "/upstream" });
+
+    expect(response.statusCode).toBe(200);
+    expect(lines().map((line) => [line.msg, line["res"]])).toEqual([
+      ["incoming request", undefined],
+      ["upstream gave no response", {}],
+      ["request completed", { statusCode: 200 }],
+    ]);
   });
 });
 
@@ -548,6 +622,62 @@ describe("secrets in the logs", () => {
     });
     expect(line(`connecting to postgres://${REDACTED}@db:5432/apex`)).toBeDefined();
     expect(line("reply headers")).toMatchObject({ headers: { "set-cookie": REDACTED } });
+  });
+
+  // Node.js accepts these characters unencoded in a request target (app.inject() would encode
+  // most of them first), so none of them may end the part of the URL that is hidden.
+  it.each([
+    ["an apostrophe", "GET", "/cars?owner=d'arcy&token=query-secret", `/cars?${REDACTED}`],
+    ["a backtick", "GET", "/cars?q=a`b&token=query-secret", `/cars?${REDACTED}`],
+    ["a double quote", "GET", '/cars?q="&token=query-secret', `/cars?${REDACTED}`],
+    ["angle brackets", "GET", "/cars?q=<b>&token=query-secret", `/cars?${REDACTED}`],
+    ["no slash before the ?", "OPTIONS", "*?token=query-secret", `*?${REDACTED}`],
+    [
+      "an apostrophe in a password",
+      "GET",
+      "http://apex:it's-query-secret@x/cars",
+      `http://${REDACTED}@x/cars`,
+    ],
+    [
+      "an @ in a query string with no path",
+      "GET",
+      "http://x?email=a@b&token=query-secret",
+      `http://${REDACTED}`,
+    ],
+  ])("hides the secrets of a request URL with %s", async (_name, method, target, logged) => {
+    const { app, output, lines } = await buildLoggedApp({ logLevel: "info" });
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+    const reply = await sendRaw(
+      new URL(address),
+      `${method} ${target} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`,
+    );
+
+    expect(reply).toMatch(/^HTTP\/1\.1 404 /);
+    expect(lines().find((line) => line.msg === "incoming request")?.["req"]).toEqual({
+      method,
+      url: logged,
+      remoteAddress: "127.0.0.1",
+    });
+    expect(output()).not.toContain("query-secret");
+  });
+
+  // Fastify's warnings about a reply sent twice quote the raw request URL in their messages.
+  it("hides the query string of a raw request URL that a message quotes", async () => {
+    const { app, output, lines } = await buildLoggedApp({ logLevel: "info" });
+    app.get("/twice", (_request, reply) => {
+      void reply.send({ first: true });
+      void reply.send({ second: true });
+    });
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+    await sendRaw(
+      new URL(address),
+      'GET /twice?q="&token=query-secret HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n',
+    );
+
+    expect(lines().some((line) => line.msg.includes(`"/twice?${REDACTED}`))).toBe(true);
+    expect(output()).not.toContain("query-secret");
   });
 
   // Node.js attaches the raw bytes of a request it cannot parse to the error that Fastify logs at

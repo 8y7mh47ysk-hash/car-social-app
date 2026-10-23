@@ -54,9 +54,9 @@ const config = loadConfigOrExit();
 const app = await buildAppOrExit(config);
 
 // An uncaught exception, or a promise rejection that nothing handles, still ends the process with
-// code 1 as Node.js does by default, but goes through the logger first: one JSON line with
-// secrets redacted and with the ID of the request whose code failed. Node.js's own report is
-// plain text on stderr, unredacted and without the ID.
+// code 1 as Node.js does by default, but goes through the logger first: one entry (a JSON line
+// unless LOG_FORMAT=pretty) with secrets redacted and with the ID of the request whose code
+// failed. Node.js's own report is plain text on stderr, unredacted and without the ID.
 process.on("uncaughtException", (error, origin) => {
   app.log.fatal({ err: error, origin }, "uncaught exception");
   process.exit(1);

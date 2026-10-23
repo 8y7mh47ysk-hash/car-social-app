@@ -33,46 +33,79 @@ export function isSensitiveKey(key: string): boolean {
   return SENSITIVE_KEY.test(key.toLowerCase().replaceAll(/[^a-z\d]/g, ""));
 }
 
-/** A run of text that may hold a URL or a path: no whitespace, quotes or angle brackets. */
-const URL_LIKE_TOKEN = /[^\s"'`<>]+/g;
+/**
+ * A run of text without whitespace, which may hold a URL or a path. Only whitespace ends it:
+ * quotes, backticks and angle brackets can stand unencoded inside a URL (an apostrophe in a
+ * password or a query string, a backtick in a query string that a browser sends), and Node.js
+ * accepts all of them in a request target, which Fastify quotes in some of its messages.
+ */
+const URL_LIKE_TOKEN = /\S+/g;
 
 /**
  * Hides the parts of URLs that can carry secrets, wherever URLs appear in a piece of text:
  *
  * - the user information of every URL with "://": "postgres://apex:pw@db/apex" becomes
  *   "postgres://[Redacted]@db/apex". Everything up to the last "@" before the first "/" counts,
- *   so a password that contains "@", "?" or "#" is hidden too. URLs joined without spaces, as in
+ *   so a password that contains "@" is hidden too, and one that contains "?" or "#" hides all
+ *   that follows the "://" (see hideUrlParts). URLs joined without spaces, as in
  *   "redis://:pw@a:6379,redis://:pw@b:6379", each get their own;
- * - everything after the first "?" or "#" of a URL or path, so query strings and fragments never
- *   reach the logs: "/reset?token=abc" becomes "/reset?[Redacted]". That covers reset links,
- *   signed storage URLs ("X-Amz-Signature=...") and OAuth redirects ("#access_token=...").
+ * - everything after the first "?" or "#" of a URL or path, up to the next whitespace:
+ *   "/reset?token=abc" becomes "/reset?[Redacted]". That covers reset links, signed storage URLs
+ *   ("X-Amz-Signature=...") and OAuth redirects ("#access_token=..."). Whatever follows a URL
+ *   without a space, such as the closing quote in '"/reset?token=abc",', is hidden with it.
  *
- * A "?" or "#" counts only in a run of text (no spaces or quotes) that has a "/" before it, so
- * questions ("ready?") and numbers ("#12") are left alone. The work is linear in the length of
- * the text, whatever it contains.
+ * A "?" or "#" counts only if a "/" comes before it in its run of text without whitespace, so
+ * questions ("ready?") and numbers ("#12") are left alone. A URL that contains a raw space, which
+ * URLs never do once encoded, ends at the space: whatever follows it stays visible. The work is
+ * linear in the length of the text, whatever it contains.
  */
 export function redactUrls(text: string): string {
   if (!text.includes("@") && !text.includes("?") && !text.includes("#")) {
     return text;
   }
-  return text.replace(URL_LIKE_TOKEN, redactUrlToken);
+  return text.replace(URL_LIKE_TOKEN, (token) => {
+    // In free text, a "?" or "#" starts a query string or fragment only after a "/". One before
+    // the first "/" ('why?"/reset?token=abc"') stays, and the search goes on after it.
+    const slash = token.indexOf("/");
+    const queryOffset = slash === -1 ? -1 : token.slice(slash).search(/[?#]/);
+    return hideUrlParts(token, queryOffset === -1 ? -1 : slash + queryOffset);
+  });
 }
 
 /**
- * Replaces the user information of every URL with "://" in a run of text. A URL's authority runs
- * from its "://" to the next "/", or to the end of the text, so authorities never overlap and each
- * character is looked at a fixed number of times.
+ * Hides the user information of `url` and everything after its first "?" or "#", treating the
+ * whole text as one URL: unlike redactUrls, it needs no "/" before the "?" (a request target can
+ * be "*?token=abc") and nothing in the URL ends it early. For request URLs, which the client
+ * chooses: "/reset?name=d'arcy&token=abc" becomes "/reset?[Redacted]".
  */
-function redactUserInfo(token: string): string {
+export function redactUrl(url: string): string {
+  return hideUrlParts(url, url.search(/[?#]/));
+}
+
+/**
+ * Hides the user information of every URL with "://" in a run of text, and everything after the
+ * "?" or "#" at `queryStart` (-1 for none; a "?" with nothing after it, as in "/health?", hides
+ * nothing). User information is everything up to the last "@" before the next "/". When that "@"
+ * comes after `queryStart`, as in "https://example.com?email=a@b.com&token=abc", it may end a
+ * password or belong to the query string, so everything after the "://" is hidden. A URL's
+ * authority runs from its "://" to the next "/", or to the end of the text, so authorities never
+ * overlap and each character is looked at a fixed number of times.
+ */
+function hideUrlParts(token: string, queryStart: number): string {
+  const hiddenFrom =
+    queryStart === -1 || queryStart === token.length - 1 ? token.length : queryStart + 1;
   let result = "";
   let copied = 0;
   let schemeEnd = token.indexOf("://");
-  while (schemeEnd !== -1) {
+  while (schemeEnd !== -1 && schemeEnd + 3 < hiddenFrom) {
     const authorityStart = schemeEnd + 3;
     const slash = token.indexOf("/", authorityStart);
     const authorityEnd = slash === -1 ? token.length : slash;
     const at = token.slice(authorityStart, authorityEnd).lastIndexOf("@");
     if (at !== -1) {
+      if (authorityStart + at >= hiddenFrom) {
+        return `${result}${token.slice(copied, authorityStart)}${REDACTED}`;
+      }
       result += `${token.slice(copied, authorityStart)}${REDACTED}`;
       copied = authorityStart + at;
     }
@@ -80,20 +113,7 @@ function redactUserInfo(token: string): string {
     // in "...:6379,redis://", and there is none if this authority runs to the end.
     schemeEnd = slash === -1 ? -1 : token.indexOf("://", slash - 1);
   }
-  return `${result}${token.slice(copied)}`;
-}
-
-function redactUrlToken(token: string): string {
-  let result = redactUserInfo(token);
-
-  const queryStart = result.search(/[?#]/);
-  if (
-    queryStart !== -1 &&
-    queryStart < result.length - 1 &&
-    result.lastIndexOf("/", queryStart) !== -1
-  ) {
-    result = `${result.slice(0, queryStart + 1)}${REDACTED}`;
-  }
-
-  return result;
+  return hiddenFrom === token.length
+    ? `${result}${token.slice(copied)}`
+    : `${result}${token.slice(copied, hiddenFrom)}${REDACTED}`;
 }

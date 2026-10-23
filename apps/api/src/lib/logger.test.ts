@@ -122,6 +122,8 @@ describe("loggableUrl", () => {
     ["/cars/7?sort=name", `/cars/7?${REDACTED}`],
     ["/reset?token=abc#top", `/reset?${REDACTED}`],
     ["//evil.example/x?y=1", `//evil.example/x?${REDACTED}`],
+    ["/reset?name=d'arcy&token=abc", `/reset?${REDACTED}`],
+    ["*?token=abc", `*?${REDACTED}`],
   ])("logs %j as %j", (url, expected) => {
     expect(loggableUrl(url)).toBe(expected);
   });

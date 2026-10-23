@@ -33,7 +33,10 @@ async function consoleProblems(path: string, code: string) {
 
 const PRINTS = 'console.log("car saved");\nconsole.error("engine failure");\n';
 
-describe("the rule that keeps console out of the API", () => {
+// The first test loads the whole ESLint config (typescript-eslint, Next.js's and jsx-a11y's
+// plugins): under a second on an idle machine, but more than Vitest's 5 s default while the full
+// suite and other work load it.
+describe("the rule that keeps console out of the API", { timeout: 30_000 }, () => {
   it.for(["apps/api/src/app.ts", "apps/api/src/lib/logger.ts", "apps/api/src/routes/garage.ts"])(
     "rejects console in %s",
     async (path) => {

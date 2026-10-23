@@ -1794,3 +1794,56 @@ Keep entries brief. Details belong in code comments and the build log.
   is not read (the API's logger writes numbers). A warning that the apps print at every start
   fails every CI run until it is fixed, which is what "fail on any warning" asks; one that has
   to be accepted would need a named exception, like the build check's cache notice.
+
+### Request URLs are redacted whole; in other text a URL ends only at whitespace
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Bravo (wave w0 review, round 3)
+- Context: "Redact every log line after serialisation, in pino's streamWrite hook" hides URL parts
+  in every string, and "Request lines hold method, shortened path and client address, never the
+  query string" used the same scan for request URLs. The scan ended a URL at whitespace, quotes,
+  backticks or angle brackets, and counted a `?` only after a `/`. Node.js accepts all of those
+  characters unencoded in a request target, so `GET /reset?name=d'arcy&token=...` was logged as
+  `/reset?[Redacted]'arcy&token=...` and `OPTIONS *?token=...` in full. An apostrophe is also
+  legal in a password (`postgres://apex:it's-a-secret@db/apex` was logged unchanged), and
+  Fastify's warnings about a reply sent twice quote the raw request URL. User information ran to
+  the last `@` before the next `/`, so in `https://example.com?invite=a@b.com&token=abc`, a URL
+  without a path, it took the `?` with it and the rest of the query string was logged.
+- Decision: `redactUrl` in `apps/api/src/lib/redact.ts` treats a request URL as one URL: it hides
+  the credentials and everything after the first `?` or `#`, and `loggableUrl` uses it. In other
+  strings, `redactUrls` ends a URL only at whitespace, which an encoded URL never holds, and hides
+  from the first `?` or `#` that a `/` comes before, so "ready?" and "#12" stay as they are. When
+  the `@` that ends user information comes after the start of the query string, everything after
+  the `://` is hidden, because that `@` may end a password or belong to the query string. Seeded
+  property tests check these rules on random text.
+- Trade-offs: text glued to a URL without a space is hidden with its query string: `"/a?b=1",`
+  loses its closing quote and comma, and a JSON document logged as one string loses everything
+  after its first URL with a query string. A password with a raw `?` or `#` hides the host as
+  well. That costs readability, never a secret. A URL that was never encoded can hold a raw space
+  and then ends there, and a raw `/` in a password ends its user information, so such a password
+  shows; the passwords that infra/README.md has the owner generate are hex. Rejected: keeping
+  quotes as boundaries in free text (Fastify's own messages quote raw request URLs, which may
+  contain quotes), and the WHATWG URL parser (it rejects relative paths such as
+  `/reset?token=abc` and accepts characters that it would encode, so it cannot find where a URL
+  ends in text either).
+
+### LOG_FORMAT=pretty writes to standard output synchronously
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Bravo (wave w0 review, round 3)
+- Context: "API logging: Fastify's own pino logger, JSON lines, pretty output only on request"
+  writes pretty lines with `process.stdout.write()`. On macOS that only queues what a full pipe
+  cannot take yet, and `pnpm dev` reads the API's output through a pipe. The entrypoint calls
+  `process.exit()` after logging a crash, which drops the queue: with the reader 2 s behind, 325
+  of 3,000 lines arrived and the crash line did not. When the reader went away (`| head`), the
+  unhandled EPIPE error stopped the API. pino's own destination, which writes the JSON format,
+  flushes at exit and drops its output after EPIPE.
+- Decision: the pretty destination in `apps/api/src/lib/logger.ts` writes each line to standard
+  output's file descriptor with `fs.writeSync`. While the pipe is full it waits for the reader in
+  10 ms steps (`Atomics.wait`); after EPIPE it drops the text. Tests still pass a destination of
+  their own. Entrypoint tests pause the reader during a burst before a crash, and close it, in
+  both formats.
+- Trade-offs: while the terminal's reader is behind, a log call blocks the event loop, as pino's
+  synchronous mode does; in development, losing the crash line is worse. pino's
+  `destination({ sync: true })` does the same, but pino is Fastify's dependency, not ours, and
+  sonic-boom (which implements it) was not worth a dependency for a development format.
+  Rejected: flushing before each `process.exit()` in the entrypoint (five call sites, and Node.js
+  has no synchronous flush for `process.stdout`).

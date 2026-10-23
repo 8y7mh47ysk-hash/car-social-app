@@ -1,3 +1,5 @@
+import { writeSync } from "node:fs";
+
 import {
   LogController,
   type FastifyError,
@@ -7,7 +9,7 @@ import {
   type LogLevel,
 } from "fastify";
 
-import { REDACTED, isSensitiveKey, redactUrls } from "./redact.ts";
+import { REDACTED, isSensitiveKey, redactUrl, redactUrls } from "./redact.ts";
 import { getRequestContext } from "./request-context.ts";
 import { REQUEST_ID_HEADER, requestIdFor } from "./request-id.ts";
 
@@ -49,7 +51,7 @@ const REQUEST_ID_LOG_KEY = "reqId";
 /** Request URLs are logged with at most this many characters. */
 export const MAX_LOGGED_URL_LENGTH = 256;
 
-/** Any other string in a log line is cut to this many characters. */
+/** Any other string value in a log line is cut to this many characters (keys are not). */
 export const MAX_LOGGED_STRING_LENGTH = 8192;
 
 /** Cuts `text` to `max` characters, saying how much was left out. */
@@ -60,12 +62,13 @@ function truncate(text: string, max: number): string {
 }
 
 /**
- * A request URL as it is logged: the query string and fragment hidden, because they can carry
- * tokens (for example in links from emails), and at most MAX_LOGGED_URL_LENGTH characters, because
- * the client chooses the URL. "/reset?token=abc" becomes "/reset?[Redacted]".
+ * A request URL as it is logged: everything after its first "?" or "#" hidden, because query
+ * strings can carry tokens (for example in links from emails), and at most MAX_LOGGED_URL_LENGTH
+ * characters, because the client chooses the URL. "/reset?token=abc" becomes "/reset?[Redacted]",
+ * whatever characters the query string holds (see redactUrl).
  */
 export function loggableUrl(url: string): string {
-  return truncate(redactUrls(url), MAX_LOGGED_URL_LENGTH);
+  return truncate(redactUrl(url), MAX_LOGGED_URL_LENGTH);
 }
 
 /** A JSON.parse reviver: called for every key and value, innermost first. */
@@ -97,17 +100,20 @@ function droppedLine(): string {
  *
  * 1. replaces the value of every sensitive key, at any depth, with "[Redacted]", even when the
  *    value is an object or an array (see isSensitiveKey);
- * 2. hides URL credentials, query strings and fragments in every string, the message included
- *    (see redactUrls), and cuts every string to MAX_LOGGED_STRING_LENGTH characters;
+ * 2. hides URL credentials, query strings and fragments in every string value, the message
+ *    included (see redactUrls), and cuts every string value to MAX_LOGGED_STRING_LENGTH
+ *    characters. Object keys, and the number of keys and items, are left as they are;
  * 3. adds the ID of the request whose code is running to a line that has none. Lines from
  *    Fastify's per-request loggers (`request.log`) already carry their own request's ID; this
  *    covers every other logger (`app.log` and children made from it), so a service that is never
  *    handed the request still logs its request's ID.
  *
  * Apart from URL parts, a secret inside a string cannot be recognised, so never put one in a log
- * message. A line that is not a JSON object (pino never writes one) is replaced by an error line.
- * Parsing turns numbers into JavaScript numbers, so an integer beyond 2^53 (a BigInt, which pino
- * writes exactly) comes out rounded: log such values as strings.
+ * message. Log the fields you need from a client's data, not whole objects whose keys and size
+ * the client chooses, such as a parsed query string or body. A line that is not a JSON object
+ * (pino never writes one) is replaced by an error line. Parsing turns numbers into JavaScript
+ * numbers, so an integer beyond 2^53 (a BigInt, which pino writes exactly) comes out rounded: log
+ * such values as strings.
  */
 export function finishLogLine(line: string): string {
   let entry: unknown;
@@ -130,11 +136,43 @@ export function finishLogLine(line: string): string {
  * Replaces Fastify's default `req` serializer, which logs the full URL (query string included),
  * the client-supplied Host and Accept-Version headers and the client's port. Headers and bodies
  * are never logged. `remoteAddress` is the direct peer; behind a proxy it is the proxy until
- * trusted proxies are configured. pino applies it to every value logged under the key `req`, and
- * a value without a `url` makes the log call throw, so log only Fastify requests under that key.
+ * trusted proxies are configured.
+ *
+ * pino applies it to every value logged under the key `req`, not only to Fastify's requests: also
+ * to null, or to an outgoing request's object. So it logs only the fields that are strings and
+ * never throws, because a log call that throws fails the request, or stops the API when it runs
+ * in a timer or an event handler.
  */
-function serializeRequest(request: FastifyRequest) {
-  return { method: request.method, url: loggableUrl(request.url), remoteAddress: request.ip };
+function serializeRequest(value: unknown): {
+  method?: string;
+  url?: string;
+  remoteAddress?: string;
+} {
+  if (typeof value !== "object" || value === null) {
+    return {};
+  }
+  const method = "method" in value ? value.method : undefined;
+  const url = "url" in value ? value.url : undefined;
+  const ip = "ip" in value ? value.ip : undefined;
+  return {
+    ...(typeof method === "string" ? { method } : {}),
+    ...(typeof url === "string" ? { url: loggableUrl(url) } : {}),
+    ...(typeof ip === "string" ? { remoteAddress: ip } : {}),
+  };
+}
+
+/**
+ * Replaces Fastify's default `res` serializer, which reads `statusCode` from every value logged
+ * under the key `res`, so `app.log.warn({ res: null })` threw (see serializeRequest). This logs
+ * the status code of a Fastify reply, or of any other value whose `statusCode` is a number (such
+ * as the response to an outgoing call), and nothing else.
+ */
+function serializeResponse(value: unknown): { statusCode?: number } {
+  if (typeof value !== "object" || value === null) {
+    return {};
+  }
+  const statusCode = "statusCode" in value ? value.statusCode : undefined;
+  return typeof statusCode === "number" ? { statusCode } : {};
 }
 
 /**
@@ -218,16 +256,50 @@ async function importPinoPretty() {
   return import("pino-pretty");
 }
 
+/** Memory for Atomics.wait, which pauses the thread without returning to the event loop. */
+const pauseCell = new Int32Array(new SharedArrayBuffer(4));
+
+/**
+ * Writes all of `text` to the file descriptor `fd` before it returns. process.stdout.write()
+ * only queues what a full pipe cannot take yet (on macOS, and `pnpm dev` reads the API's output
+ * through a pipe), and the process.exit() with which the entrypoint stops after logging a crash
+ * drops that queue, crash line included. So while the pipe is full this waits for its reader, as
+ * pino's own destination (used for JSON) does when it flushes at exit. Once the reader has gone
+ * (EPIPE) the text is dropped, as pino drops it.
+ */
+function writeAll(fd: number, text: string): void {
+  let rest = Buffer.from(text);
+  while (rest.length > 0) {
+    try {
+      rest = rest.subarray(writeSync(fd, rest));
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? error.code : undefined;
+      if (code === "EPIPE") {
+        return;
+      }
+      if (code !== "EAGAIN") {
+        throw error;
+      }
+      Atomics.wait(pauseCell, 0, 0, 10);
+    }
+  }
+}
+
 /**
  * Formats lines with pino-pretty's synchronous formatter, after finishLogLine has redacted them.
- * Each log call then writes its formatted line straight to the destination, exactly as in the
- * JSON format: no worker thread (pino-pretty's transport API runs one) and no extra stream
- * pipeline (its stream API builds one). pino-pretty is imported only here, so the JSON format
+ * Each log call then writes its formatted line straight to the destination, as in the JSON
+ * format: no worker thread (pino-pretty's transport API runs one) and no extra stream pipeline
+ * (its stream API builds one). Standard output is written synchronously (see writeAll), so no
+ * line is lost when the process exits. pino-pretty is imported only here, so the JSON format
  * never loads it.
  */
 async function prettyDestination(destination: LogDestination | undefined): Promise<LogDestination> {
   const pinoPretty = await importPinoPretty();
-  const target: LogDestination = destination ?? process.stdout;
+  const target: LogDestination = destination ?? {
+    write(text) {
+      writeAll(process.stdout.fd, text);
+    },
+  };
   const prettify = pinoPretty.prettyFactory({
     // Colour only on a terminal, never in output that tests or files read back.
     colorize: destination === undefined && pinoPretty.isColorSupported,
@@ -243,12 +315,13 @@ async function prettyDestination(destination: LogDestination | undefined): Promi
 }
 
 /**
- * The Fastify factory options that set up logging and request IDs: pino writing one JSON object
- * (or one readable entry) per line; a request ID that is validated or generated for every
- * request, appears on every line logged while that request is handled and goes back in the
- * x-request-id header, also when the router rejects the URL; and no secrets, query strings or
- * unbounded client input in the output. `buildApp` passes these to `fastify()` and registers
- * enterRequestContext, which covers every other response.
+ * The Fastify factory options that set up logging and request IDs: pino writes one JSON object
+ * (or one readable entry) per line, which finishLogLine redacts; genReqId gives each request that
+ * reaches Fastify's router a validated or new ID, which every line logged while the request is
+ * handled carries; and sendFrameworkError sends that ID in x-request-id with the router's 400 and
+ * 414 responses. `buildApp` passes these to `fastify()` and registers enterRequestContext, which
+ * sends the ID with the response of every request that reaches the hooks. The other responses
+ * that go out before any hook runs carry no ID: docs/ARCHITECTURE.md ("Observability") lists them.
  */
 export async function loggingServerOptions(
   settings: LoggingSettings,
@@ -265,7 +338,7 @@ export async function loggingServerOptions(
       // owner can read `docker compose logs` directly. pino's stdTimeFunctions.isoTime does the
       // same, but pino is Fastify's dependency, not ours.
       timestamp: () => `,"time":"${new Date().toISOString()}"`,
-      serializers: { req: serializeRequest },
+      serializers: { req: serializeRequest, res: serializeResponse },
       hooks: { streamWrite: finishLogLine },
     },
     // Fastify's own requestIdHeader option trusts any value; requestIdFor validates it.

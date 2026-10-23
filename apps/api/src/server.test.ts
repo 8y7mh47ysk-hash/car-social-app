@@ -128,6 +128,25 @@ function failAfterRequest(kind: "throw" | "reject"): string[] {
 }
 
 /**
+ * Adds `GET /burst` to the entrypoint's app. 50 ms after it answers, a timer logs 3,000 lines,
+ * far more than a pipe holds, and then throws, so the crash line comes right after them.
+ */
+const BURST_THEN_CRASH = preload(`
+  import { subscribe } from "node:diagnostics_channel";
+  subscribe("fastify.initialization", ({ fastify }) => {
+    fastify.get("/burst", () => {
+      setTimeout(() => {
+        for (let index = 0; index < 3000; index += 1) {
+          fastify.log.info({ index, padding: "x".repeat(100) }, "burst");
+        }
+        throw new Error("crash after a burst");
+      }, 50);
+      return { ok: true };
+    });
+  });
+`);
+
+/**
  * Holds the app's start in an onReady hook, as a plugin that connects to a database at startup
  * would, until the process gets SIGTERM, and prints "start held" once the hold begins. The
  * entrypoint's own SIGTERM handler, registered earlier, runs first.
@@ -531,6 +550,46 @@ describe("server entrypoint", { timeout: 20_000 }, () => {
         err: { message: `lost postgres://${REDACTED}@db:5432/apex` },
       });
       expect(server.output()).not.toContain("crash-secret");
+    },
+  );
+
+  // `pnpm dev` reads the API's output through a pipe. While its reader falls behind, the lines
+  // wait in the pipe, and the exit after a crash must not drop them.
+  it.each([
+    ["json", '"msg":"burst"', '"msg":"uncaught exception"'],
+    ["pretty", "INFO: burst", "FATAL: uncaught exception"],
+  ])(
+    "writes every %s line before it exits after a crash, also when the reader is slow",
+    async (format, burstLine, crashLine) => {
+      const server = startServer({ LOG_FORMAT: format }, BURST_THEN_CRASH);
+      const url = await listeningUrl(server);
+
+      server.child.stdout.pause();
+      await fetch(new URL("/burst", url));
+      await sleep(500);
+      server.child.stdout.resume();
+
+      expect(await server.exited).toEqual({ code: 1, signal: null });
+      const lines = server.output().split("\n");
+      expect(lines.filter((line) => line.includes(burstLine))).toHaveLength(3000);
+      expect(server.output()).toContain(crashLine);
+    },
+  );
+
+  // As when the output is piped to `head` and it exits: the lines are dropped, the API runs on.
+  it.each(["json", "pretty"])(
+    "keeps serving after the reader of its %s output has gone",
+    async (format) => {
+      const server = startServer({ LOG_FORMAT: format });
+      const url = await listeningUrl(server);
+
+      server.child.stdout.destroy();
+      for (let request = 0; request < 3; request += 1) {
+        expect((await fetch(new URL("/health", url))).status).toBe(200);
+      }
+
+      server.child.kill("SIGTERM");
+      expect(await server.exited).toEqual({ code: 0, signal: null });
     },
   );
 

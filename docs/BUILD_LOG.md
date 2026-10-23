@@ -148,7 +148,7 @@ How to verify, from the repository root:
 ```sh
 pnpm exec vitest run typecheck.test.ts workspace.test.ts apps/api/src/production.test.ts \
   apps/api/src/server.test.ts
-# "Test Files  4 passed (4)" and "Tests  46 passed (46)" since round 2 of the review
+# "Test Files  4 passed (4)" and "Tests  50 passed (50)" since round 3 of the review
 pnpm --filter @apex/shared build && pnpm --filter @apex/api build
 cd apps/api && node --no-strip-types dist/server.js; cd ../..
 # exits at once: ERR_UNKNOWN_FILE_EXTENSION for packages/shared/src/index.ts (no condition)
@@ -276,7 +276,7 @@ How to verify, from the repository root:
 
 ```sh
 pnpm exec vitest run typecheck.test.ts workspace.test.ts apps/api/src/production.test.ts \
-  apps/api/src/server.test.ts                  # "Test Files  4 passed (4)", "Tests  46 passed (46)"
+  apps/api/src/server.test.ts                  # "Test Files  4 passed (4)", "Tests  50 passed (50)"
 pnpm exec vitest run test-suite.test.ts eslint-config.test.ts scripts/tooling-project.test.ts
                                                # "Test Files  3 passed (3)", "Tests  13 passed (13)"
 pnpm --filter @apex/web test                   # "Tests  47 passed (47)"
@@ -1128,7 +1128,7 @@ How to verify the fixes:
 ```sh
 pnpm exec vitest run packages/shared/src/env.test.ts       # "Tests  54 passed (54)"
 pnpm exec vitest run apps/web/src/env                      # "Tests  33 passed (33)"
-pnpm exec vitest run apps/api/src/config.test.ts apps/api/src/server.test.ts  # "Tests  54 passed (54)" (46 before round 2)
+pnpm exec vitest run apps/api/src/config.test.ts apps/api/src/server.test.ts  # "Tests  58 passed (58)" (46 before round 2, 54 before round 3)
 pnpm exec vitest run env-access.test.ts env-files.test.ts  # "Tests  92 passed (92)" (61 before round 2)
 ```
 
@@ -1874,7 +1874,7 @@ pnpm exec vitest run scripts/check-docker.test.ts   # "Tests  35 passed (35)"
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm --filter @apex/api test   # all pass: "Tests  261 passed (261)" after round 2 of the review
+pnpm --filter @apex/api test   # all pass: "Tests  312 passed (312)" after round 3 of the review
 pnpm lint                      # exits with code 0
 pnpm typecheck                 # shared, api and web each report "Done"
 ```
@@ -1988,7 +1988,8 @@ Delta reviewed this instruction and changed:
     and raw bodies logged as strings (a webhook body, #91) are free text that redaction cannot
     see into;
   - only Fastify requests may be logged under the key `req`: anything without a `url` makes the
-    log call throw;
+    log call throw (no longer needed since round 3: any value can be logged under `req` or
+    `res`);
   - integers beyond 2^53 (BigInt values) come out of the redaction pass rounded: log them as
     strings.
 
@@ -1999,8 +2000,8 @@ pnpm --filter @apex/api exec vitest run src/lib/redact.test.ts src/logging.test.
 pnpm --filter @apex/api exec vitest run src/server.test.ts -t "pino-pretty|redacted JSON line"
 ```
 
-The first ends with `Tests  148 passed (148)`, the second with `Tests  4 passed | 19 skipped (23)`
-(round 2 added tests to both files).
+The first ends with `Tests  193 passed (193)`, the second with `Tests  4 passed | 23 skipped (27)`
+(rounds 2 and 3 added tests to both files).
 
 **Review fixes (wave w0, round 2)**
 
@@ -2041,8 +2042,9 @@ pnpm --filter @apex/api exec vitest run src/server.test.ts -t "LOG_FORMAT=pretty
 pnpm exec vitest run api-console.test.ts
 ```
 
-They end with `Tests  148 passed (148)`, `Tests  4 passed | 19 skipped (23)` and
-`Tests  4 passed (4)`. To see the pino-pretty messages for yourself, from `apps/api`:
+They end with `Tests  193 passed (193)`, `Tests  4 passed | 23 skipped (27)` and
+`Tests  4 passed (4)` (round 3 added tests to the first two files). To see the pino-pretty
+messages for yourself, from `apps/api`:
 
 ```sh
 mv node_modules/pino-pretty /tmp/pino-pretty-link   # as a production install leaves it out
@@ -2052,3 +2054,63 @@ mv /tmp/pino-pretty-link node_modules/pino-pretty   # put it back
 
 The second command prints only "LOG_FORMAT=pretty needs pino-pretty, a development dependency
 that production installs leave out. Use LOG_FORMAT=json." and `exit code 1`.
+
+**Review fixes (wave w0, round 3)**
+
+Bravo reviewed this instruction and changed:
+
+- Query strings in request lines (open item w0.V2.Echo.1). The redaction ended a URL at an
+  apostrophe, a backtick, a double quote or an angle bracket, and needed a `/` before the `?`.
+  Node.js accepts all of those in a request target, so `GET /reset?name=d'arcy&token=...` was
+  logged as `/reset?[Redacted]'arcy&token=...` (the same with `` ` ``, `"`, `<` and `>`), and
+  `OPTIONS *?token=...` in full. A request URL is now redacted as one URL: its credentials and
+  everything after its first `?` or `#` are hidden, whatever they hold. In other strings a URL
+  now ends only at whitespace, so a password with an apostrophe
+  (`postgres://apex:it's-a-secret@db/apex`) and the raw URL that Fastify quotes when a reply is
+  sent twice are hidden too; text glued to a URL without a space is hidden with it.
+- Query strings after an `@`. User information ran to the last `@` before the next `/`, so in a
+  URL without a path, the `@` of an email address in the query string ended it and took the `?`
+  with it: `https://example.com?invite=a@b.com&token=abc` was logged as
+  `https://[Redacted]@b.com&token=abc`, in messages and in request lines
+  (`GET http://x?email=a@b&token=...`). In that case everything after the `://` is now hidden. A
+  `?` or `#` with no `/` before it also ended the search for a later one in the same run of text
+  (`why?"/reset?token=abc"`), which the change above to whitespace-only runs made more likely.
+  Seeded property tests now check 20,000 random runs of text against these rules.
+- A value logged under the key `req` that is not a Fastify request (null, an object without a
+  `url`, an outgoing `http.ClientRequest`) made the log call throw a TypeError, which fails a
+  request or, from a timer, stops the API. The request serializer now logs only the string fields
+  it finds. Fastify's own serializer for the key `res` threw the same way for null:
+  `app.log.warn({ res: null }, ...)` in a handler turned its response into a 500. The API now has
+  its own, which logs a `statusCode` that is a number and nothing else.
+- `LOG_FORMAT=pretty` wrote through `process.stdout`, which on macOS only queues what a full pipe
+  cannot take. After a crash, `process.exit()` dropped that queue: with the reader 2 s behind, 325
+  of 3,000 lines arrived and the crash line did not. When the reader went away (`| head`), the API
+  stopped. Pretty lines are now written synchronously, waiting while the pipe is full and dropped
+  once its reader has gone, as pino does for JSON.
+- Comments (open item w0.V2.Echo.2): `logger.ts` said that a request ID goes back with every
+  response, with `enterRequestContext` covering the rest, and that no unbounded client input
+  reaches the log. It now says which responses carry the ID, and that string values are redacted
+  and cut, but not object keys or the number of keys and items; `docs/ARCHITECTURE.md`
+  ("Observability") says the same. A test read an error body through a type-only cast; it now
+  parses it with Zod.
+- `api-console.test.ts` timed out in a full `pnpm test` while the machine was busy (5,033 ms
+  against Vitest's 5 s default): its first test loads the whole ESLint config. It now allows 30 s.
+
+To check the fixes:
+
+```sh
+pnpm --filter @apex/api exec vitest run src/lib/redact.test.ts src/lib/logger.test.ts src/logging.test.ts
+pnpm --filter @apex/api exec vitest run src/server.test.ts -t "reader"
+```
+
+They end with `Tests  214 passed (214)` and `Tests  4 passed | 23 skipped (27)`. With the API
+running as above (`pnpm --filter @apex/api dev`), in terminal 2:
+
+```sh
+curl -s -o /dev/null "http://127.0.0.1:4000/reset?name=d'arcy&token=secret-value"
+curl -s -o /dev/null -X OPTIONS --request-target '*?token=secret-value' http://127.0.0.1:4000/
+curl -s -o /dev/null --request-target 'http://x?email=a@b&token=secret-value' http://127.0.0.1:4000/
+```
+
+Terminal 1 logs the three URLs as `"/reset?[Redacted]"`, `"*?[Redacted]"` and
+`"http://[Redacted]"`, and `secret-value` appears nowhere.

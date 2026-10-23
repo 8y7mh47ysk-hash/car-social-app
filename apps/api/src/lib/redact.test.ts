@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { REDACTED, isSensitiveKey, redactUrls } from "./redact.ts";
+import { REDACTED, isSensitiveKey, redactUrl, redactUrls } from "./redact.ts";
 
 describe("isSensitiveKey", () => {
   it.each([
@@ -104,9 +104,14 @@ describe("redactUrls", () => {
       "a password with an @: postgres://apex:p@ss@db/apex",
       `a password with an @: postgres://${REDACTED}@db/apex`,
     ],
+    // A "?" or "#" before the "@" may start a query string instead, so everything after "://" goes.
     [
       "a password with a ?: postgres://apex:p?ss@db/apex",
-      `a password with a ?: postgres://${REDACTED}@db/apex`,
+      `a password with a ?: postgres://${REDACTED}`,
+    ],
+    [
+      "a password with a #: postgres://apex:p#ss@db/apex",
+      `a password with a #: postgres://${REDACTED}`,
     ],
     ["(postgres://apex:pw@db)", `(postgres://${REDACTED}@db)`],
     // Several URLs joined without spaces, as in lists of Redis or PostgreSQL servers.
@@ -124,6 +129,13 @@ describe("redactUrls", () => {
       "nodes=[redis://:pw1@a;redis://:pw2@b]",
       `nodes=[redis://${REDACTED}@a;redis://${REDACTED}@b]`,
     ],
+    // Characters that can stand unencoded in a password, before or after its "@".
+    ["postgres://apex:it's-a-secret@db:5432/apex", `postgres://${REDACTED}@db:5432/apex`],
+    ['postgres://apex:a"b<c>d`e@db/apex', `postgres://${REDACTED}@db/apex`],
+    [
+      "connecting to 'postgres://apex:pw@db/apex'",
+      `connecting to 'postgres://${REDACTED}@db/apex'`,
+    ],
   ])("hides the user information in %j", (text, expected) => {
     expect(redactUrls(text)).toBe(expected);
   });
@@ -137,14 +149,32 @@ describe("redactUrls", () => {
       `https://example.com/garage/1?${REDACTED}`,
     ],
     ["https://example.com?a=1", `https://example.com?${REDACTED}`],
+    // An "@" in the query string of a URL without a path might end a password instead.
+    ["https://example.com?invite=a@b.com&token=abc", `https://${REDACTED}`],
+    ["see https://example.com#email=a@b.com&access_token=abc", `see https://${REDACTED}`],
     [
       "https://minio:9000/photos/car.jpg?X-Amz-Credential=key&X-Amz-Signature=sig",
       `https://minio:9000/photos/car.jpg?${REDACTED}`,
     ],
     ["postgres://apex:pw@db/apex?sslmode=require", `postgres://${REDACTED}@db/apex?${REDACTED}`],
-    ['in "/login?token=abc" (GET)', `in "/login?${REDACTED}" (GET)`],
     ["Route GET:/nope?token=abc not found", `Route GET:/nope?${REDACTED} not found`],
     ["two: /a?x=1 and /b?y=2", `two: /a?${REDACTED} and /b?${REDACTED}`],
+    // Only whitespace ends a URL: what follows it without a space is hidden with the query.
+    ['in "/login?token=abc" (GET)', `in "/login?${REDACTED} (GET)`],
+    ["['/a?x=1','/b?token=abc']", `['/a?${REDACTED}`],
+    // A "?" or "#" with no "/" before it does not end the search for one that has.
+    ['{"q":"why?","next":"/reset?token=abc"}', `{"q":"why?","next":"/reset?${REDACTED}`],
+    ["#12:/reset?token=abc", `#12:/reset?${REDACTED}`],
+    // Characters that a query string can hold unencoded, all before the secret.
+    ["/reset?name=d'arcy&token=abc", `/reset?${REDACTED}`],
+    ["/search?q=a`b&token=abc", `/search?${REDACTED}`],
+    ['/search?q="a"&token=abc', `/search?${REDACTED}`],
+    ["/search?q=<a>&token=abc", `/search?${REDACTED}`],
+    // Fastify's warning for a reply sent twice quotes the raw request URL.
+    [
+      'Reply was already sent, did you forget to "return reply" in the "/cars?q="&token=abc" (GET) route?',
+      `Reply was already sent, did you forget to "return reply" in the "/cars?${REDACTED} (GET) route?`,
+    ],
   ])("hides the query string and fragment in %j", (text, expected) => {
     expect(redactUrls(text)).toBe(expected);
   });
@@ -158,6 +188,7 @@ describe("redactUrls", () => {
     "ready?",
     "is /health up?",
     "fixed in #12",
+    "it's ready?",
     "a/b",
     "/health",
     "/health?",
@@ -188,5 +219,83 @@ describe("redactUrls", () => {
     const text = "a://u:p@h,".repeat(100_000);
 
     expect(redactUrls(text)).toBe(`a://${REDACTED}@h,`.repeat(100_000));
+  });
+});
+
+// Request targets, as Node.js accepts them from a client.
+describe("redactUrl", () => {
+  it.each([
+    ["/health", "/health"],
+    ["/health?", "/health?"],
+    ["/cars/7?sort=name", `/cars/7?${REDACTED}`],
+    ["/cb#access_token=abc", `/cb#${REDACTED}`],
+    ["/reset?name=d'arcy&token=abc", `/reset?${REDACTED}`],
+    ["/search?q=a`b&token=abc", `/search?${REDACTED}`],
+    ['/search?q="&token=abc', `/search?${REDACTED}`],
+    ["/search?q=<>&token=abc", `/search?${REDACTED}`],
+    // Without a "/" before the "?", which redactUrls needs in free text.
+    ["*?token=abc", `*?${REDACTED}`],
+    ["http://u:p@example.com?token=abc", `http://${REDACTED}@example.com?${REDACTED}`],
+    ["http://apex:it's-a-secret@example.com/", `http://${REDACTED}@example.com/`],
+    ["http://example.com?email=a@b&token=abc", `http://${REDACTED}`],
+  ])("logs %j as %j", (url, expected) => {
+    expect(redactUrl(url)).toBe(expected);
+  });
+});
+
+// The rules of both functions, checked on random runs of text made of URL characters with a
+// secret somewhere in each. The generator is seeded, so every run checks the same texts.
+describe("URL redaction on random text", () => {
+  const pieces = ["a", "b", "/", ":", "?", "#", "@", "://", "'", '"', "=", "&", ",", ".", "%"];
+  let seed = 7;
+  const random = (n: number): number => {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return seed % n;
+  };
+  const randomText = (): string =>
+    Array.from({ length: random(10) }, () => pieces[random(pieces.length)]).join("");
+
+  /** Whether the secret at `at` is in the user information of a URL with "://". */
+  function inUserInfo(text: string, at: number): boolean {
+    const nextSlash = text.indexOf("/", at);
+    const authorityEnd = nextSlash === -1 ? text.length : nextSlash;
+    for (let scheme = text.indexOf("://"); scheme !== -1 && scheme < at;) {
+      if (!text.slice(scheme + 3, at).includes("/")) {
+        return text.slice(at, authorityEnd).includes("@");
+      }
+      scheme = text.indexOf("://", scheme + 1);
+    }
+    return false;
+  }
+
+  it("never shows a secret in user information, or after a ? or # that a / comes before", () => {
+    const shown: string[] = [];
+    for (let round = 0; round < 20_000; round += 1) {
+      const before = randomText();
+      const text = `${before}secret${randomText()}`;
+      const slash = text.indexOf("/");
+      const query = slash === -1 ? -1 : text.slice(slash).search(/[?#]/);
+      const afterQuery = query !== -1 && slash + query < before.length;
+      if ((afterQuery || inUserInfo(text, before.length)) && redactUrls(text).includes("secret")) {
+        shown.push(text);
+      }
+    }
+
+    expect(shown).toEqual([]);
+  });
+
+  it("never shows a secret in a request URL's user information, query string or fragment", () => {
+    const shown: string[] = [];
+    for (let round = 0; round < 20_000; round += 1) {
+      const before = randomText();
+      const text = `${before}secret${randomText()}`;
+      const query = text.search(/[?#]/);
+      const afterQuery = query !== -1 && query < before.length;
+      if ((afterQuery || inUserInfo(text, before.length)) && redactUrl(text).includes("secret")) {
+        shown.push(text);
+      }
+    }
+
+    expect(shown).toEqual([]);
   });
 });
