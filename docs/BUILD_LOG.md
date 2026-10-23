@@ -477,7 +477,9 @@ The new tests change no count that the verify steps of the other instructions qu
   Prettier, on staged code; Prettier on other staged files; `pnpm typecheck` for the whole
   repository when a staged file is TypeScript, JSON or a pnpm workspace file; then
   `vitest related --run --passWithNoTests` for the tests that import a staged file. ESLint and
-  Prettier fixes are added to the commit. A failing task does not stop the others.
+  Prettier fixes are added to the commit. A failing task does not stop the others. Since the
+  round-3 review, two more tasks follow: `test-suite.test.ts` once when a test file is staged, and
+  `env-files.test.ts` once when an env file is staged (see #4).
 - `.husky/commit-msg` runs commitlint with `commitlint.config.mjs`: Conventional Commits
   (`@commitlint/config-conventional`) plus the team rules (lowercase scope and subject, subject at
   most 72 characters, a blank line before the body and before the footer, so the
@@ -487,11 +489,12 @@ The new tests change no count that the verify steps of the other instructions qu
   runs every test. Since Phase 0 was merged, so does staging a file that other instructions'
   tests read instead of importing: `docker-compose.yml`, an `.env.example` template, a
   `.gitignore`, a CI workflow or (since the wave w0 review) `eslint.config.mjs`; since the
-  round-2 review of this instruction, a PostCSS config; and since the round-3 review of
-  instruction 3, another file that Docker Compose reads by default (`compose.yaml`,
-  `docker-compose.override.yml` and their variants), which `infra/compose.test.ts` refuses. An
-  env file staged with `git add --force` ran every test from the round-2 review of instruction 4;
-  since round 3 it runs only `env-files.test.ts`, through a lint-staged task of its own (see #4).
+  round-2 review of this instruction, a PostCSS config; since the round-3 review of this
+  instruction, `.nvmrc` and `.node-version`; and since the round-3 review of instruction 3,
+  another file that Docker Compose reads by default (`compose.yaml`, `docker-compose.override.yml`
+  and their variants), which `infra/compose.test.ts` refuses. An env file staged with
+  `git add --force` ran every test from the round-2 review of instruction 4; since round 3 it runs
+  only `env-files.test.ts`, through a lint-staged task of its own (see #4).
 - `git-hooks.test.ts` (54 tests): 28 commit messages through the real commit-msg hook and
   commitlint config; 10 pre-commit scenarios that run the real lint-staged with this
   repository's config in scratch git repositories, with stand-ins for ESLint, Prettier, pnpm and
@@ -832,7 +835,7 @@ How to verify, from the repository root (the counts are those on a machine with 
 the zsh tests are skipped):
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 73 skipped (83)"
+pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 78 skipped (88)"
 pnpm exec vitest run readme.test.ts                    # "Tests  3 passed (3)"
 ```
 
@@ -845,9 +848,23 @@ git commit -m "test(shared): add a probe"   # rejected: test-suite.test.ts lists
 ```
 
 This round's hook tests change a count that instruction 4's round-2 note quotes:
-`pnpm exec vitest run git-hooks.test.ts -t "runs every test when"` now gives
-`Tests  23 passed | 60 skipped (83)` (it says 21 and 55 of 76). The round's integration updates it
-with the other branches' tests. No owner actions.
+`pnpm exec vitest run git-hooks.test.ts -t "runs every test when"` gave
+`Tests  23 passed | 60 skipped (83)` on this branch (it says 21 and 55 of 76). With the round's
+other branches merged it gives `Tests  21 passed | 67 skipped (88)`, which that note now quotes.
+No owner actions.
+
+**Integration fixes (wave w0, round 3)**
+
+- The merges brought together three branches' changes to the hook: this review's task for staged
+  test files and its `.nvmrc` and `.node-version` triggers; the trigger for other files that
+  Docker Compose reads by default, from the review of instruction 3; and the task for staged env
+  files, from the review of instruction 4, which replaced the env-file trigger. In
+  `lint-staged.config.ts` the test-file task is the fifth and the env-file task the sixth (each
+  branch had added a fifth). `git-hooks.test.ts` has 88 tests (83 on this branch, 78 on the
+  instruction 3 branch and 79 on the instruction 4 branch), and every command in this log that
+  runs it gives the merged count. The "What changed" list above now names the new tasks and the
+  `.nvmrc` and `.node-version` triggers, and the README's hook section names the Compose files,
+  which it had left out.
 
 ## #3 - Docker Compose services
 
@@ -1270,7 +1287,8 @@ Run from the repository root:
 ```sh
 pnpm install --frozen-lockfile
 pnpm lint && pnpm typecheck   # both exit with code 0
-pnpm test                     # "Test Files  10 passed (10)" and "Tests  144 passed (144)"
+pnpm test                     # every test passes; when #4 was finished: "Test Files  10 passed
+                              # (10)" and "Tests  144 passed (144)"
 pnpm build                    # web build log includes "Running next.config.ts took ..."
 ```
 
@@ -1502,7 +1520,7 @@ How to verify the fixes:
 ```sh
 pnpm exec vitest run env-access.test.ts               # "Tests  64 passed (64)"
 pnpm exec vitest run apps/api/src/env-file.test.ts    # "Tests  6 passed (6)"
-pnpm exec vitest run git-hooks.test.ts -t "runs every test when"  # "Tests  21 passed | 55 skipped (76)"; 17 of 79 since round 3
+pnpm exec vitest run git-hooks.test.ts -t "runs every test when"  # "Tests  21 passed | 55 skipped (76)"; 21 of 88 since round 3
 mkdir -p apps/web/src/app/probe
 printf '"use client";\n\nexport { serverEnvSchema } from "../../env/server-schema";\n' \
   > apps/web/src/app/probe/leak.tsx
@@ -1566,7 +1584,7 @@ otherwise:
   packages/shared. Documentation only. `eslint.config.mjs` and DECISIONS add
   `process.getBuiltinModule("process")` to the routes that the env lint rules let through.
 
-How to verify the fixes: these two commands report `Tests  7 passed | 72 skipped (79)` and
+How to verify the fixes: these two commands report `Tests  7 passed | 81 skipped (88)` and
 `Tests  35 passed (35)`.
 
 ```sh
@@ -1584,6 +1602,16 @@ git add --force .apex-probe/probe.env
 git commit -m "chore: try to commit an env file in a dot folder"
 git rm --cached --quiet .apex-probe/probe.env && rm .apex-probe/probe.env && rmdir .apex-probe
 ```
+
+**Integration fixes (wave w0, round 3)**
+
+- With the round's other branches merged, `git-hooks.test.ts` has 88 tests (79 on the review
+  branch), so the counts above that filter it are updated: `-t "env file"` gives 7 passed of 88,
+  and `-t "runs every test when"` 21 of 88.
+- The `pnpm test` line under "How to verify" now says that its totals are those from when this
+  instruction was finished, as the log's introduction says such counts are: run again at that
+  commit (`bc024e2`), `pnpm test` printed exactly `Test Files  10 passed (10)` and
+  `Tests  144 passed (144)`. Today every test passes, and there are more of them.
 
 ## #5 - GitHub Actions CI
 

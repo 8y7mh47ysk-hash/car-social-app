@@ -2130,7 +2130,9 @@ Keep entries brief. Details belong in code comments and the build log.
   went through in 2 seconds (round-3 open item w0.V2.Charlie.1). Another glob for dot folders
   would still miss a dot folder inside a dot folder, and a staged env file in any other folder
   ran the whole suite (about 30 seconds) only to fail on one test.
-- Decision: `lint-staged.config.ts` gets a fifth task for the names `.gitignore` gives env files,
+- Decision: `lint-staged.config.ts` gets a fifth task (the sixth since the round-3 merges, after
+  the task of "A staged test file makes the hook check that a Vitest project runs it"; fact
+  corrected at the integration) for the names `.gitignore` gives env files,
   `{.env,.env.*,*.env,.envrc}`. lint-staged matches a pattern without a slash against the file
   name in every folder, dot folders included (it passes `dot: true` and `matchBase` to
   picomatch), and the task runs `vitest run --project tooling env-files.test.ts` once, which

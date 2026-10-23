@@ -218,15 +218,16 @@ are not checked.
   (`test-suite.test.ts`): a test file that no Vitest project includes would never run. Staging a
   `package.json`, a pnpm lockfile or workspace file, a tsconfig, a Vitest config or setup file, a
   PostCSS config, a git hook or its config, the API's entrypoint (`apps/api/src/server.ts`, which
-  its tests start as a separate process) or a file that tests read instead of importing
+  its tests start as a separate process), a file that tests read instead of importing
   (`docker-compose.yml`, an `.env.example` template, a `.gitignore`, a CI workflow,
-  `eslint.config.mjs`, `.nvmrc` or `.node-version`) runs every test instead. This README is the
-  exception: `git-hooks.test.ts` runs the recovery steps below from it, but a README change runs
-  no tests here, only in CI. A staged env file (`.env`, `.env.*`, `*.env` or `.envrc`, in any
-  folder, dot folders such as `.devcontainer/` included), which only `git add --force` can stage,
-  runs `env-files.test.ts`, which then fails the commit. Deleted files count as staged, so
-  deleting a module that is still imported fails the type check. A failing step does not stop the
-  others, so one run shows every problem.
+  `eslint.config.mjs`, `.nvmrc` or `.node-version`) or another file that Docker Compose reads by
+  default (such as `compose.yaml` or `docker-compose.override.yml`, which `infra/compose.test.ts`
+  refuses) runs every test instead. This README is the exception: `git-hooks.test.ts` runs the
+  recovery steps below from it, but a README change runs no tests here, only in CI. A staged env
+  file (`.env`, `.env.*`, `*.env` or `.envrc`, in any folder, dot folders such as `.devcontainer/`
+  included), which only `git add --force` can stage, runs `env-files.test.ts`, which then fails the
+  commit. Deleted files count as staged, so deleting a module that is still imported fails the type
+  check. A failing step does not stop the others, so one run shows every problem.
 - **pre-merge-commit** ([`.husky/pre-merge-commit`](.husky/pre-merge-commit)) runs the same
   checks on what a merge brings in when `git merge` (or a `git pull` that merges) commits without
   conflicts; git runs pre-commit only for commits you make with `git commit`.
