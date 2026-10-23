@@ -1469,7 +1469,8 @@ Keep entries brief. Details belong in code comments and the build log.
   modules still passes. The config's comment now names the routes that remain.
 - Trade-offs: code that passes `process` around as a value still gets through: an alias,
   `Reflect.get(process, "env")`, `process[name]`, `createRequire(import.meta.url)("process")`,
-  and an `import()` whose source is computed. Each takes intent rather than a slip, and review
+  `process.getBuiltinModule("process")` (added in round 3 of the wave w0 review), and an
+  `import()` whose source is computed. Each takes intent rather than a slip, and review
   catches it. Selectors see syntax, not scopes: a ban on the bare name `process` would also hit a
   local variable of that name, and listing every allowed use (`process.exitCode`,
   `typeof process`, a property named `process`) makes a long, fragile selector. A rule of our own
