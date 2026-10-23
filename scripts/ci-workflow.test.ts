@@ -37,9 +37,12 @@ const workflowSchema = z.object({
   permissions: z.unknown().optional(),
   concurrency: z.unknown().optional(),
   defaults: defaultsSchema.optional(),
+  env: envSchema.optional(),
   jobs: z.record(
     z.string(),
     z.object({
+      if: z.unknown().optional(),
+      "continue-on-error": z.unknown().optional(),
       "timeout-minutes": z.number().optional(),
       permissions: z.unknown().optional(),
       defaults: defaultsSchema.optional(),
@@ -49,6 +52,7 @@ const workflowSchema = z.object({
           id: z.string().optional(),
           name: z.string().optional(),
           if: z.string().optional(),
+          "continue-on-error": z.unknown().optional(),
           uses: z.string().optional(),
           with: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
           env: envSchema.optional(),
@@ -195,8 +199,46 @@ describe("ci.yml", () => {
 
   it("installs exactly what the lockfile says, then lints, type-checks, tests and builds", () => {
     expect(runs[0]).toBe("pnpm install --frozen-lockfile");
-    for (const check of ["pnpm lint", "pnpm typecheck", "pnpm test", "pnpm build"]) {
-      expect(runs.some((run) => run === check || run.startsWith(`${check} `))).toBe(true);
+    // The root scripts as they are: an option, such as `pnpm lint --fix`, would change the check.
+    for (const check of ["pnpm lint", "pnpm typecheck", "pnpm test"]) {
+      expect(runs).toContain(check);
+    }
+    expect(runs.some((run) => run.startsWith("pnpm build "))).toBe(true);
+  });
+
+  it("never lets a failed step or job pass, and never skips the job", () => {
+    // `continue-on-error: true` turns a failure into a pass, and a job condition can skip every
+    // check, for example for pull requests; either would leave CI green.
+    for (const job of Object.values(ci.workflow.jobs)) {
+      expect(job["continue-on-error"]).toBeUndefined();
+      expect(job.if).toBeUndefined();
+      for (const step of job.steps) {
+        expect(step["continue-on-error"], step.name).toBeUndefined();
+      }
+    }
+  });
+
+  it("turns off Next.js's telemetry for every step", () => {
+    for (const job of Object.values(ci.workflow.jobs)) {
+      expect(job.env?.["NEXT_TELEMETRY_DISABLED"]).toBe("1");
+    }
+  });
+
+  it("never hides Node.js warnings, which the build-log and start checks fail on", () => {
+    // NODE_NO_WARNINGS=1, or NODE_OPTIONS with one of these flags, would keep every Node.js
+    // warning out of the output that those checks read, and CI would pass them.
+    const envs = [
+      ci.workflow.env,
+      ...Object.values(ci.workflow.jobs).flatMap((job) => [
+        job.env,
+        ...job.steps.map((s) => s.env),
+      ]),
+    ];
+    for (const env of envs) {
+      expect(env?.["NODE_NO_WARNINGS"]).toBeUndefined();
+      expect(String(env?.["NODE_OPTIONS"] ?? "")).not.toMatch(
+        /--(?:no-warnings|no-deprecation|disable-warning|redirect-warnings)\b/u,
+      );
     }
   });
 
@@ -237,6 +279,13 @@ describe("ci.yml", () => {
 
     expect(compose).toContain("cp .env.example .env");
     expect(compose).toContain("docker compose --profile '*' config --quiet");
+  });
+
+  it("validates docker-compose.yml even when the install failed", () => {
+    // The check needs only Docker, so a broken lockfile does not hide a broken compose file.
+    const step = steps.find((candidate) => candidate.run?.includes("docker compose") === true);
+
+    expect(step?.if).toBe("${{ !cancelled() && steps.checkout.outcome == 'success' }}");
   });
 
   it("gives the Compose check a value for every variable docker-compose.yml requires", () => {
@@ -408,6 +457,21 @@ function runStep(name: string, options: StepOptions = {}): StepRun {
 describe("ci.yml steps, run as GitHub runs them", { timeout: 20_000 }, () => {
   const clean = "apps/web build: ✓ Compiled successfully in 868ms\n";
   const warning = "apps/web build: ⚠ Invalid next.config.ts options detected:\n";
+
+  it("fails each step that runs pnpm when its command fails", () => {
+    // A script that hides the status, such as `pnpm lint || true`, would pass a failed check.
+    const pnpmSteps = Object.values(ci.workflow.jobs)
+      .flatMap((job) => job.steps)
+      .filter((step) => step.run?.startsWith("pnpm ") === true);
+
+    expect(pnpmSteps.length).toBeGreaterThan(0);
+    for (const { name = "" } of pnpmSteps) {
+      const step = runStep(name, { status: 1 });
+
+      expect(step.status, name).not.toBe(0);
+      expect(step.calls, name).toHaveLength(1);
+    }
+  });
 
   it("fails the Build step when the build fails, although tee saves its output", () => {
     // Without pipefail, the status of `pnpm build 2>&1 | tee ...` would be tee's: success.

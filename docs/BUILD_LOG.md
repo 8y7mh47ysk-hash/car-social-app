@@ -1249,7 +1249,7 @@ from the repository root:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm exec vitest run --project scripts            # "Test Files  6 passed (6)", "Tests  101 passed (101)"
+pnpm exec vitest run --project scripts            # "Test Files  6 passed (6)", "Tests  124 passed (124)"
 pnpm peers check                                  # "No peer dependency issues found"
 pnpm build 2>&1 | tee build.log                   # the route table, then "Done"
 node scripts/check-build-warnings.ts build.log    # "Found no warning or error lines ...", status 0
@@ -1420,7 +1420,7 @@ scripts, each failing a test. Fixes, each with a test where it changed code or a
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run scripts/check-start.test.ts   # "Tests  14 passed (14)" since wave w0 round 2
+pnpm exec vitest run scripts/check-start.test.ts   # "Tests  28 passed (28)" since wave w0 round 3
 pnpm build && node scripts/check-start.ts           # "Both apps started: the API answered ..."
 LOG_LEVEL=loud node scripts/check-start.ts          # "`pnpm start` exited with code 1 before
                                                     # both apps answered.", then the API's error
@@ -1473,7 +1473,7 @@ pnpm 12.11.2, Docker Engine 29.9.1 and Compose 5.1.3, the runner image's version
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run scripts/check-start.test.ts workspace.test.ts   # "Tests  18 passed (18)"
+pnpm exec vitest run scripts/check-start.test.ts workspace.test.ts   # "Tests  33 passed (33)"
 pnpm build
 node scripts/check-start.ts & sleep 0.2; kill -INT $!; wait $!; echo "status $?"
 # "Interrupted by SIGINT: stopped the apps." and "status 130"; if it says "Both apps started",
@@ -1484,6 +1484,75 @@ pgrep -fl 'next-server|dist/server.js' || echo "no app left"     # "no app left"
 The start check's tests named "stops the apps, then ends by SIGINT" (and SIGTERM, SIGHUP) start
 it as a terminal does, with a stand-in for `pnpm`, and interrupt it. The workspace test's failure
 shows only where /tmp is on another file system than pnpm's store, as on Ubuntu 26.04.
+
+**Review fixes (wave w0, round 3)**
+
+Alpha reviewed instructions 5 and 7 and took them over from Bravo. The review broke the workflow,
+the three checks in `scripts/`, the root `docker:*` and `db:*` scripts and `workspace.test.ts` on
+purpose, 64 ways, one at a time, and ran their tests: 32 breakages passed every test. Two of those
+change nothing that matters: the build-log check also running after a failed build, when the job
+has already failed, and the Docker engine's version also being checked on Windows, which these
+scripts do not support. Each of the other 30 now fails a test, and every new test was checked by
+breaking the code it guards. Fixes:
+
+- The workflow tests let a failed check pass: `continue-on-error: true` on a step or on the job, a
+  job condition that skips pull requests, `|| true` after `pnpm lint`, `pnpm typecheck` or
+  `pnpm test`, and `pnpm lint --fix` all passed them, as did the Compose step waiting for the
+  install, Next.js's telemetry left on, and `NODE_OPTIONS=--no-warnings` or `NODE_NO_WARNINGS`,
+  which hide every Node.js warning from the build-log and start checks.
+  `scripts/ci-workflow.test.ts` now refuses each.
+- The start check's core rules had no test: what counts as a good answer (status 200 from both
+  apps, an HTML content type and a whole page from the web app), the time limit on each request,
+  the SIGKILL that ends processes left in the command's group, the program's exit status and
+  output, the time limits themselves, and how soon the program ends after a pass (a timer that
+  kept Node.js running made it end 10 s late). New stand-in modes and tests cover each. Failure
+  messages now say exactly what was wrong (a status of 503 used to read "answered with status 503
+  and an unexpected body"), problems are listed one per line, and a stop that needed SIGKILL says
+  so. The limit for the apps to answer now counts from the start of the command, as documented,
+  not from after the first two requests.
+- Removing the closing of the output streams, which lets the program end when a process outside
+  the command's group still holds them, and reporting only the first of several problems both
+  passed every test (w0.V2.Delta.1). A program test now shows that the program ends once it gives
+  up on such a process, and stand-ins that answer wrongly and then ignore SIGTERM, or leave such a
+  process behind, show that both problems are reported.
+- Interrupted while it stopped the apps, the check printed "stopped the apps." even when a process
+  might still be running (w0.V2.Delta.3). It now prints the stop problem instead:
+  "Interrupted by SIGINT. The apps' output was still open 10 s after SIGKILL: ...".
+- CI fails on any warning, but nothing looked at what the apps print as they start: with
+  `NODE_ENV=staging`, `next start` printed "⚠ You are using a non-standard "NODE_ENV" value ..."
+  twice, and the check passed. It now fails on any line that the build-log check reports in what
+  the apps printed until both had answered, and both checks now also report the API's JSON log
+  lines at level 40 (a warning) or above, which carry no marker (see "The start check fails on
+  warnings and errors that the apps print while they start" in docs/DECISIONS.md).
+- Widening the build-log check's exception for "No build cache found" to any line about a cache
+  passed every test, although Next.js reports failures to write its caches that way; a test now
+  holds it.
+- `workspace.test.ts` asked for pnpm's store with every `npm_config_` and `pnpm_config_` variable
+  removed, so with the store set by `PNPM_CONFIG_STORE_DIR` its offline installs used another
+  store and failed with `ERR_PNPM_NO_OFFLINE_TARBALL` (w0.V2.Delta.2). It now asks with the test's
+  own environment. A new test runs the install test in a Vitest of its own, with the store named
+  only by that variable and an empty store in pnpm's global configuration; it fails with the old
+  query, and on macOS too without `--config.store-dir`, which until now only the Ubuntu runner
+  showed to be needed.
+
+Against this Mac's real build (`CI=true pnpm build`), the build-log check found nothing;
+`node scripts/check-start.ts` passed in 0.4 s, the API having logged only info lines (level 30)
+before both apps answered; with `NODE_ENV=staging` it failed on Next.js's two warnings, where the
+check on `main` passed; and interrupted with SIGINT after 0.2 s, it printed "Interrupted by SIGINT:
+stopped the apps." and ended with status 130, with no app left. `ci.yml` itself did not change; it
+has still not run on GitHub (see Owner actions).
+
+How to verify, from the repository root:
+
+```sh
+pnpm exec vitest run --project scripts     # "Test Files  6 passed (6)", "Tests  124 passed (124)"
+pnpm exec vitest run workspace.test.ts     # "Tests  5 passed (5)"
+pnpm build
+node scripts/check-start.ts                # "Both apps started: ..."
+NODE_ENV=staging node scripts/check-start.ts; echo "status $?"
+# "The apps printed 2 warning or error line(s) while they started, and CI fails on any:", the two
+# "⚠ You are using a non-standard "NODE_ENV" value ..." lines, what the apps printed, "status 1"
+```
 
 ## #6 - Architecture and decision docs
 
@@ -1619,7 +1688,7 @@ Charlie reviewed this instruction and changed:
 pnpm run                              # lists db:migrate, db:seed, docker:up, docker:down, docker:logs
 pnpm db:migrate; echo "status $?"     # db:migrate: not available yet. ... instruction 26. ... status 1
 pnpm db:seed; echo "status $?"        # db:seed: not available yet. ... instruction 26. ... status 1
-pnpm exec vitest run --project scripts  # "Tests  101 passed (101)"
+pnpm exec vitest run --project scripts  # "Tests  124 passed (124)"
 ```
 
 Without Docker, `pnpm docker:up` prints "Docker is not installed, or the `docker` command is not
@@ -1706,7 +1775,7 @@ From Alpha's hand-offs from the review of instruction 3:
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run scripts/check-docker.test.ts   # "Tests  21 passed (21)"; 33 since round 2
+pnpm exec vitest run scripts/check-docker.test.ts   # "Tests  21 passed (21)"; 35 since round 3
 ```
 
 **Review fixes (wave w0, round 2)**
@@ -1748,7 +1817,24 @@ How to verify, from the repository root:
 
 ```sh
 pnpm exec vitest run scripts/check-docker.test.ts scripts/package-scripts.test.ts
-# "Test Files  2 passed (2)" and "Tests  46 passed (46)"
+# "Test Files  2 passed (2)" and "Tests  46 passed (46)"; 48 since round 3
+```
+
+**Review fixes (wave w0, round 3)**
+
+Alpha took this instruction over with instruction 5 (see there for how it was reviewed). The
+scripts needed no change. The Docker check gives each `docker` command 20 seconds, so that an
+engine that hangs (Docker Desktop while it starts, for example) cannot hang the `docker:*`
+scripts, but no test held that limit: removing it, or setting it to 0 or to an hour, passed every
+test. Tests now show that the command runner stops a command that hangs and reports `ETIMEDOUT`
+(which the check reports as Compose or the engine not working), and that the runner the scripts
+use passes the 20-second limit to `spawnSync`. The test counts in "How to verify" above are
+updated.
+
+How to verify, from the repository root:
+
+```sh
+pnpm exec vitest run scripts/check-docker.test.ts   # "Tests  35 passed (35)"
 ```
 
 ## #8 - Structured logging with request IDs
