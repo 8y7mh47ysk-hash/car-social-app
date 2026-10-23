@@ -951,10 +951,12 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
   `cp .env.example .env && chmod 600 .env`, set both passwords, run `docker compose up -d --wait`
   (or `pnpm docker:up`, from instruction 7) and check that `docker compose ps` shows both
   services healthy. The commands under "How to verify" check the rest.
-- Confirm the Redis licence choice: Redis 8 under its AGPLv3 option, used unmodified, or switch
-  to Valkey (BSD-3-Clause), which changes the image, the first word of the `redis` service's
-  command (`valkey-server`, or the server runs as root) and the tests that pin both. The reasoning
-  is in `docs/DECISIONS.md`; it is not legal advice.
+- Done on 2026-10-22: confirm the Redis licence choice, Redis 8 under its AGPLv3 option, used
+  unmodified, or a switch to Valkey (BSD-3-Clause), which would have changed the image, the first
+  word of the `redis` service's command (`valkey-server`, or the server runs as root) and the
+  tests that pin both. The owner chose Redis 8, accepted the AGPL-3.0 licence and does not want
+  Valkey (docs/DECISIONS.md, "Redis 8 under AGPLv3, confirmed by the owner; Valkey is not
+  wanted").
 
 **Notes & limitations**
 
@@ -1201,6 +1203,14 @@ docker compose exec redis redis-cli ping # PONG
 Owner action: decide whether instruction 102 should build our own PostgreSQL image (the official
 `postgres` image plus PGDG's `postgresql-18-pgvector` package) instead of using
 `pgvector/pgvector`, which lags the official image's security rebuilds (see the decision above).
+
+**Integration fixes (wave w0, round 3)**
+
+- On 2026-10-22 the owner chose Redis 8 under its AGPLv3 option, used unmodified, and said that
+  Valkey is not wanted. docs/DECISIONS.md records it in "Redis 8 under AGPLv3, confirmed by the
+  owner; Valkey is not wanted", which supersedes "Redis 8 under its AGPLv3 option, with Valkey as
+  the fallback"; the owner action above is marked done, and the `redis` row of
+  docs/DEPENDENCIES.md says so. `docker-compose.yml` already pinned Redis 8 and does not change.
 
 ## #4 - Typed environment loader
 

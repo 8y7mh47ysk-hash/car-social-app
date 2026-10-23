@@ -438,6 +438,7 @@ Keep entries brief. Details belong in code comments and the build log.
   one-line image change", but then the server ran as root.) Redis's default `maxmemory-policy` of
   `noeviction` is kept on purpose: BullMQ's production guide says it is the only setting that
   keeps queues correct, so a cache that needs eviction should get its own Redis instance.
+- Superseded by: Redis 8 under AGPLv3, confirmed by the owner; Valkey is not wanted
 
 ### Compose secure defaults: required passwords, loopback ports, pinned images
 
@@ -2141,3 +2142,21 @@ Keep entries brief. Details belong in code comments and the build log.
   too, which costs about a quarter of a second. `git commit --no-verify` still skips the hook, and
   CI still runs the test. The secret scanning planned next looks at contents, which this check
   does not.
+
+### Redis 8 under AGPLv3, confirmed by the owner; Valkey is not wanted
+
+- Date: 2026-10-11 · Instruction: #3 · Author: the owner (recorded by the integrator, round 3)
+- Context: replaces "Redis 8 under its AGPLv3 option, with Valkey as the fallback", which chose
+  Redis 8, kept Valkey (BSD-3-Clause) as the fallback and left the licence choice to the owner
+  (an owner action in BUILD_LOG #3, w0.I0.12 in the review log). In a message of 2026-10-22 the
+  owner chose Redis 8, accepted its AGPL-3.0 licence and said that Valkey is not wanted.
+- Decision: Redis 8 stays, as `docker-compose.yml` pins it (`redis:8.10.2-alpine3.23` at its
+  digest), used unmodified under its AGPLv3 option in a container of its own. Valkey is no longer
+  the fallback; using it would need a new decision by the owner. The rest of the replaced entry
+  holds: the apps only talk to Redis over its protocol, and `maxmemory-policy` stays `noeviction`
+  for BullMQ.
+- Trade-offs: AGPLv3's extra duty, offering the source to users who interact with the program
+  over a network, applies to a modified Redis; a patch to Redis itself would need the licence
+  looked at again. Without the fallback, the replaced entry's reason to keep to core commands
+  (a small switch to Valkey) no longer applies; whether to use Redis's own modules is for the
+  instructions that need them. Recording the choice is not legal advice.
