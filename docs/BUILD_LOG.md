@@ -479,7 +479,8 @@ The new tests change no count that the verify steps of the other instructions qu
   `vitest related --run --passWithNoTests` for the tests that import a staged file. ESLint and
   Prettier fixes are added to the commit. A failing task does not stop the others. Since the
   round-3 review, two more tasks follow: `test-suite.test.ts` once when a test file is staged, and
-  `env-files.test.ts` once when an env file is staged (see #4).
+  `env-files.test.ts` once when an env file is staged (see #4). Since the round-4 review of
+  instruction 4, a seventh runs `build-log.test.ts` once when `docs/BUILD_LOG.md` is staged.
 - `.husky/commit-msg` runs commitlint with `commitlint.config.mjs`: Conventional Commits
   (`@commitlint/config-conventional`) plus the team rules (lowercase scope and subject, subject at
   most 72 characters, a blank line before the body and before the footer, so the
@@ -510,7 +511,7 @@ Run from the repository root:
 ```sh
 pnpm install --frozen-lockfile          # a fresh install prints ". prepare$ husky"
 git config --get core.hooksPath         # prints .husky/_
-pnpm exec vitest run git-hooks.test.ts  # "Tests  88 passed (88)" since the wave w0 round-3 review
+pnpm exec vitest run git-hooks.test.ts  # "Tests  89 passed (89)" since the wave w0 round-4 review
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
@@ -704,7 +705,7 @@ Found while merging the round's five branches, and from the reviewers' hand-offs
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  9 passed | 79 skipped (88)"
+pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  9 passed | 80 skipped (89)"
 pnpm exec vitest run typecheck.test.ts -t "root type check"  # "Tests  2 passed | 13 skipped (15)"
 ```
 
@@ -766,7 +767,7 @@ fresh clone of this round's final branch, with 610 tests, at a load average of 3
 4.7 to 5.1 s). How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 78 skipped (88)"
+pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 79 skipped (89)"
 ```
 
 No owner actions.
@@ -836,7 +837,7 @@ How to verify, from the repository root (the counts are those on a machine with 
 the zsh tests are skipped):
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 78 skipped (88)"
+pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 79 skipped (89)"
 pnpm exec vitest run readme.test.ts                    # "Tests  3 passed (3)"
 ```
 
@@ -1533,7 +1534,7 @@ How to verify the fixes:
 ```sh
 pnpm exec vitest run env-access.test.ts               # "Tests  64 passed (64)"
 pnpm exec vitest run apps/api/src/env-file.test.ts    # "Tests  6 passed (6)"
-pnpm exec vitest run git-hooks.test.ts -t "runs every test when"  # "Tests  21 passed | 55 skipped (76)"; 21 of 88 since round 3
+pnpm exec vitest run git-hooks.test.ts -t "runs every test when"  # "Tests  21 passed | 55 skipped (76)"; 21 of 88 since round 3, of 89 since round 4
 mkdir -p apps/web/src/app/probe
 printf '"use client";\n\nexport { serverEnvSchema } from "../../env/server-schema";\n' \
   > apps/web/src/app/probe/leak.tsx
@@ -1602,7 +1603,7 @@ otherwise:
   `process.getBuiltinModule("process")` to the routes that the env lint rules let through.
 
 How to verify the fixes: these two commands report `Tests  7 passed | 81 skipped (88)` and
-`Tests  35 passed (35)`.
+`Tests  35 passed (35)` (since round 4: 7 passed of 89, and 50 passed).
 
 ```sh
 pnpm exec vitest run git-hooks.test.ts -t "env file"

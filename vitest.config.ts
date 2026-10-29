@@ -41,7 +41,9 @@ export default defineConfig({
       // template), env-files.test.ts (the ignore rules and the templates),
       // scripts/ci-workflow.test.ts (the workflows), env-access.test.ts (the ESLint config) and
       // workspace.test.ts (the Node.js version files). README.md, which git-hooks.test.ts reads, is
-      // left out on purpose: see docs/DECISIONS.md, "README changes do not run every test".
+      // left out on purpose: see docs/DECISIONS.md, "README changes do not run every test". So is
+      // docs/BUILD_LOG.md, which build-log.test.ts reads: a task in lint-staged.config.ts runs only
+      // that test for it.
       `${root}docker-compose.yml`,
       `${root}**/.env.example`,
       `${root}**/.gitignore`,

@@ -22,8 +22,8 @@ import { beforeAll, describe, expect, it, onTestFinished } from "vitest";
 // people often paste the whole block again. These tests run the steps that set a developer's own
 // files aside, and those that try to commit an env file, in scratch folders and over and over, to
 // check that nothing of the developer's is lost or left behind. Vitest cannot see that they read
-// the build log, so a change to the log alone runs them in CI but not in the pre-commit hook, as
-// for the README's steps.
+// the build log, so the pre-commit hook runs this file through a task of its own when
+// docs/BUILD_LOG.md is staged (lint-staged.config.ts).
 
 const repoRoot = import.meta.dirname;
 const buildLog = await readFile(join(repoRoot, "docs", "BUILD_LOG.md"), "utf8");

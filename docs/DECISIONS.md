@@ -2166,3 +2166,24 @@ Keep entries brief. Details belong in code comments and the build log.
   looked at again. Without the fallback, the replaced entry's reason to keep to core commands
   (a small switch to Valkey) no longer applies; whether to use Redis's own modules is for the
   instructions that need them. Recording the choice is not legal advice.
+
+### A staged build log runs build-log.test.ts in the pre-commit hook
+
+- Date: 2026-10-11 · Instruction: #2, #4 · Author: Delta (wave w0 review, round 4)
+- Context: `build-log.test.ts` (round 3 of the wave w0 review) pastes the steps in
+  `docs/BUILD_LOG.md` that set a developer's `apps/api/.env` aside into shells. It reads the log
+  from disk, which `vitest related` cannot trace, and the log was neither a rerun trigger nor
+  matched by a task, so a commit that broke those steps passed the hook (round-3 verification
+  item w0.V3.Bravo.3): the trade-off sat only in the test's header comment, and the README still
+  called itself the only such exception. "README changes do not run every test" says to revisit
+  once such tests live in a file of their own, which a task could run in seconds.
+- Decision: a seventh task in `lint-staged.config.ts`, for the pattern `docs/BUILD_LOG.md` (with
+  a slash, so it matches that file only), runs `vitest run --project tooling build-log.test.ts`
+  once. The log does not become a rerun trigger, and the README's steps still run only in CI.
+  `git-hooks.test.ts` checks that the task runs once for the log and not for other documents or
+  a `BUILD_LOG.md` in another folder; the README, `vitest.config.ts` and BUILD_LOG #2 name it.
+- Trade-offs: a commit that stages the log, as most review rounds do, takes one to two seconds
+  longer (1.3 to 2.2 s for the file's 20 tests at load averages of 1.7 to 2.4, most of it in the
+  git commands of the tests that try to commit an env file). The pattern is one more name to keep
+  in step: a test that reads another document needs its own task or trigger. CI runs the test
+  either way, and `git commit --no-verify` still skips it.

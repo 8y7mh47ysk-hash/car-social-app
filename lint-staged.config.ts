@@ -53,4 +53,10 @@ export default {
   //    against file names in every folder, dot folders such as .devcontainer/ included, where
   //    Vitest's rerun triggers never look.
   [envFiles]: () => "vitest run --project tooling env-files.test.ts",
+
+  // 7. build-log.test.ts pastes the steps in the build log that set a developer's files aside into
+  //    shells. No test imports the log, so step 4 never picks that test for it: run it, once, when
+  //    the log is staged. The README's steps, which git-hooks.test.ts runs, still run only in CI
+  //    (docs/DECISIONS.md, "README changes do not run every test").
+  "docs/BUILD_LOG.md": () => "vitest run --project tooling build-log.test.ts",
 } satisfies Configuration;
