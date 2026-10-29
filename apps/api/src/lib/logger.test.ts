@@ -85,6 +85,43 @@ describe("finishLogLine", () => {
     expect(finish(entry)).toEqual({ msg: `${start} postgres://${REDACTED}@db/apex` });
   });
 
+  /**
+   * DEL and the C1 controls, the Arabic letter mark, the left-to-right and right-to-left marks,
+   * the line and paragraph separators with the bidirectional embeddings and overrides, and the
+   * bidirectional isolates: every character that the logger must escape, built from code points.
+   */
+  const displayControlRanges: readonly (readonly [number, number])[] = [
+    [0x7f, 0x9f],
+    [0x61c, 0x61c],
+    [0x200e, 0x200f],
+    [0x2028, 0x202e],
+    [0x2066, 0x2069],
+  ];
+  const displayControls = displayControlRanges.flatMap(([first, last]) =>
+    Array.from({ length: last - first + 1 }, (_, offset) => String.fromCodePoint(first + offset)),
+  );
+
+  it("escapes every character a terminal or viewer could act on, in keys and values alike", () => {
+    const text = `car${displayControls.join("x")}`;
+    const entry = { msg: text, [text]: [text], ansi: "\u001b[2J" };
+
+    const output = finishLogLine(`${JSON.stringify(entry)}\n`);
+
+    expect(displayControls.filter((character) => output.includes(character))).toEqual([]);
+    expect(output).not.toContain("\u001b");
+    expect(output).toContain("\\u009b");
+    expect(output).toContain("\\u202e");
+    expect(output.indexOf("\n")).toBe(output.length - 1);
+    // Escaped, not removed: the line still holds the same values.
+    expect(JSON.parse(output)).toEqual(entry);
+  });
+
+  it("leaves other non-ASCII text as it is", () => {
+    const entry = { msg: "Citroën 2CV, 雪佛兰, 🏎", owner: "Zoë" };
+
+    expect(finishLogLine(`${JSON.stringify(entry)}\n`)).toBe(`${JSON.stringify(entry)}\n`);
+  });
+
   it.each([
     ["text that is not JSON", "password=hunter2\n"],
     ["a JSON array", '["hunter2"]\n'],

@@ -708,6 +708,40 @@ describe("secrets in the logs", () => {
   });
 });
 
+// A client can put C1 controls in a header value (Node.js reads its bytes as Latin-1) and any
+// character in a JSON body, and JSON.stringify writes C1 and bidirectional controls as they are.
+describe("control characters from a client", () => {
+  const CSI = String.fromCodePoint(0x9b);
+  const RIGHT_TO_LEFT_OVERRIDE = String.fromCodePoint(0x202e);
+  const LINE_SEPARATOR = String.fromCodePoint(0x2028);
+
+  it.each(["json", "pretty"] as const)(
+    "reach the %s log only as escapes, from a header and a body",
+    async (logFormat) => {
+      const { app, output } = await buildLoggedApp({ logFormat, logLevel: "info" });
+      app.post("/cars", (request) => {
+        const { name } = carBodySchema.parse(request.body);
+        request.log.info({ userAgent: request.headers["user-agent"] }, `car saved: ${name}`);
+        return { saved: name };
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/cars",
+        headers: { "user-agent": `curl${CSI}2J` },
+        payload: { name: `MX-5${RIGHT_TO_LEFT_OVERRIDE}${LINE_SEPARATOR}evil` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      for (const character of [CSI, RIGHT_TO_LEFT_OVERRIDE, LINE_SEPARATOR]) {
+        expect(output()).not.toContain(character);
+      }
+      expect(output()).toContain("curl\\u009b2J");
+      expect(output()).toContain("car saved: MX-5\\u202e\\u2028evil");
+    },
+  );
+});
+
 describe("pretty format", () => {
   it("writes one readable line per entry, with the request ID and the same redaction", async () => {
     const { app, output } = await buildLoggedApp({ logFormat: "pretty", logLevel: "info" });
