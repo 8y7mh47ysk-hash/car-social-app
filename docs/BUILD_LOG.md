@@ -1323,7 +1323,9 @@ published checksums; Docker Engine 29.9.2 and Compose 5.6.1 from Docker's signed
   PostgreSQL password changed with `\password`, the connection URLs from the host, and both ports
   refused on the VM's own network address. The file is valid for the Compose 5.6.1 parser and for
   both compose-spec JSON Schemas (the compose-spec repository's and compose-go 2.16.1's, with Ajv
-  8.20.0; four deliberately invalid documents were refused).
+  8.20.0; four deliberately invalid documents were refused). The 137 deliberate breakages of the
+  earlier rounds still fail a test wherever they apply to the file (125, eight of them rewritten
+  for the new Redis line and header; the other 12 were written for older versions of the file).
 
 How to verify the fixes:
 
