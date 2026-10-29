@@ -190,7 +190,10 @@ describe("commit-msg hook", { timeout: 20_000 }, () => {
     // How every message that git or GitHub writes begins, which commitlint.config.mjs lets through.
     ["git's message for a merge into another branch", "Merge branch 'main' into feature\n"],
     ["git's message for an octopus merge", "Merge branches 'a' and 'b'\n"],
-    ["git's message for pulling a remote branch", "Merge remote-tracking branch 'origin/main'\n"],
+    [
+      "git's message for merging a remote-tracking branch",
+      "Merge remote-tracking branch 'origin/main'\n",
+    ],
     ["git's message for merging a tag", "Merge tag 'v1.0.0'\n"],
     ["git's message for merging a commit", `Merge commit '${"0".repeat(40)}'\n`],
     [
