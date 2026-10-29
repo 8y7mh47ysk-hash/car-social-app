@@ -1351,8 +1351,13 @@ git commit -m "test: add a yaml file"        # passes, after ✔ vitest run --pr
 cd - && rm -rf "$d"
 ```
 
-With Docker, the steps under "How to verify" above check the new Redis image:
-`docker compose exec redis redis-cli INFO server` then shows `redis_version:8.10.3`.
+With Docker and the root `.env` set up as under "How to verify" above, those steps check the new
+Redis image too; to see its version:
+
+```sh
+docker compose up -d --wait
+docker compose exec redis redis-cli INFO server | grep redis_version   # redis_version:8.10.3
+```
 
 ## #4 - Typed environment loader
 
