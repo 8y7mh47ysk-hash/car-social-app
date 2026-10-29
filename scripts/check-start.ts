@@ -43,13 +43,13 @@ const HOST = "127.0.0.1";
 const API_LOGGING = { LOG_FORMAT: "json", LOG_LEVEL: "info" } as const;
 
 /** How long both apps may take to answer, from the moment the command starts. */
-const START_TIMEOUT_MS = 60_000;
+export const START_TIMEOUT_MS = 60_000;
 
 /** How long the apps may take to stop after SIGTERM, and then to end after SIGKILL. */
-const STOP_TIMEOUT_MS = 10_000;
+export const STOP_TIMEOUT_MS = 10_000;
 
 /** How long one request may take. */
-const REQUEST_TIMEOUT_MS = 2_000;
+export const REQUEST_TIMEOUT_MS = 2_000;
 
 /** How long to wait between two rounds of requests. */
 const POLL_INTERVAL_MS = 250;
