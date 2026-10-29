@@ -1214,8 +1214,10 @@ JSON Schemas (Ajv 8.20.0; valid as written and after interpolation, and a misspe
   into an interactive zsh started with `zsh -f`). The blocks now hold commands only.
 - Recorded: the pinned `pgvector/pgvector` build (2026-10-01, still the newest) lacks Debian
   security updates that the official `postgres:18.6-trixie` (rebuilt 2026-10-21) has (`xz-utils`
-  and `liblzma5`, `libpcre2-8-0`) and ships build tools the official image does not. Decision:
-  "The pgvector image lags the official postgres image's security rebuilds"; owner action below.
+  and `liblzma5`, `libpcre2-8-0`). (Corrected in round 4: this also said that it ships build tools
+  the official image does not; its build removes them, and only their config files are left.)
+  Decision: "The pgvector image lags the official postgres image's security rebuilds"; owner
+  action below.
 
 How to verify the fixes:
 

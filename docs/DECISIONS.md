@@ -2110,8 +2110,13 @@ Keep entries brief. Details belong in code comments and the build log.
   the newest, while the official `postgres:18.6-trixie` is also rebuilt for Debian's security
   updates, last on 2026-10-21. In the round-3 review's VM, the pinned image still had packages
   that trixie's security suite has since replaced (`liblzma5` and `xz-utils` 5.8.1-1+deb13u1, not
-  +deb13u2; `libpcre2-8-0` 10.46-1~deb13u2, not ~deb13u3), which the official image already had,
-  and build tools that the official image does not ship (binutils, cpp, dpkg-dev, python3).
+  +deb13u2; `libpcre2-8-0` 10.46-1~deb13u2, not ~deb13u3), which the official image already had.
+  (Corrected in round 4 of the wave w0 review: this also said that the image ships build tools
+  that the official image does not, binutils, cpp, dpkg-dev and python3. Its build step installs
+  them and removes them again: dpkg lists them as removed with only their config files left
+  (`rc`), none of their programs is in the image, and both images have the same 145 installed
+  packages. On 2026-10-29 those differed only in `liblzma5`, `xz-utils`, `libpcre2-8-0` and
+  `tzdata` (2026c against 2026e), and the official image had been rebuilt again on 2026-10-28.)
 - Decision: keep `pgvector/pgvector`, and move the digest to each newer `0.8.x-pg18-trixie` build
   as soon as pgvector publishes one. Whether instruction 102, which builds the hardened images,
   should build this one too (the official image plus PGDG's `postgresql-18-pgvector` package,
@@ -2119,9 +2124,10 @@ Keep entries brief. Details belong in code comments and the build log.
   BUILD_LOG #3.
 - Trade-offs: until then the database container can lag Debian's security fixes by weeks; the
   ports are on 127.0.0.1 only, which limits who can reach PostgreSQL. Our own image would remove
-  the lag and the build tools but adds a Dockerfile and its builds to maintain, which the original
-  entry rejected while no Docker engine was available to build and test one. Instruction 106's
-  update checks should compare against the official image's rebuilds, not only pgvector's tags.
+  the lag (and the removed tools' leftover config files) but adds a Dockerfile and its builds to
+  maintain, which the original entry rejected while no Docker engine was available to build and
+  test one. Instruction 106's update checks should compare against the official image's
+  rebuilds, not only pgvector's tags.
 
 ### The pre-commit hook runs env-files.test.ts for an env file staged in any folder
 
