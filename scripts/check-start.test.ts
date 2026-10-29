@@ -106,7 +106,7 @@ if (modes.has("log-warn")) {
 
 const apiHost = process.env.API_HOST ?? "127.0.0.1";
 const webHost = process.env.WEB_HOST ?? "127.0.0.1";
-const logging = \`\${String(process.env.LOG_FORMAT)} lines at level \${String(process.env.LOG_LEVEL)}\`;
+const logging = \`\${process.env.LOG_FORMAT} lines at level \${process.env.LOG_LEVEL}\`;
 createServer((request, response) => {
   response.writeHead(modes.has("health-503") ? 503 : 200, { "content-type": "application/json" });
   response.end(JSON.stringify({ status: modes.has("bad-health") ? "starting" : "ok" }));
