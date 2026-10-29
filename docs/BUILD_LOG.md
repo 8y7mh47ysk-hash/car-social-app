@@ -1327,28 +1327,35 @@ API_PORT=99999 LOG_LEVEL=loud pnpm --filter @apex/api start
 # then pnpm reports "Command failed with exit code 1"
 ```
 
-The API reads `apps/api/.env`, and the shell wins over it. The first line sets an `apps/api/.env`
-that you already have aside, in a new folder `apps/api/.env.backup` (gitignored, like every
-`.env.*` name). If that folder already exists, because these lines ran before without the clean-up
-below, `mkdir` says "File exists" and the first backup is kept. The next two lines write a copy of
-the template that sets port 4010, only while the backup folder exists.
+The API reads `apps/api/.env`, and the shell wins over it. The first command below sets an
+`apps/api/.env` that you already have aside, in a new folder `apps/api/.env.set-aside`
+(gitignored, like every `.env.*` name), or, if you have none, leaves a file named `none` there.
+Then it writes a copy of the template that sets port 4010. It does all of this only if it can
+create the folder: if `mkdir` says "File exists", it changes nothing. Either these lines ran before
+without the clean-up below (the folder still holds what they set aside, and `apps/api/.env` is
+still their copy), or a file or folder of yours has that name: then rename yours and paste the
+lines again.
 
 ```sh
-mkdir apps/api/.env.backup && { [ ! -e apps/api/.env ] || mv apps/api/.env apps/api/.env.backup/; }
-[ -d apps/api/.env.backup ] && cp apps/api/.env.example apps/api/.env && chmod 600 apps/api/.env
-[ -d apps/api/.env.backup ] && echo "API_PORT=4010" >> apps/api/.env
+mkdir apps/api/.env.set-aside &&
+  if [ -e apps/api/.env ] || [ -L apps/api/.env ]; then mv apps/api/.env apps/api/.env.set-aside/; else touch apps/api/.env.set-aside/none; fi &&
+  cp apps/api/.env.example apps/api/.env && chmod 600 apps/api/.env && echo "API_PORT=4010" >> apps/api/.env
 pnpm --filter @apex/api dev
 ```
 
 The API logs "Server listening at http://127.0.0.1:4010", and in a second terminal
 `curl http://127.0.0.1:4010/health` prints `{"status":"ok"}`. Press Ctrl+C, then run
 `LOG_LEVEL=warn pnpm --filter @apex/api dev`: the API still answers on port 4010, but logs nothing
-for the start or for requests (those lines are at info level). Press Ctrl+C, then clean up. This
-line deletes the copy, puts your own file back if you had one and removes the backup folder; once
-that is done, it does nothing, so running it twice is safe:
+for the start or for requests (those lines are at info level). Press Ctrl+C, then clean up. These
+lines put your own file back, or delete the copy if you had none, and then remove the folder.
+Pasted again, they change nothing. If `rmdir` says "Directory not empty", another program has put
+a file into the folder (Finder's `.DS_Store`, or an editor's swap file) and the rest is already
+done: look at what is left, then delete the folder with `rm -r apps/api/.env.set-aside`.
 
 ```sh
-[ ! -d apps/api/.env.backup ] || { rm -f apps/api/.env; [ ! -e apps/api/.env.backup/.env ] || mv apps/api/.env.backup/.env apps/api/.env; rmdir apps/api/.env.backup; }
+if [ -e apps/api/.env.set-aside/.env ] || [ -L apps/api/.env.set-aside/.env ]; then mv -f apps/api/.env.set-aside/.env apps/api/.env
+elif [ -e apps/api/.env.set-aside/none ]; then rm -f apps/api/.env apps/api/.env.set-aside/none; fi
+[ ! -d apps/api/.env.set-aside ] || rmdir apps/api/.env.set-aside
 ```
 
 The web app's guard and phase checks:
