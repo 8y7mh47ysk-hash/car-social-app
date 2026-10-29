@@ -917,7 +917,10 @@ Keep entries brief. Details belong in code comments and the build log.
   w0 review. This said every line takes this path, but writing to `process.stdout` or
   `process.stderr` directly would not, and no rule catches that. Corrected again at the round-3
   integration: the rule reports direct `console` calls only, so `globalThis.console.log(...)` or a
-  copy of `console`, such as `const { log } = console`, also gets round it.)
+  copy of `console`, such as `const { log } = console`, also gets round it. Corrected again in
+  round 4 of the review: URL parts are hidden in string values, and only string values are cut;
+  object keys, and the number of keys and items, are logged as they are. For which `?` and `#`
+  count in free text, see "Logged text hides a query string after a * as after a /".)
 - Trade-offs: parsing and re-serialising each line costs about 3.3 µs instead of pino's 0.5 µs
   (measured on this Apple M5), about 5.5 µs per request for Fastify's two request lines: nothing
   next to a real route, but worth revisiting if profiling (#119) says otherwise. Free text cannot
@@ -1837,6 +1840,7 @@ Keep entries brief. Details belong in code comments and the build log.
   contain quotes), and the WHATWG URL parser (it rejects relative paths such as
   `/reset?token=abc` and accepts characters that it would encode, so it cannot find where a URL
   ends in text either).
+- Superseded by: Logged text hides a query string after a * as after a /
 
 ### LOG_FORMAT=pretty writes to standard output synchronously
 
@@ -2166,3 +2170,49 @@ Keep entries brief. Details belong in code comments and the build log.
   looked at again. Without the fallback, the replaced entry's reason to keep to core commands
   (a small switch to Valkey) no longer applies; whether to use Redis's own modules is for the
   instructions that need them. Recording the choice is not legal advice.
+
+### Logged text hides a query string after a * as after a /
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Alpha (wave w0 review, round 4)
+- Context: replaces "Request URLs are redacted whole; in other text a URL ends only at
+  whitespace", which in free text counted a `?` or `#` only when a `/` came before it in its run
+  of text. Node.js also accepts request targets that start with `*` (`OPTIONS *?token=...`, and
+  `*x?token=...` or `*#...` with any method), and Fastify quotes the raw target in its warnings
+  about a reply sent twice: with a catch-all route, the warning's message, `err.message` and
+  `err.stack` held such a query string in full while the request line hid it (open item
+  w0.V3.Delta.1).
+- Decision: in `redactUrls` (`apps/api/src/lib/redact.ts`) a `*` counts like a `/`: a `?` or `#`
+  starts a query string or fragment when either comes before it in its run of text. Every request
+  target that Node.js accepts starts with `/` or `*` or holds `://` (checked by sending each form
+  over a socket), so the query string of a quoted request URL is always hidden. The rest of the
+  replaced entry holds: `redactUrl` redacts request URLs whole, a URL in other text ends only at
+  whitespace, and an `@` after the start of a query string hides everything after the `://`.
+- Trade-offs: text such as `a*b?c` now loses what follows its `?`, which costs readability, never
+  a secret. A URL with none of `/`, `*` or `://` before its `?`, such as `example.com?key=abc` or a
+  bare `?code=abc`, is still logged as it is: counting every `?` and `#` would also hide what
+  follows them in ordinary text, such as "#12" in "fixed in #12". `docs/ARCHITECTURE.md` states
+  the rule, so code does not log such URLs.
+
+### Log lines escape the control characters that JSON leaves as they are
+
+- Date: 2026-10-11 · Instruction: #8 · Author: Alpha (wave w0 review, round 4)
+- Context: JSON escapes the C0 control characters, ESC and line breaks among them, but not DEL,
+  the C1 controls (U+0080 to U+009F), the line and paragraph separators (U+2028, U+2029) or
+  Unicode's bidirectional controls. A client can send them all: C1 bytes in a header value, which
+  Node.js reads as Latin-1, and any of them in a JSON body. A handler that logged a user agent and
+  a car name, the kind of field the logger's rules say to log, wrote them raw. A terminal that
+  reads 8-bit controls takes U+009B as the start of a control sequence, as it takes ESC [; some
+  log viewers break a line at U+2028; and a bidirectional override reorders the text after it, so
+  a line can show something other than what it holds.
+- Decision: `finishLogLine` in `apps/api/src/lib/logger.ts` writes those characters as `\u`
+  escapes once the line is serialised, in keys and values alike. In a JSON line they occur only
+  inside strings, where the escape stands for the same character, so every line keeps its values.
+  The pretty format escapes pino-pretty's output the same way, because pino-pretty prints a
+  message and a stack as they are. Other text, such as accents, other alphabets and emoji, is left
+  alone. The source writes the characters as escapes, never as the characters themselves.
+- Trade-offs: one more pass over each line, within the noise of the parse and re-serialisation
+  around it (3.5 to 3.9 µs per line with or without it on this Apple M5). Escaping all non-ASCII
+  text would be simpler but would make names in other alphabets unreadable. The pretty format
+  still prints ESC and line breaks from a message or a stack, because its colours need ESC; it is
+  for a developer's own terminal. Characters that are only invisible, such as U+200B, are not
+  escaped: they neither act on a terminal nor reorder text.
