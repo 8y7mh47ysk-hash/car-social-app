@@ -31,6 +31,8 @@ const WARNING =
  * configuration it cannot serve; "log-warn" logs an info line and then a warning as the API does
  * (JSON lines, with pnpm's prefix); "exit" prints an error and exits with code 3; "stubborn" ignores
  * SIGTERM; "error-on-stop" prints an error line on SIGTERM, as pnpm does for the apps it stops.
+ * Unless it exits, it then prints the addresses it listens on and the API's logging settings that
+ * it was given (LOG_FORMAT and LOG_LEVEL).
  * Two modes start a helper process and add its process ID to the file: "escaped", one that leaves
  * the process group but keeps the output open for 30 s, and "left-behind", one that stays in the
  * group and ignores SIGTERM but does not hold the output. The stand-in and its helpers end by
@@ -99,6 +101,7 @@ if (modes.has("log-warn")) {
 
 const apiHost = process.env.API_HOST ?? "127.0.0.1";
 const webHost = process.env.WEB_HOST ?? "127.0.0.1";
+const logging = \`\${String(process.env.LOG_FORMAT)} lines at level \${String(process.env.LOG_LEVEL)}\`;
 createServer((request, response) => {
   response.writeHead(modes.has("health-503") ? 503 : 200, { "content-type": "application/json" });
   response.end(JSON.stringify({ status: modes.has("bad-health") ? "starting" : "ok" }));
@@ -117,6 +120,7 @@ if (!modes.has("no-web")) {
   }).listen(Number(process.env.WEB_PORT), webHost);
 }
 console.log(\`stand-in started: the API on \${apiHost}, the web app on \${webHost}\`);
+console.log(\`stand-in logging: \${logging}\`);
 `;
 
 /** The context's onTestFinished, which also works for tests that run concurrently. */
@@ -278,6 +282,24 @@ describe("checkStart", { timeout: 20_000 }, () => {
     expect(result.output).toContain(
       "stand-in started: the API on 127.0.0.1, the web app on 127.0.0.1",
     );
+  });
+
+  it("has the API log JSON lines at level info, whatever LOG_FORMAT and LOG_LEVEL say", async ({
+    onTestFinished,
+  }) => {
+    // The README suggests LOG_FORMAT=pretty in apps/api/.env, whose "ERROR:" and "FATAL:" lines the
+    // check cannot tell from other text, and LOG_LEVEL=error or silent would leave warnings out;
+    // CI's API logs JSON lines at level info, the default.
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
+    vi.stubEnv("LOG_FORMAT", "pretty");
+    vi.stubEnv("LOG_LEVEL", "silent");
+
+    const { result } = await checkStandIn("ok", onTestFinished);
+
+    expect(result.problem, result.output).toBeUndefined();
+    expect(result.output).toContain("stand-in logging: json lines at level info");
   });
 
   it("fails at once when the command stops before both apps answer, keeping its output", async ({

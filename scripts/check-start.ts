@@ -8,7 +8,8 @@
 // tests, apps/api/src/server.test.ts and production.test.ts, check its shutdown). CI fails on any
 // warning, so the check also fails when the apps print a warning or an error line while they start
 // (as scripts/check-build-warnings.ts finds them, the API's log lines at level warn or above
-// included); what they print while they stop is not checked.
+// included, so the API logs JSON lines at level info here, as in CI); what they print while they
+// stop is not checked.
 //
 // Usage, from the repository root, after `pnpm build`: node scripts/check-start.ts
 // Exit status: 0 when both apps answered without printing a warning and then stopped, 1 otherwise.
@@ -32,6 +33,14 @@ const healthSchema = z.strictObject({ status: z.literal("ok") });
  * shell or in apps/api/.env never exposes them during the check.
  */
 const HOST = "127.0.0.1";
+
+/**
+ * How the API logs during the check, whatever the shell or apps/api/.env says: JSON lines at its
+ * default level, as in CI. findWarnings reads the API's warnings and errors from its JSON lines
+ * (LOG_FORMAT=pretty writes "ERROR:" and "FATAL:", which it cannot tell from other text), and a
+ * level above warn (LOG_LEVEL=error or silent, say) would leave them out.
+ */
+const API_LOGGING = { LOG_FORMAT: "json", LOG_LEVEL: "info" } as const;
 
 /** How long both apps may take to answer, from the moment the command starts. */
 const START_TIMEOUT_MS = 60_000;
@@ -151,10 +160,11 @@ const seconds = (ms: number): string => String(ms / 1000);
 
 /**
  * Starts the apps with `options.command` (by default `pnpm start`), with WEB_HOST and API_HOST set
- * to 127.0.0.1 and WEB_PORT and API_PORT to free ports, in a process group of its own. Waits until
- * the API answers GET /health and the web app its home page, and fails if they printed a warning
- * or an error line by then. Then stops the group with SIGTERM, and with SIGKILL if its output has
- * not closed in time. Never waits longer than the time limits.
+ * to 127.0.0.1, WEB_PORT and API_PORT to free ports and the API's logging to JSON lines at level
+ * info, in a process group of its own. Waits until the API answers GET /health and the web app its
+ * home page, and fails if they printed a warning or an error line by then. Then stops the group
+ * with SIGTERM, and with SIGKILL if its output has not closed in time. Never waits longer than the
+ * time limits.
  */
 export async function checkStart(options: StartCheckOptions = {}): Promise<StartCheckResult> {
   const [command, ...args] = options.command ?? ["pnpm", "start"];
@@ -187,6 +197,7 @@ export async function checkStart(options: StartCheckOptions = {}): Promise<Start
       WEB_PORT: String(ports.web),
       API_HOST: HOST,
       API_PORT: String(ports.api),
+      ...API_LOGGING,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
