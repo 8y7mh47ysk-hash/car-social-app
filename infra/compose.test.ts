@@ -358,7 +358,8 @@ describe("docker-compose.yml", () => {
   it("is the only Compose file that Compose reads by default", () => {
     // Compose prefers a compose.yaml to this file and merges a docker-compose.override.yml on top
     // of it, so a committed one would change what runs without any check here seeing it. On
-    // macOS, "Compose.yaml" does the same.
+    // macOS, "Compose.yaml" does the same. The pre-commit hook runs this test whenever a YAML
+    // file is staged (lint-staged.config.ts).
     expect(trackedFiles().filter(isComposeDefaultFile)).toEqual(["docker-compose.yml"]);
   });
 });

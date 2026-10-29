@@ -48,12 +48,11 @@ export default defineConfig({
       `${root}.github/workflows/*`,
       `${root}eslint.config.*`,
       `${root}{.nvmrc,.node-version}`,
-      // Other files that Docker Compose reads without being told, such as compose.yaml or
-      // docker-compose.override.yml: infra/compose.test.ts, which lists what git tracks, then
-      // fails the commit.
-      `${root}**/{compose,docker-compose}{,.override}.{yml,yaml}`,
       // Env files are not triggers: no test reads them. A staged one runs env-files.test.ts through
-      // its own task in lint-staged.config.ts, which also finds env files in dot folders.
+      // its own task in lint-staged.config.ts, which also finds env files in dot folders. Nor are
+      // the other files that Docker Compose reads without being told, such as compose.yaml:
+      // infra/compose.test.ts only asks git whether one is tracked, and a staged YAML file runs it
+      // through its own task there, which also matches any letter case.
     ],
   },
 });

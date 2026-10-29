@@ -2099,6 +2099,7 @@ Keep entries brief. Details belong in code comments and the build log.
   a list of forbidden settings (a merge key, `extends` or a new Compose feature gets round it),
   and running `docker compose config` in the tests (Docker is not installed everywhere the tests
   run; CI's Compose step does run it).
+- Superseded by: A staged YAML file runs the compose tests, which match file names as macOS does
 
 ### The pgvector image lags the official postgres image's security rebuilds
 
@@ -2166,3 +2167,29 @@ Keep entries brief. Details belong in code comments and the build log.
   looked at again. Without the fallback, the replaced entry's reason to keep to core commands
   (a small switch to Valkey) no longer applies; whether to use Redis's own modules is for the
   instructions that need them. Recording the choice is not legal advice.
+
+### A staged YAML file runs the compose tests, which match file names as macOS does
+
+- Date: 2026-10-11 · Instruction: #2, #3 · Author: Charlie (wave w0 review, round 4)
+- Context: replaces one part of "The compose tests accept only the settings they check": the
+  check that no other file Compose reads by default is tracked matched the names in lower case
+  only, and a Vitest rerun trigger made staging one run every test. Compose looks each name up in
+  the file system, and on macOS's case-insensitive APFS, Compose 5.6.1 read a `Compose.yaml`
+  instead of `docker-compose.yml` and merged a `docker-compose.Override.yml` on top, with every
+  test and the hook passing (w0.V3.Alpha.1): Vitest's triggers are case-sensitive and never look
+  inside a dot folder. APFS also folds a long s (U+017F) and a Kelvin sign (U+212A) to s and k: in
+  round 4, Compose on this Mac used a `compose.yaml` spelt with a long s.
+- Decision: `infra/compose.test.ts` matches the names with the regular-expression flags `i` and
+  `u`, which fold letters as APFS does (under `u`, those two are the only characters outside
+  ASCII that fold to an ASCII letter). `lint-staged.config.ts` gets a seventh task: a staged YAML
+  file (`*.{[yY][mM][lL],[yY][aA][mM][lL]}`, which lint-staged matches in every folder, dot
+  folders included) runs `vitest run --project infra` once. The trigger glob for the other names
+  leaves `vitest.config.ts`, because the test only asks git which files are tracked;
+  `docker-compose.yml` stays a trigger, because tests read it. `git-hooks.test.ts` checks the task
+  for six names, upper-case extensions and a dot folder among them. The rest of the replaced
+  entry holds: the strict schemas, the exact Redis config and the refused YAML warnings.
+- Trade-offs: every staged YAML file (a workflow, the pnpm lockfile) now runs the infra tests,
+  about a second, also when it is no Compose file: matching the extension keeps the list of names
+  in one place, the test. A staged `compose.yaml` no longer runs every test, only the one that
+  refuses it. The names are those of the checked Compose release; a default name added by a later
+  Compose must be added to the test. Windows's own case folding was not checked, only APFS's.

@@ -479,7 +479,8 @@ The new tests change no count that the verify steps of the other instructions qu
   `vitest related --run --passWithNoTests` for the tests that import a staged file. ESLint and
   Prettier fixes are added to the commit. A failing task does not stop the others. Since the
   round-3 review, two more tasks follow: `test-suite.test.ts` once when a test file is staged, and
-  `env-files.test.ts` once when an env file is staged (see #4).
+  `env-files.test.ts` once when an env file is staged (see #4); since the round-4 review of
+  instruction 3, a third: the infra tests once when a YAML file is staged (see #3).
 - `.husky/commit-msg` runs commitlint with `commitlint.config.mjs`: Conventional Commits
   (`@commitlint/config-conventional`) plus the team rules (lowercase scope and subject, subject at
   most 72 characters, a blank line before the body and before the footer, so the
@@ -490,9 +491,11 @@ The new tests change no count that the verify steps of the other instructions qu
   tests read instead of importing: `docker-compose.yml`, an `.env.example` template, a
   `.gitignore`, a CI workflow or (since the wave w0 review) `eslint.config.mjs`; since the
   round-2 review of this instruction, a PostCSS config; since the round-3 review of this
-  instruction, `.nvmrc` and `.node-version`; and since the round-3 review of instruction 3,
-  another file that Docker Compose reads by default (`compose.yaml`, `docker-compose.override.yml`
-  and their variants), which `infra/compose.test.ts` refuses. An env file staged with
+  instruction, `.nvmrc` and `.node-version`. From the round-3 to the round-4 review of
+  instruction 3, so did another file that Docker Compose reads by default (`compose.yaml`,
+  `docker-compose.override.yml` and the other lower-case names), which `infra/compose.test.ts`
+  refuses; since round 4 a staged YAML file, in any letter case and any folder, runs only the infra
+  tests, through a lint-staged task of its own (see #3). An env file staged with
   `git add --force` ran every test from the round-2 review of instruction 4; since round 3 it runs
   only `env-files.test.ts`, through a lint-staged task of its own (see #4).
 - `git-hooks.test.ts` (54 tests): 28 commit messages through the real commit-msg hook and

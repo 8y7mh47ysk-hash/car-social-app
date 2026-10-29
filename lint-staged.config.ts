@@ -19,6 +19,9 @@ const testFiles = "*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}";
 /** Env files, by the names that .gitignore ignores (the .env.example templates match too). */
 const envFiles = "{.env,.env.*,*.env,.envrc}";
 
+/** YAML files, with the extension in any letter case. */
+const yamlFiles = "*.{[yY][mM][lL],[yY][aA][mM][lL]}";
+
 export default {
   // 1. Lint, fixing what ESLint can; any warning left fails the commit, as in `pnpm lint`.
   //    --no-warn-ignored skips files that the ESLint config ignores. Then format the result.
@@ -53,4 +56,12 @@ export default {
   //    against file names in every folder, dot folders such as .devcontainer/ included, where
   //    Vitest's rerun triggers never look.
   [envFiles]: () => "vitest run --project tooling env-files.test.ts",
+
+  // 7. A file that Docker Compose reads without being told, such as compose.yaml or
+  //    docker-compose.override.yml, replaces or extends docker-compose.yml, and on macOS and
+  //    Windows Compose finds those names in any letter case. When a YAML file is staged, run the
+  //    infra tests, once: infra/compose.test.ts fails if git tracks such a file other than
+  //    docker-compose.yml, whatever its folder or letter case. Unlike Vitest's rerun triggers, this
+  //    pattern matches upper-case extensions and files in dot folders.
+  [yamlFiles]: () => "vitest run --project infra",
 } satisfies Configuration;

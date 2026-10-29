@@ -208,7 +208,9 @@ and once the API image has a health check, `web` should wait for `service_health
 - `pnpm test` includes `infra/compose.test.ts`, static checks that need no Docker. The file may
   hold only the services and settings the checks know (so no `env_file`, `extends`, `include`,
   `entrypoint`, `network_mode`, YAML merge key and so on), and the repository no other file that
-  Compose reads by default, such as a `compose.yaml` or a `docker-compose.override.yml`. Within
+  Compose reads by default, such as a `compose.yaml` or a `docker-compose.override.yml`, in any
+  letter case (on macOS, Compose also reads a `Compose.YAML`); the pre-commit hook runs these
+  checks whenever a YAML file is staged. Within
   that: only `postgres` and `redis` start by default, ports stay on `127.0.0.1`, passwords have
   no default and stay off command lines, PostgreSQL comes from the pgvector image, Redis's config
   file holds exactly its password and the append-only setting, the health checks, environments,

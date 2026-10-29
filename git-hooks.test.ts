@@ -275,6 +275,7 @@ describe("pre-commit hook", { timeout: 30_000 }, () => {
   const relatedTests = "vitest related --run --passWithNoTests";
   const suiteCheck = "vitest run --project tooling test-suite.test.ts";
   const envCheck = "vitest run --project tooling env-files.test.ts";
+  const composeCheck = "vitest run --project infra";
 
   /**
    * The stand-in for each tool: appends its name and arguments to $STUB_LOG, appends a line to
@@ -540,6 +541,9 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       ...staged.map((file) => `A  ${file}`),
       suiteCheck,
       ...staged.map((file) => `A  ${file}`),
+      // .github/workflows/ci.yml is a YAML file.
+      composeCheck,
+      ...staged.map((file) => `A  ${file}`),
     ]);
   });
 
@@ -623,6 +627,52 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
 
     expect((await modulesOnly.preCommit()).code).toBe(0);
     expect(await vitestCalls(modulesOnly)).toEqual([`${relatedTests} ${envModules.join(" ")}`]);
+  });
+
+  // A file that Docker Compose reads without being told replaces or extends docker-compose.yml, and
+  // on macOS and Windows Compose finds those names in any letter case; infra/compose.test.ts then
+  // fails the commit. Vitest's rerun triggers match neither other letter cases nor dot folders.
+  it.for([
+    "compose.yaml",
+    "Compose.YAML",
+    "docker-compose.Override.yml",
+    ".devcontainer/compose.yaml",
+    "infra/compose.yml",
+    "docs/example.Yml",
+  ])("runs the compose tests when %s is staged", async (file) => {
+    const repo = await createRepo();
+    await repo.write(file, "services: {}\n");
+    await repo.git("add", file);
+
+    const result = await repo.preCommit();
+
+    expect(result.code, result.output).toBe(0);
+    expect(await vitestCalls(repo)).toEqual([`${relatedTests} ${file}`, composeCheck]);
+  });
+
+  it("runs the compose tests once, however many YAML files are staged, and not for others", async () => {
+    const repo = await createRepo();
+    const yamlFiles = ["compose.yaml", "infra/docker-compose.override.yml"];
+    const others = ["compose.json", "compose.yaml.bak"];
+    for (const file of [...yamlFiles, ...others]) {
+      await repo.write(file, "services: {}\n");
+    }
+    await repo.git("add", ...yamlFiles, ...others);
+
+    expect((await repo.preCommit()).code).toBe(0);
+    expect(await vitestCalls(repo)).toEqual([
+      `${relatedTests} ${[...yamlFiles, ...others].sort().join(" ")}`,
+      composeCheck,
+    ]);
+
+    const othersOnly = await createRepo();
+    for (const file of others) {
+      await othersOnly.write(file, "services: {}\n");
+    }
+    await othersOnly.git("add", ...others);
+
+    expect((await othersOnly.preCommit()).code).toBe(0);
+    expect(await vitestCalls(othersOnly)).toEqual([`${relatedTests} ${others.join(" ")}`]);
   });
 
   it("checks a commit that only deletes a file", async () => {
@@ -1064,10 +1114,6 @@ describe("the pre-commit hook's test step", { timeout: 60_000 }, () => {
     "eslint.config.mjs",
     ".nvmrc",
     ".node-version",
-    // Files that Compose would read instead of, or on top of, docker-compose.yml:
-    // infra/compose.test.ts then fails the commit.
-    "compose.yaml",
-    "docker-compose.override.yml",
   ])("runs every test when %s is staged", async (file) => {
     const result = await relatedTests(file);
 
