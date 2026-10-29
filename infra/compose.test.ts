@@ -24,8 +24,10 @@ const envExampleText = readFileSync(join(repoRoot, ".env.example"), "utf8");
 // and ["true"] would make a placeholder exit with status 0), network_mode: host (no port
 // publishing, so every listening port is open), build (no Dockerfile exists yet), a health check's
 // disable, or volume options that put the data elsewhere. Add a setting here only together with a
-// test for its value. Ports use the short "IP:host:container" form, volumes "source:target",
-// environments the map form and a service's configs the long form.
+// test for its value: the tests below pin every value, except that the images' digests only need
+// the right form, because a digest changes with every rebuild of its tag. Ports use the short
+// "IP:host:container" form, volumes "source:target", environments the map form and a service's
+// configs the long form.
 const healthcheckSchema = z.strictObject({
   test: z.array(z.string()),
   interval: z.string(),
@@ -261,6 +263,29 @@ describe("docker-compose.yml", () => {
     expect(redis.image).toMatch(/^redis:\d+\.\d+\.\d+-[\w.]+@sha256:[0-9a-f]{64}$/);
   });
 
+  it("times the health checks as infra/README.md describes them", () => {
+    // Every 10 s, every second while a service starts (for up to 30 s for PostgreSQL, which may
+    // first initialise an empty volume, and 10 s for Redis), a 5 s time-out, and five failures in
+    // a row before a service counts as unhealthy. A longer interval or time-out keeps
+    // `docker compose up --wait` and the API placeholder waiting; more retries hide a broken
+    // server for longer. The next test checks the commands, and the schema above allows no other
+    // setting.
+    expect(postgres.healthcheck).toMatchObject({
+      interval: "10s",
+      timeout: "5s",
+      retries: 5,
+      start_period: "30s",
+      start_interval: "1s",
+    });
+    expect(redis.healthcheck).toMatchObject({
+      interval: "10s",
+      timeout: "5s",
+      retries: 5,
+      start_period: "10s",
+      start_interval: "1s",
+    });
+  });
+
   it("health-checks postgres over TCP and Redis with the password from its own config file", () => {
     // TCP, because a Unix-socket check would pass against the temporary server that runs during
     // first-time initialisation. CMD-SHELL, because a shell must expand the container's
@@ -318,13 +343,28 @@ describe("docker-compose.yml", () => {
     expect(web.depends_on).toEqual({ api: { condition: "service_started" } });
   });
 
-  it("keeps the app placeholders honest: each exits with an error", () => {
-    // A placeholder that exited with status 0 would look as if the app had run. Neither builds
-    // anything (the schema above allows no `build`): no Dockerfile exists yet, and instruction 102
-    // adds the images.
-    for (const [name, placeholder] of Object.entries({ api, web })) {
-      expect(placeholder.command.at(-1), name).toMatch(/; exit 1$/);
-    }
+  it("keeps the app placeholders honest: each prints its reminder and exits with an error", () => {
+    // A placeholder that exited with status 0 would look as if the app had run, and one that
+    // never exited would keep `docker compose up` waiting. Each runs only `echo` in the official
+    // alpine image, at an exact release: anything else would run next to PostgreSQL and Redis, on
+    // their network. Neither builds anything (the schema above allows no `build`): no Dockerfile
+    // exists yet, and instruction 102 adds the images.
+    expect(api.image).toMatch(/^alpine:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$/);
+    expect(web.image).toBe(api.image);
+    const reminder = (app: string) => [
+      "sh",
+      "-c",
+      `echo "Placeholder: ${app} has no image yet. Run it on the host: pnpm dev" >&2; exit 1`,
+    ];
+    expect(api.command).toEqual(reminder("the API"));
+    expect(web.command).toEqual(reminder("the web app"));
+  });
+
+  it("names the project apex-garage, which names its containers and data volumes", () => {
+    // Compose names the volumes after the project (apex-garage_postgres-data): under another name,
+    // PostgreSQL and Redis would start with new, empty volumes while the data stayed in the old
+    // ones (docs/DECISIONS.md, "A fixed Compose project name: apex-garage").
+    expect(compose.name).toBe("apex-garage");
   });
 
   it("keeps data in named volumes at the paths the images use", () => {

@@ -210,13 +210,17 @@ and once the API image has a health check, `web` should wait for `service_health
   `entrypoint`, `network_mode`, YAML merge key and so on), and the repository no other file that
   Compose reads by default, such as a `compose.yaml` or a `docker-compose.override.yml`, in any
   letter case (on macOS, Compose also reads a `Compose.YAML`); the pre-commit hook runs these
-  checks whenever a YAML file is staged. Within
-  that: only `postgres` and `redis` start by default, ports stay on `127.0.0.1`, passwords have
-  no default and stay off command lines, PostgreSQL comes from the pgvector image, Redis's config
-  file holds exactly its password and the append-only setting, the health checks, environments,
-  ports and dependencies are the ones described here, the placeholders exit with an error,
-  images are pinned, and `.env.example` lists exactly the variables the file reads, with the
-  right defaults. A new setting needs a test for its value before the checks accept it.
+  checks whenever a YAML file is staged. Within that: only `postgres` and `redis` start by
+  default, ports stay on `127.0.0.1`, passwords have no default and stay off command lines,
+  PostgreSQL comes from the pgvector image, Redis's config file holds exactly its password and the
+  append-only setting, the health checks (commands and timings), environments, ports and
+  dependencies are the ones described here, the placeholders run the pinned Alpine image only to
+  print their reminder and exit with an error, the project is named `apex-garage`, every image is
+  pinned to an exact release and a digest, and `.env.example` lists exactly the variables the
+  file reads, with the right defaults. Every setting's value is checked, except that a digest is
+  checked for its form only, because it changes with every rebuild of its tag: when you pin a new
+  one, read it from the registry as "Security notes" says. A new setting needs a test for its
+  value before the checks accept it.
 
 ## What comes next
 
