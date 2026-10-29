@@ -539,12 +539,13 @@ describe("the helpers these checks use", () => {
       "infra/compose.yaml",
       ".devcontainer/compose.yaml",
       // Names that Compose 5.6.1 read on macOS's case-insensitive file system in the wave w0
-      // review (round 4): the one with a long s replaced docker-compose.yml.
+      // review (round 4). The one with a long s (U+017F) replaced docker-compose.yml; the last
+      // one has a Kelvin sign (U+212A) for the k.
       "Compose.yaml",
       "docker-compose.Override.yml",
       "COMPOSE.OVERRIDE.YAML",
-      "compoſe.yaml",
-      "docKer-compose.override.yml",
+      "compo\u017fe.yaml",
+      "doc\u212aer-compose.override.yml",
     ]) {
       expect(isComposeDefaultFile(path), path).toBe(true);
     }
@@ -553,9 +554,10 @@ describe("the helpers these checks use", () => {
       "my-compose.yml",
       "compose.json",
       "compose.yaml.bak",
-      // macOS does not fold these to "i", and neither does the check.
-      "compose.overrıde.yaml",
-      "compose.overrİde.yaml",
+      // A dotless i (U+0131) and a capital I with a dot (U+0130): macOS does not fold them to an
+      // "i", and neither does the check.
+      "compose.overr\u0131de.yaml",
+      "compose.overr\u0130de.yaml",
     ]) {
       expect(isComposeDefaultFile(path), path).toBe(false);
     }
