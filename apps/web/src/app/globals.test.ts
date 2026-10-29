@@ -7,6 +7,8 @@
 // `vitest related`, in the pre-commit hook, runs them when any of these changes.
 import "./globals.css";
 
+import { readFile } from "node:fs/promises";
+
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -73,14 +75,17 @@ describe("the global stylesheet", () => {
     expect(used.filter((name) => !defined.has(name))).toEqual([]);
   });
 
-  // Without the sources that globals.css names, Tailwind CSS reads every file in the working folder:
-  // apps/web when Next.js builds the app, but the whole repository when `pnpm test` runs, so a class
-  // that only the docs named got a rule there. Two class names that it must not find:
+  // Without the sources that globals.css names, Tailwind CSS reads every file in the working
+  // folder: apps/web when Next.js builds the app, but the whole repository when `pnpm test` runs,
+  // so a class that only the docs named got a rule there. Two class names that it must not find:
   // `[--sentinel-test-file:1]`, named only in this test, and the one in postcss.config.mjs, which
-  // is outside the web app's source folder.
+  // is outside the web app's source folder. Tailwind CSS ignores a class name that a full stop or
+  // a comma follows, so both are written in backticks.
   it("takes class names from the web app's source files only, not from its tests", async () => {
+    const outside = await readFile(new URL("../../postcss.config.mjs", import.meta.url), "utf8");
     const css = await compiledStylesheet();
 
+    expect(outside).toContain("`[--sentinel-outside-src:1]`");
     expect(css).not.toContain("--sentinel-test-file");
     expect(css).not.toContain("--sentinel-outside-src");
   });

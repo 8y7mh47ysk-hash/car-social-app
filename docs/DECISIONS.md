@@ -2231,7 +2231,8 @@ Keep entries brief. Details belong in code comments and the build log.
   draw (async Server Components, providers) will need the test changed when they come (instruction
   17). A package whose components use Tailwind classes, such as packages/ui, needs an `@source`
   line in globals.css; until it has one, the test fails on the classes of its components that the
-  home page renders. The sentinel in `postcss.config.mjs` is a comment that has to stay there.
+  home page renders. The sentinel in `postcss.config.mjs` is a comment that has to stay there, in
+  backticks (Tailwind CSS ignores a class name that a full stop follows); the test checks both.
 
 ### zod 4.6.7, fast-uri and undici for security advisories
 
