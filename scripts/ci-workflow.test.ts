@@ -231,8 +231,12 @@ describe("ci.yml", () => {
   });
 
   it("turns off Next.js's telemetry for every step", () => {
+    // Set once for the job; a step's own env could set it back.
     for (const job of Object.values(ci.workflow.jobs)) {
       expect(job.env?.["NEXT_TELEMETRY_DISABLED"]).toBe("1");
+      for (const step of job.steps) {
+        expect(step.env?.["NEXT_TELEMETRY_DISABLED"] ?? "1", step.name).toBe("1");
+      }
     }
   });
 
