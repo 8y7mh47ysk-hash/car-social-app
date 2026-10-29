@@ -157,10 +157,13 @@ function envEntries(text: string): Map<string, { value: string; commented: boole
 /**
  * True for the file names Docker Compose reads without being told: compose.yaml, compose.yml,
  * docker-compose.yaml and docker-compose.yml, and each of them with ".override" before the
- * extension, which Compose merges on top. It prefers compose.yaml to docker-compose.yml.
+ * extension, which Compose merges on top. It prefers compose.yaml to docker-compose.yml. Compose
+ * looks each name up in the file system, so on a case-insensitive one, as macOS and Windows use,
+ * it also reads "Compose.YAML", and on macOS even a name with a long s (U+017F) for the s or a
+ * Kelvin sign (U+212A) for the k: with "u", "i" folds letters the same way.
  */
 function isComposeDefaultFile(path: string): boolean {
-  return /(?:^|\/)(?:docker-)?compose(?:\.override)?\.ya?ml$/.test(path);
+  return /(?:^|\/)(?:docker-)?compose(?:\.override)?\.ya?ml$/iu.test(path);
 }
 
 /** Every path in git's index: the files that are committed or staged. */
@@ -354,7 +357,8 @@ describe("docker-compose.yml", () => {
 
   it("is the only Compose file that Compose reads by default", () => {
     // Compose prefers a compose.yaml to this file and merges a docker-compose.override.yml on top
-    // of it, so a committed one would change what runs without any check here seeing it.
+    // of it, so a committed one would change what runs without any check here seeing it. On
+    // macOS, "Compose.yaml" does the same.
     expect(trackedFiles().filter(isComposeDefaultFile)).toEqual(["docker-compose.yml"]);
   });
 });
@@ -434,7 +438,7 @@ describe("the helpers these checks use", () => {
     ]);
   });
 
-  it("recognise the file names Compose reads by default, in any folder", () => {
+  it("recognise the file names Compose reads by default, in any folder and any letter case", () => {
     for (const path of [
       "compose.yaml",
       "compose.yml",
@@ -443,6 +447,14 @@ describe("the helpers these checks use", () => {
       "compose.override.yaml",
       "docker-compose.override.yml",
       "infra/compose.yaml",
+      ".devcontainer/compose.yaml",
+      // Names that Compose 5.6.1 read on macOS's case-insensitive file system in the wave w0
+      // review (round 4): the one with a long s replaced docker-compose.yml.
+      "Compose.yaml",
+      "docker-compose.Override.yml",
+      "COMPOSE.OVERRIDE.YAML",
+      "compoſe.yaml",
+      "docKer-compose.override.yml",
     ]) {
       expect(isComposeDefaultFile(path), path).toBe(true);
     }
@@ -451,6 +463,9 @@ describe("the helpers these checks use", () => {
       "my-compose.yml",
       "compose.json",
       "compose.yaml.bak",
+      // macOS does not fold these to "i", and neither does the check.
+      "compose.overrıde.yaml",
+      "compose.overrİde.yaml",
     ]) {
       expect(isComposeDefaultFile(path), path).toBe(false);
     }
