@@ -286,7 +286,7 @@ pnpm exec vitest run typecheck.test.ts workspace.test.ts apps/api/src/production
   apps/api/src/server.test.ts                  # "Test Files  4 passed (4)", "Tests  52 passed (52)"
 pnpm exec vitest run test-suite.test.ts eslint-config.test.ts scripts/tooling-project.test.ts
                                                # "Test Files  3 passed (3)", "Tests  13 passed (13)"
-pnpm --filter @apex/web test                   # "Tests  47 passed (47)"
+pnpm --filter @apex/web test                   # "Tests  47 passed (47)"; 49 since round 4
 ```
 
 To see one of these tests catch a broken setting, delete the line
@@ -387,7 +387,10 @@ values such as `query-secret`. Fixes, each with a test that fails without it:
   which Tailwind CSS finds by scanning those files, but imported neither: a home page change that
   dropped `sm:grid-cols-2` passed the pre-commit hook and failed only in `pnpm test`. The test now
   imports both, so the hook runs it when either changes. When instruction 17 replaces the page,
-  the test's list of utilities has to change with it.
+  the test's list of utilities has to change with it. (Corrected in round 4 of the review: run
+  from the repository root, as `pnpm test` and the hook run it, Tailwind CSS also scanned the
+  docs, and once this note named `sm:grid-cols-2` that change passed `pnpm test` too. Round 4
+  scoped the scan and replaced the list; see "Review fixes (wave w0, round 4)" below.)
 - The README's quick start stopped at its first line in zsh, the default shell on macOS:
   `pnpm install   # also installs the git hooks (see "Git hooks" below)` printed "zsh: number
   expected" and installed nothing, because zsh does not read `#` at its prompt as the start of a
@@ -417,7 +420,11 @@ values such as `query-secret`. Fixes, each with a test that fails without it:
   one-day hold; the lockfile changes only those packages and their `@next/*` and `@vitest/*` parts.
   `pnpm audit` now reports one advisory, in braces up to 3.0.3 (high), which only
   eslint-config-next's lint tooling uses and which has no fixed release (docs/DECISIONS.md,
-  "Next.js 16.4.2 and Vitest 4.1.12 for security advisories").
+  "Next.js 16.4.2 and Vitest 4.1.12 for security advisories"). (Corrected in round 4 of the
+  review: a third advisory against the same versions, GHSA-673q-mjm6-r5xr, critical:
+  unauthenticated remote code execution in `use cache` functions that return typed arrays, was
+  published the same day, about an hour before this fix, which covers it too: it was first fixed
+  in 16.4.1. GitHub withdrew the braces advisory on 2026-10-23.)
 - Right after that upgrade, `workspace.test.ts` failed with ERR_PNPM_NO_OFFLINE_TARBALL ("snapshot
   not present in local store") for packages that were in the store. pnpm 12 keeps the store's
   index in SQLite, and while another process has it open, newly added entries stay in the
@@ -439,7 +446,7 @@ How to verify, from the repository root:
 ```sh
 pnpm exec vitest run typecheck.test.ts eslint-config.test.ts generated-files.test.ts readme.test.ts
 # "Test Files  4 passed (4)" and "Tests  37 passed (37)"
-pnpm audit                  # "1 vulnerabilities found", "Severity: 1 high": braces only
+pnpm audit                  # "No known vulnerabilities found" since round 4; braces only before
 pnpm --filter @apex/web exec next --version   # Next.js v16.4.2
 pnpm --filter @apex/api list fastify          # fastify@5.12.7
 ```
@@ -463,6 +470,70 @@ The new tests change no count that the verify steps of the other instructions qu
   52 tests: 46 before the round, one more in `workspace.test.ts` from the review of instruction 5,
   four in `apps/api/src/server.test.ts` from the review of instruction 8 and one in
   `typecheck.test.ts` from this review (each branch counted only its own).
+
+**Review fixes (wave w0, round 4)**
+
+Bravo reviewed instructions 1 and 2 and took them over from Charlie, with the six open items that
+the verification of round 3 raised (w0.V3.Echo.1 to w0.V3.Echo.6). Checked by running them, in
+this checkout and in scratch clones, with ports 3020 and 4020: a frozen install, `pnpm peers check`,
+`pnpm audit`, the format check, lint, the type check, every test, the build and the build-warning
+check; `pnpm dev` and `pnpm start`, each probed and then stopped with SIGINT to its process group,
+leaving no process behind; every "How to verify" command of this entry and of instruction 2 that
+quotes a count or an output, and the recipes for a stale route, a weakened tsconfig and a missing
+Vitest project; and a search of the whole git history for key and token formats and for secrets
+given values, which found only the CI workflow's `ci-only-not-a-secret`. Fixes, each with a test
+that fails without it:
+
+- The stylesheet test's result depended on the folder it ran from (w0.V3.Echo.1, w0.V3.Echo.3,
+  w0.V3.Echo.4). Unless the stylesheet names its sources, Tailwind CSS scans the working folder:
+  apps/web for `next build`, but the whole repository for `pnpm test` and the pre-commit hook,
+  where the docs named `sm:grid-cols-2`, so a home page that dropped it passed both, while
+  `pnpm --filter @apex/web test` failed. The test's own strings supplied `antialiased` and
+  `mx-auto`. The CSS that `next build` shipped held `.inline`, from the word `inline` in the
+  test, and a misspelt class such as `tracking-tigth` on the home page passed the test and the
+  hook. `globals.css` now names its sources, the app's `src` folder (`source("..")`) without its
+  test files (`@source not "../**/*.test.*"`), so every working folder compiles the same
+  stylesheet, and the shipped CSS holds only the pages' classes. `globals.test.ts` keeps no list
+  of utilities: it renders the root layout around the home page and checks that every class in
+  the markup has a rule, and that two sentinel class names get none, one written only in the test
+  and one only in `apps/web/postcss.config.mjs`. Removing `source()`, widening it to apps/web,
+  removing the `@source not` line, a misspelt class and a colour that the theme lacks each fail
+  the test, from the repository root and from apps/web; a page that drops a class passes it
+  (docs/DECISIONS.md, "Tailwind CSS scans only the app's source; the test checks every class the
+  pages use").
+- `pnpm audit` reported 17 advisories, 5 of them high, where round 3 had ended with one: zod 4.6.5
+  (GHSA-mrhx-c7xc-m3w5, high: memory exhaustion on a large array), fast-uri 3.1.8 and 4.2.2 under
+  Fastify and commitlint (two moderate and two low advisories), and undici 8.11.2 under jsdom in
+  the web tests (four high and four moderate). The catalog now asks for `zod` `^4.6.7`, and the
+  lockfile moves fast-uri to 3.1.9 and 4.2.3 and undici to 8.12.3, which their dependents' ranges
+  allow; nothing else in the lockfile changes, and `pnpm audit` reports no known vulnerabilities
+  (docs/DECISIONS.md, "zod 4.6.7, fast-uri and undici for security advisories"). No test can
+  hold this, because advisories reach npm's database without any change here; `pnpm audit` stays
+  a check to run by hand until instruction 106.
+- Docs (w0.V3.Echo.5, w0.V3.Echo.6): the round-3 note above and its DECISIONS entry named two of
+  the three advisories against Next.js 16.4.0, and the braces advisory that they leave in
+  `pnpm audit` was withdrawn on 2026-10-23; DECISIONS ("The README's command blocks hold no
+  comments; the docs say how to make zsh read them") still said that the README names
+  infra/README.md. Each has a fact correction, and the round-3 note's claim that the dropped
+  class failed `pnpm test` has one too.
+
+How to verify, from the repository root:
+
+```sh
+pnpm audit                                        # "No known vulnerabilities found"
+pnpm exec vitest run apps/web/src/app/globals.test.ts   # "Tests  3 passed (3)"
+pnpm --filter @apex/web test                      # "Tests  49 passed (49)"
+```
+
+To see the test catch a misspelt class, change `tracking-tight` to `tracking-tigth` in
+`apps/web/src/app/page.tsx` and run the second command: "has a rule for every class that the root
+layout and the home page use" fails and lists `tracking-tigth`; before this round the test, and a
+commit through the hook, passed. Then run `git checkout apps/web/src/app/page.tsx`.
+
+This round's tests change two counts that other entries quote: `pnpm --filter @apex/web test` gives
+49 tests (instruction 4 says 47 since round 2), and `git-hooks.test.ts` has 103 tests, so
+`-t "runs every test when"` gives 21 of 103 and `-t "env file"` 7 of 103 (instruction 4 says 88).
+No owner actions.
 
 ## #2 - Git hooks and conventional commits
 
@@ -510,7 +581,7 @@ Run from the repository root:
 ```sh
 pnpm install --frozen-lockfile          # a fresh install prints ". prepare$ husky"
 git config --get core.hooksPath         # prints .husky/_
-pnpm exec vitest run git-hooks.test.ts  # "Tests  88 passed (88)" since the wave w0 round-3 review
+pnpm exec vitest run git-hooks.test.ts  # "Tests  103 passed (103)" since the wave w0 round-4 review
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
@@ -635,7 +706,7 @@ instruction 4 and two merge tests from the round's integration (see below). How 
 the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts   # "Tests  64 passed (64)"; 88 since the round-3 review
+pnpm exec vitest run git-hooks.test.ts   # "Tests  64 passed (64)"; 103 since the round-4 review
 ```
 
 To see a merge stopped by the checks, in a scratch clone (a branch committed with `--no-verify`
@@ -704,7 +775,7 @@ Found while merging the round's five branches, and from the reviewers' hand-offs
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  9 passed | 79 skipped (88)"
+pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  15 passed | 88 skipped (103)"
 pnpm exec vitest run typecheck.test.ts -t "root type check"  # "Tests  2 passed | 13 skipped (15)"
 ```
 
@@ -766,7 +837,7 @@ fresh clone of this round's final branch, with 610 tests, at a load average of 3
 4.7 to 5.1 s). How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 78 skipped (88)"
+pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 93 skipped (103)"
 ```
 
 No owner actions.
@@ -836,7 +907,7 @@ How to verify, from the repository root (the counts are those on a machine with 
 the zsh tests are skipped):
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 78 skipped (88)"
+pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 93 skipped (103)"
 pnpm exec vitest run readme.test.ts                    # "Tests  3 passed (3)"
 ```
 
@@ -871,6 +942,55 @@ No owner actions.
   documentation change 0.8 s (3.0 s for the clone's first commit), a source change with related
   tests 4.9 s (6.6 s the first time), and a change that runs every test 33.0 to 34.5 s. The README
   gives these figures.
+
+**Review fixes (wave w0, round 4)**
+
+Bravo reviewed this instruction with instruction 1 (see its round-4 note). The scratch-clone
+recipes above, run from a non-interactive shell, gave every result they promise: the bad messages
+were rejected in 0.3 to 1.0 s, the lint error, the type error and the failing related test in 5.1
+to 7.4 s, and the documentation change passed in 1.0 s; the merge stopped on the lint error, and
+`git commit --no-edit` stopped on it again; the staged test file that no project runs was
+rejected. Fixes, each with a test that fails without it:
+
+- commitlint skipped every check for more messages than the README said (w0.V3.Echo.2): the hook
+  used commitlint's own list of messages to skip (@commitlint/is-ignored 21.2.3), whose merge
+  patterns match a line anywhere in a message. "Feat: Add Stuff." with the body line "Merge the
+  old parser into the new one." was committed through the real hook unchecked, and so would be a
+  message with a body line such as "Merge branch work" or "Merge tag v1". The list also skipped
+  hand-written subjects such as "revert the logger change", "Merged ..." and "Automatic merge
+  ...", and version numbers, also after `chore(release):` or with `[skip ci]`; and it rejected two
+  messages that git itself writes on `main`, for an octopus merge ("Merge branches 'a' and 'b'")
+  and for merging a commit ("Merge commit '<sha>'"). `commitlint.config.mjs` now replaces the
+  list: a message skips the checks only when it starts as git's or GitHub's do (a merge,
+  `Revert "`, `Reapply "`, `amend!`, `fixup!` or `squash!`). `git-hooks.test.ts` runs ten more
+  such messages through the real hook, which must pass, and five that the old list let through,
+  which must be rejected; with the old config, seven of the fifteen fail, and removing any single
+  form from the new list fails at least one. The README section "Commit messages" lists the forms
+  (docs/DECISIONS.md, "Commit messages skip the checks only when they start as git's own do").
+- The README section "Git hooks" and the comment on the rerun triggers in `vitest.config.ts` named
+  the README as the only document that tests run steps from without being a trigger. Since round 3,
+  `build-log.test.ts` runs steps from `docs/BUILD_LOG.md`, so a change there runs those tests in
+  CI only, too; both now say so (whether the hook should run them is instruction 4's open item
+  w0.V3.Bravo.3). The section also called `pnpm-lock.yaml` a pnpm workspace file. Documentation
+  only.
+
+`git-hooks.test.ts` now has 103 tests (88 before), so the counts of the commands above that run it
+are updated. How to verify, from the repository root:
+
+```sh
+pnpm exec vitest run git-hooks.test.ts -t "commit-msg"   # "Tests  43 passed | 60 skipped (103)"
+printf 'Feat: Add stuff.\n\nMerge the old parser into the new one.\n' | pnpm exec commitlint
+# exit code 1, with [type-case], [type-enum], [subject-case] and [subject-full-stop]
+```
+
+Before this round, the `printf` line printed nothing and exited with code 0.
+
+Run times measured again in a fresh clone of this branch, with 835 tests, committing from a
+non-interactive shell, three rounds of each at a load average of 1.2 to 8.3 while other work used
+the machine: a documentation change 0.9 to 1.0 s (1.9 s the first time), a change to
+`packages/shared/src/health.ts`, whose related tests include the production build test, 7.6 to
+10.3 s, and a change that runs every test 40.5 to 41.1 s. The README's figures are from the
+round-3 integration. No owner actions.
 
 ## #3 - Docker Compose services
 
