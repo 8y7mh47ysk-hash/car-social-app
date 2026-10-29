@@ -2166,3 +2166,25 @@ Keep entries brief. Details belong in code comments and the build log.
   looked at again. Without the fallback, the replaced entry's reason to keep to core commands
   (a small switch to Valkey) no longer applies; whether to use Redis's own modules is for the
   instructions that need them. Recording the choice is not legal advice.
+
+### The start check sets the API's log format and level itself
+
+- Date: 2026-10-11 · Instruction: #5 · Author: Echo (wave w0 review, round 4)
+- Context: found in round 4 of the review (w0.V3.Charlie.3). "The start check fails on warnings
+  and errors that the apps print while they start" reads the API's warnings and errors from its
+  JSON log lines, and CI's API logs JSON. The README suggests `LOG_FORMAT=pretty` in
+  `apps/api/.env` for development, and `pnpm start` reads that file, so the pre-push run of
+  `node scripts/check-start.ts` got pino-pretty's lines, whose `ERROR:` and `FATAL:` the check
+  cannot tell from other text: with a compiled API changed to log an error and a fatal line as it
+  started, the check passed where CI fails. `LOG_LEVEL=error` or `silent` hid the API's warnings
+  the same way.
+- Decision: the check gives the apps `LOG_FORMAT=json` and `LOG_LEVEL=info`, the API's defaults,
+  next to the `WEB_HOST`, `API_HOST` and ports it already sets, so the shell and `apps/api/.env`
+  cannot change them (the environment wins over the file). `scripts/check-start.test.ts` stubs
+  both variables and checks what the stand-in for the apps was given.
+- Trade-offs: the check no longer runs the API exactly as a developer has set it up; to watch a
+  failing start with `LOG_LEVEL=debug`, run `pnpm start` directly. If the API's defaults change,
+  the pin should follow them, since CI's API runs with the defaults. Rejected: reading
+  pino-pretty's text (its format is meant for people and changes with its options, and
+  `LOG_LEVEL` would still hide lines), and refusing to run while either variable says something
+  else (the README's own advice would then stop the pre-push check).

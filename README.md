@@ -188,7 +188,8 @@ The second line saves the build's output in `build.log` (git ignores `*.log` fil
 check on it. If the build itself fails, the reason is in `build.log`. The third starts both
 production builds with `pnpm start` on free ports, as CI does, and stops them once both answer;
 if one does not, or the apps print a warning or an error line as they start (a warning in the
-API's JSON log included), it says so and prints what the apps printed. Ctrl+C stops it and the
+API's JSON log included), it says so and prints what the apps printed. It runs the API with JSON
+logs at level info, as in CI, whatever `apps/api/.env` or the shell sets. Ctrl+C stops it and the
 apps it started. With Docker and the root `.env` (see [Local services](#local-services)),
 `docker compose --profile '*' config --quiet` runs CI's last check, on `docker-compose.yml`: it
 prints nothing when the file is valid.
