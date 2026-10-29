@@ -47,9 +47,9 @@ services:
       driver: local
 
   redis:
-    # Redis 8.10.2 on Alpine 3.23 (licence notes in docs/DECISIONS.md). The digest pins this exact
+    # Redis 8.10.3 on Alpine 3.23 (licence notes in docs/DECISIONS.md). The digest pins this exact
     # multi-platform build: always change the tag and the digest together.
-    image: redis:8.10.2-alpine3.23@sha256:0bf6577d7774e592b29d093e3ac9390eb91e13d72c21e506afce736de5e0eeb0
+    image: redis:8.10.3-alpine3.23@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537
     restart: unless-stopped
     # Redis reads its settings, the password among them, from the redis-config file (see configs
     # at the end). Keep redis-server as the first word: the image drops root privileges only when

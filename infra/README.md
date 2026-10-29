@@ -13,7 +13,7 @@ Docker.
 | Service    | What                                                         | Host address     | Data volume     |
 | ---------- | ------------------------------------------------------------ | ---------------- | --------------- |
 | `postgres` | PostgreSQL 18.6 with the pgvector 0.8.7 extension available  | `127.0.0.1:5432` | `postgres-data` |
-| `redis`    | Redis 8.10.2, password required, append-only file on         | `127.0.0.1:6379` | `redis-data`    |
+| `redis`    | Redis 8.10.3, password required, append-only file on         | `127.0.0.1:6379` | `redis-data`    |
 | `api`      | Placeholder in the `app` profile: prints a reminder, exits 1 | none             | none            |
 | `web`      | Placeholder in the `app` profile: prints a reminder, exits 1 | none             | none            |
 
