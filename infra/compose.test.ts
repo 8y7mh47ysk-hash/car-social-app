@@ -144,6 +144,11 @@ function stringsIn(value: unknown): string[] {
   return [];
 }
 
+/** The commands that a file's comments quote: comment lines indented by three spaces or more. */
+function quotedCommands(text: string): string[] {
+  return text.split("\n").flatMap((line) => /^# {3,}(\S.*)$/.exec(line)?.[1] ?? []);
+}
+
 /**
  * The NAME=value lines of an env file, including commented-out ones such as "# NAME=value". Every
  * other line must be blank or a comment, and each name may appear once: Compose's own parser also
@@ -447,6 +452,20 @@ describe(".env.example", () => {
   });
 });
 
+describe("the commands quoted in docker-compose.yml and .env.example", () => {
+  // People paste them into a terminal, and on macOS its shell is zsh, which at its prompt passes a
+  // `#` and the words after it to the command (its interactivecomments option is off by default):
+  // `docker compose up -d --wait   # starts ...` stopped with "no such service: #".
+  it.for<[string, string]>([
+    ["docker-compose.yml", composeText],
+    [".env.example", envExampleText],
+  ])("hold no # comments in %s", ([, text]) => {
+    const commands = quotedCommands(text);
+    expect(commands.length).toBeGreaterThan(0);
+    expect(commands.filter((command) => /(?:^|\s)#/.test(command))).toEqual([]);
+  });
+});
+
 describe("the helpers these checks use", () => {
   it("accept only 127.0.0.1 port bindings", () => {
     expect(isLoopbackOnly("127.0.0.1:5432:5432")).toBe(true);
@@ -478,6 +497,12 @@ describe("the helpers these checks use", () => {
     expect(plainDefaults("127.0.0.1:${PORT:-5432}:5432")).toEqual([["PORT", "5432"]]);
     expect(plainDefaults("${A:-}")).toEqual([["A", ""]]);
     expect(plainDefaults("${B:-${C}} ${D:?x} ${E-1} $${F:-1}")).toEqual([]);
+  });
+
+  it("find the commands that comments quote", () => {
+    expect(
+      quotedCommands("# Prose.\n#\n#   cp a b\n#    ls   # list\n#  two spaces\n  #   x\n"),
+    ).toEqual(["cp a b", "ls   # list"]);
   });
 
   it("read set and commented-out env entries, but not prose", () => {
