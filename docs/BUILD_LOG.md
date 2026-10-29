@@ -1649,11 +1649,13 @@ against macOS. The three open items from the round-3 verification came first. Ch
 the API's `dev` and `start` scripts with invalid, unreadable and shell-emptied settings (on port
 4040); Node.js's and Next.js's `.env` parsers on CRLF line ends, a byte order mark, `#`, `$`,
 `export` and quotes; the steps above in sh and zsh in scratch folders; and, in a fresh clone of
-the review branch, every "How to verify" step above (the API on port 4040 instead of 4010, also
-after pasting the set-aside command a second time), `pnpm build` (which logged "Running
-next.config.ts took 67ms") and both commit probes, which the hook refused in under a second each
-and which, with the hooks removed, left the branch and the index as they were. Fixes, each with a
-test that fails without it unless it says otherwise:
+the review branch, every "How to verify" step above, with the API on port 4040 instead of 4010
+and the web app on 3040: `pnpm test` (834 tests passed), `pnpm build` (which logged "Running
+next.config.ts took 67ms"), the set-aside command also pasted a second time, the build check
+with a temporary `SESSION_SECRET` (the build succeeded without it, `next start` exited with code
+1 naming it, and with it in `apps/web/.env` served the page), and both commit probes, which the
+hook refused in under a second each and which, with the hooks removed, left the branch and the
+index as they were. Fixes, each with a test that fails without it unless it says otherwise:
 
 - The clean-up of the steps that show the API reading `apps/api/.env` deleted the developer's
   restored file when it was pasted again after `rmdir` had failed, for example because Finder had
