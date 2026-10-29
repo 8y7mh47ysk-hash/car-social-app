@@ -1544,12 +1544,16 @@ pnpm exec eslint apps/api/src/probe.ts    # 1 error: "Use the global process. ..
 rm apps/api/src/probe.ts
 ```
 
-The hook refusing an env file (the commit fails, so nothing else you have staged is committed;
-it took as long as `pnpm test` until round 3, and takes a few seconds since):
+The hook refusing an env file: the `git commit` below fails, and the failure of
+`env-files.test.ts` ("are never committed") names `infra/probe.env`. Nothing else you have staged
+is committed; it took as long as `pnpm test` until round 3, and takes a few seconds since. If the
+commit goes through instead, the hook did not catch the file, or did not run because the hooks
+are not installed in this checkout (`pnpm install` installs them): the `git reset` on the same
+line then takes the commit back, and the last line removes the file.
 
 ```sh
 printf 'SECRET=x\n' > infra/probe.env && git add --force infra/probe.env
-git commit -m "chore: try to commit an env file"   # fails: env-files.test.ts, "are never committed"
+git commit -m "chore: try to commit an env file" && git reset --quiet --soft HEAD~1
 git rm --cached --quiet infra/probe.env && rm infra/probe.env
 ```
 
@@ -1607,12 +1611,13 @@ pnpm exec vitest run env-files.test.ts build-log.test.ts
 
 The hook refusing an env file in a dot folder: the `git commit` below fails within a second or
 two, and the failure of `env-files.test.ts` names `.apex-probe/probe.env`. Nothing else you have
-staged is committed, and the last line removes the file again.
+staged is committed, and the last line removes the file again. If the commit goes through, the
+`git reset` takes it back, as above.
 
 ```sh
 mkdir .apex-probe && printf 'SECRET=x\n' > .apex-probe/probe.env
 git add --force .apex-probe/probe.env
-git commit -m "chore: try to commit an env file in a dot folder"
+git commit -m "chore: try to commit an env file in a dot folder" && git reset --quiet --soft HEAD~1
 git rm --cached --quiet .apex-probe/probe.env && rm .apex-probe/probe.env && rmdir .apex-probe
 ```
 
