@@ -403,8 +403,9 @@ flowchart TB
   bidirectional controls, and a client can send all of those in a header value or a JSON body.
   The logger writes them as `\u` escapes too, in keys and values, so a client's text cannot send
   control sequences to the terminal that shows the log, break a line in a log viewer or reorder
-  what it shows. `LOG_FORMAT=pretty` escapes the same characters but prints the other control
-  characters of a message or a stack as they are, which only a developer's own terminal sees.
+  what it shows. `LOG_FORMAT=pretty` escapes the same characters, and pino-pretty itself drops ESC
+  and most other control characters from a message or a stack, but it keeps their line breaks:
+  a line break in a message still starts a new line in the developer's terminal.
 - **Crashes.** An uncaught exception, or a promise rejection that nothing handles, is logged at
   fatal level, redacted and with the ID of the request whose code failed, before the process
   exits with code 1 (`apps/api/src/server.ts`). Node.js's own report would be unredacted text.

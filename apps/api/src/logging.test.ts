@@ -710,10 +710,12 @@ describe("secrets in the logs", () => {
 
 // A client can put C1 controls in a header value (Node.js reads its bytes as Latin-1) and any
 // character in a JSON body, and JSON.stringify writes C1 and bidirectional controls as they are.
+// ESC is escaped by JSON, and pino-pretty drops it from a message: neither format may write it.
 describe("control characters from a client", () => {
   const CSI = String.fromCodePoint(0x9b);
   const RIGHT_TO_LEFT_OVERRIDE = String.fromCodePoint(0x202e);
   const LINE_SEPARATOR = String.fromCodePoint(0x2028);
+  const ESCAPE = String.fromCodePoint(0x1b);
 
   it.each(["json", "pretty"] as const)(
     "reach the %s log only as escapes, from a header and a body",
@@ -729,11 +731,11 @@ describe("control characters from a client", () => {
         method: "POST",
         url: "/cars",
         headers: { "user-agent": `curl${CSI}2J` },
-        payload: { name: `MX-5${RIGHT_TO_LEFT_OVERRIDE}${LINE_SEPARATOR}evil` },
+        payload: { name: `MX-5${RIGHT_TO_LEFT_OVERRIDE}${LINE_SEPARATOR}evil${ESCAPE}[2J` },
       });
 
       expect(response.statusCode).toBe(200);
-      for (const character of [CSI, RIGHT_TO_LEFT_OVERRIDE, LINE_SEPARATOR]) {
+      for (const character of [CSI, RIGHT_TO_LEFT_OVERRIDE, LINE_SEPARATOR, ESCAPE]) {
         expect(output()).not.toContain(character);
       }
       expect(output()).toContain("curl\\u009b2J");

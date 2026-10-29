@@ -2574,8 +2574,9 @@ Alpha reviewed this instruction and changed:
   a control sequence, and a right-to-left override, which reorders what a log viewer shows. Both
   formats now write these characters as `\u` escapes, in keys and values, so every line keeps
   its values; other non-ASCII text is unchanged, and the cost per line is within measurement
-  noise. The pretty format still prints ESC and line breaks from a message or a stack, which
-  only a developer's own terminal sees.
+  noise. In the pretty format, pino-pretty itself drops ESC and most other control characters
+  from a message or a stack but keeps line breaks, so a line break in a message still starts a
+  new line in the developer's terminal.
 - Query strings after a `*` (open item w0.V3.Delta.1). In free text a `?` or `#` counted only
   after a `/`, so the warning Fastify logs when a route replies twice, which quotes the raw
   request target, held the query string of `OPTIONS *?token=...` (also `*x?token=...` and

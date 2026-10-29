@@ -2207,12 +2207,14 @@ Keep entries brief. Details belong in code comments and the build log.
 - Decision: `finishLogLine` in `apps/api/src/lib/logger.ts` writes those characters as `\u`
   escapes once the line is serialised, in keys and values alike. In a JSON line they occur only
   inside strings, where the escape stands for the same character, so every line keeps its values.
-  The pretty format escapes pino-pretty's output the same way, because pino-pretty prints a
-  message and a stack as they are. Other text, such as accents, other alphabets and emoji, is left
-  alone. The source writes the characters as escapes, never as the characters themselves.
+  The pretty format escapes pino-pretty's output the same way: pino-pretty drops ESC, DEL and the
+  C1 controls from a message or a stack itself, but not the separators or the bidirectional
+  controls, and prints the other fields as JSON, where DEL and the C1 controls stay. Other text,
+  such as accents, other alphabets and emoji, is left alone. The source writes the characters as
+  escapes, never as the characters themselves.
 - Trade-offs: one more pass over each line, within the noise of the parse and re-serialisation
   around it (3.5 to 3.9 µs per line with or without it on this Apple M5). Escaping all non-ASCII
-  text would be simpler but would make names in other alphabets unreadable. The pretty format
-  still prints ESC and line breaks from a message or a stack, because its colours need ESC; it is
-  for a developer's own terminal. Characters that are only invisible, such as U+200B, are not
-  escaped: they neither act on a terminal nor reorder text.
+  text would be simpler but would make names in other alphabets unreadable. In the pretty format a
+  line break in a message or a stack, which pino-pretty keeps, still starts a new line; that
+  format is for a developer's own terminal. Characters that are only invisible, such as U+200B,
+  are not escaped: they neither act on a terminal nor reorder text.

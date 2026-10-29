@@ -321,11 +321,13 @@ function writeAll(fd: number, text: string): void {
  * line is lost when the process exits. pino-pretty is imported only here, so the JSON format
  * never loads it.
  *
- * pino-pretty reads the JSON line back, display controls included, and prints the message and an
- * error's stack as they are, so its output gets the same escapes (it writes none of those
- * characters itself). Its colours need ESC, so the other control characters of a message or a
- * stack, ESC and line breaks among them, still reach the terminal: acceptable for a format that
- * only a developer's own terminal shows, and one more reason to keep client text out of messages.
+ * pino-pretty reads the JSON line back. It removes ESC and the other control characters from a
+ * message and a stack itself, except tabs and line breaks, but not the line and paragraph
+ * separators or the bidirectional controls, and it prints the other fields as JSON, in which DEL
+ * and the C1 controls stay as they are too. So its output gets the same escapes (its colours use
+ * only ESC). A line break in a message or a stack still starts a new line: acceptable for a
+ * format that only a developer's own terminal shows, and one more reason to keep client text out
+ * of messages.
  */
 async function prettyDestination(destination: LogDestination | undefined): Promise<LogDestination> {
   const pinoPretty = await importPinoPretty();
