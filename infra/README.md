@@ -153,6 +153,11 @@ The `api` and `web` services are in the `app` profile, so a plain `docker compos
 Neither app has a container image yet: run both on the host with `pnpm dev`.
 `docker compose --profile app up` starts PostgreSQL and Redis, waits until they are healthy, and
 then each placeholder prints that reminder and exits with status 1. They are never restarted.
+The command itself does not return: it stays attached to the output of PostgreSQL and Redis until
+you press Ctrl+C, which stops those two as well (start them again with
+`docker compose up -d --wait`). With `-d` it returns at once, and
+`docker compose --profile app logs api web` shows the reminders; with `-d --wait` it fails with
+"container ... exited (1)", because the placeholders exit.
 
 Remove them with the profile as well: `docker compose --profile app down`. A plain
 `docker compose down` only handles the services outside a profile, so it leaves both exited
