@@ -1220,16 +1220,21 @@ JSON Schemas (Ajv 8.20.0; valid as written and after interpolation, and a misspe
 How to verify the fixes:
 
 ```sh
-pnpm exec vitest run --project infra   # "Tests  40 passed (40)"
+pnpm exec vitest run --project infra   # "Tests  40 passed (40)" then; 46 since round 4
 pnpm exec vitest run --project tooling git-hooks.test.ts -t "compose"
-# "Tests  3 passed": staging docker-compose.yml, compose.yaml or docker-compose.override.yml
-# runs every test
+# "Tests  3 passed" then: staging docker-compose.yml, compose.yaml or docker-compose.override.yml
+# ran every test. Since round 4 "Tests  8 passed": docker-compose.yml still runs every test, and
+# a staged YAML file runs the infra tests (see the round-4 fixes below)
 pnpm test && pnpm typecheck && pnpm lint && pnpm format:check   # all exit with code 0
 ```
 
-With Docker, from the repository root, after the commands under "How to verify" above:
+With Docker, from the repository root, with the root `.env` set up as under "How to verify"
+above. (Corrected in round 4: this said "after the commands under "How to verify" above", whose
+last step removes the containers, so `docker compose start redis` failed with "service "redis"
+has no container to start" and nothing was checked. The first line now starts the services.)
 
 ```sh
+docker compose up -d --wait              # both services report "Healthy"
 docker compose stop redis
 # put a new password in .env as REDIS_PASSWORD, for example the output of openssl rand -hex 32
 docker compose start redis
