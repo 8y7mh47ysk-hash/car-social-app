@@ -144,7 +144,9 @@ Settings can also live in a gitignored `.env` file next to the app: copy the app
 create one, and make the copy readable by your user only (`chmod 600`, as for the root `.env`),
 because settings can include secrets. Until `apps/api/.env` exists, the API prints Node.js's
 notice ".env not found. Continuing without it." as it starts (twice in `pnpm dev`); that is
-expected.
+expected. Node.js prints the same notice for a file that it cannot read, and the API then starts
+without the file's settings: if the notice appears although the file exists, check with
+`ls -l apps/api/.env` that it belongs to you and that you can read it.
 
 | File            | Read by                                                                 | Template                |
 | --------------- | ----------------------------------------------------------------------- | ----------------------- |
@@ -152,11 +154,13 @@ expected.
 | `apps/api/.env` | The API, in `pnpm dev` and `pnpm start`                                 | `apps/api/.env.example` |
 | `apps/web/.env` | Next.js, in `pnpm dev`, `pnpm build`, `pnpm start` and `pnpm typecheck` | `apps/web/.env.example` |
 
-Variables set in the shell win over the files: if an error names a variable that the file sets
-correctly, the shell has exported its own value (check with `printenv LOG_LEVEL`, for example,
-which prints nothing for a variable that is not set). `WEB_HOST` and `WEB_PORT` work only from
-the shell, because Next.js opens its port before it reads `.env` files. The templates explain
-each variable and the rules for adding one; the design is in
+Variables set in the shell win over the files, even with an empty value, which the apps treat as
+not set (so the default applies): if an error names a variable that the file sets correctly, or a
+setting in the file has no effect, the shell has exported its own value. For example,
+`env | grep '^LOG_LEVEL='` prints the shell's value (`LOG_LEVEL=` for an empty one) and nothing
+for a variable that is not set, and `unset LOG_LEVEL` removes it from that shell. `WEB_HOST` and
+`WEB_PORT` work only from the shell, because Next.js opens its port before it reads `.env` files.
+The templates explain each variable and the rules for adding one; the design is in
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
 The API logs one JSON object per line. To read its log in a terminal while developing, add

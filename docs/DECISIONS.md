@@ -2187,3 +2187,23 @@ Keep entries brief. Details belong in code comments and the build log.
   git commands of the tests that try to commit an env file). The pattern is one more name to keep
   in step: a test that reads another document needs its own task or trigger. CI runs the test
   either way, and `git commit --no-verify` still skips it.
+
+### Node.js reports an unreadable apps/api/.env as not found; the README says so
+
+- Date: 2026-10-11 · Instruction: #4 · Author: Delta (wave w0 review, round 4)
+- Context: found in round 4 of the wave w0 review. For a file it cannot read (for example one
+  that `sudo` created, owned by another user), `node --env-file-if-exists=.env` prints ".env not
+  found. Continuing without it." and goes on: with `LOG_LEVEL=nonsense` in an unreadable
+  `apps/api/.env`, the API started with its defaults and no error. The README called that notice
+  expected. Next.js instead logs "Failed to load env from .env" with the `EACCES` error, and then
+  carries on as well.
+- Decision: keep Node's flag ("The API loads apps/api/.env with Node's --env-file-if-exists"
+  still holds) and document the case: the README says that the notice also appears for a file
+  the API cannot read, which the API then ignores, and how to check it (`ls -l apps/api/.env`).
+- Trade-offs: the scripts could check first (`[ ! -e .env ] || [ -r .env ] || exit 1`), but a
+  compound command can keep the shell between pnpm and Node.js: with macOS's `sh`, a SIGTERM to
+  the script's process then stopped the shell and left Node.js running, and `production.test.ts`
+  starts the script with `exec`. Reading the file in `server.ts` would lose `node --watch`'s
+  restart when `.env` changes, and tests that start `server.ts` would read a developer's file.
+  Once a variable is required (Phase 2), an unreadable file stops the API anyway, with the notice
+  just above the error.
