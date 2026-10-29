@@ -1401,6 +1401,10 @@ None for this instruction.
 - `pnpm dev` keeps watching after an environment error ("Failed running 'src/server.ts'. Waiting
   for file changes before restarting..."); saving a fixed `apps/api/.env` restarts it.
   `pnpm start` exits with code 1.
+- Node.js does not remove a UTF-8 byte order mark from `apps/api/.env`: the mark becomes part of
+  the first variable's name, so a variable on the first line of a file that an editor saved with
+  one is ignored. Next.js removes the mark. The templates begin with comments, so copies of them
+  are not affected (found in round 4 of the wave w0 review).
 - `next typegen`, which `pnpm typecheck` runs, loads the Next.js config in the build phase, so
   once a required public variable exists, type checks (and CI) need it set too.
 - Next.js prints "Failed to load next.config.ts", then the error as
@@ -1631,6 +1635,89 @@ git rm --cached --quiet .apex-probe/probe.env && rm .apex-probe/probe.env && rmd
   instruction was finished, as the log's introduction says such counts are: run again at that
   commit (`bc024e2`), `pnpm test` printed exactly `Test Files  10 passed (10)` and
   `Tests  144 passed (144)`. Today every test passes, and there are more of them.
+
+**Review fixes (wave w0, round 4)**
+
+Delta reviewed this instruction with a focus on failure modes: settings that are missing,
+unreadable or overridden, steps that fail half-way and get pasted again, first runs, and Linux CI
+against macOS. The three open items from the round-3 verification came first. Checked by running:
+the API's `dev` and `start` scripts with invalid, unreadable and shell-emptied settings (on port
+4040); Node.js's and Next.js's `.env` parsers on CRLF line ends, a byte order mark, `#`, `$`,
+`export` and quotes; the steps above in sh and zsh in scratch folders; and, in a fresh clone of
+the review branch, every "How to verify" step above (the API on port 4040 instead of 4010, also
+after pasting the set-aside command a second time), `pnpm build` (which logged "Running
+next.config.ts took 67ms") and both commit probes, which the hook refused in under a second each
+and which, with the hooks removed, left the branch and the index as they were. Fixes, each with a
+test that fails without it unless it says otherwise:
+
+- The clean-up of the steps that show the API reading `apps/api/.env` deleted the developer's
+  restored file when it was pasted again after `rmdir` had failed, for example because Finder had
+  put a `.DS_Store` into the backup folder (w0.V3.Bravo.1). The guards that kept the file when a
+  file of the developer's was already called `apps/api/.env.backup` had no test, and the text gave
+  "File exists" only one cause (w0.V3.Bravo.2). The steps now set the file aside in
+  `apps/api/.env.set-aside`, an unusual name, and leave a file `none` there when there was none:
+  the clean-up deletes the copy only while that file is there, and restores with `mv -f`, so an
+  `alias mv='mv -i'` cannot stop it or take the next pasted line as its answer. Everything the
+  first command does depends on `mkdir` creating the folder, and a symbolic link is moved aside and
+  back as it is. `build-log.test.ts` runs 7 scenarios of these steps in sh and zsh (15 tests, 5
+  before): twice each, a file that another program puts into the folder, a file of yours with the
+  folder's name, a file that holds exactly what the copy holds, a link whose target is gone, and
+  `mv`, `cp` and `rm` that ask first. It also reads the copy as Node.js does, so a template without
+  a final newline, which would join the port line to a comment, fails it. Each of 12 mutations of
+  the steps fails 2 to 10 of the tests; round 3's steps fail 6.
+- A commit that changed only `docs/BUILD_LOG.md` never ran `build-log.test.ts` in the pre-commit
+  hook (w0.V3.Bravo.3): in a scratch clone, a commit that turned the `mkdir` above into `mkdir -p`
+  went through. A seventh task in `lint-staged.config.ts` now runs that file, once, when the log is
+  staged, and in a fresh clone the same commit is refused within 3 seconds. `git-hooks.test.ts`
+  checks the task (89 tests now). The README, `vitest.config.ts`, the #2 entry and DECISIONS ("A
+  staged build log runs build-log.test.ts in the pre-commit hook") describe it.
+- The steps above that try to commit an env file could pass, or commit, for the wrong reason. The
+  round-2 one ended its commit line with a `#` comment, so pasted into zsh without
+  `interactivecomments` the commit failed on "pathspec '#' did not match", which looks like the
+  hook's refusal. And where the hooks are not installed (a new worktree before `pnpm install`),
+  both commits went through and put their `SECRET=x` file on the current branch. The comment is
+  now in the text, and `&& git reset --quiet --soft HEAD~1` takes such a commit back;
+  `build-log.test.ts` pastes both blocks into scratch repositories with a refusing hook and with
+  none (5 tests).
+- An `apps/api/.env` that the API cannot read, for example one created with `sudo`, is ignored:
+  Node.js prints ".env not found. Continuing without it.", which the README called expected, and
+  the API starts with its defaults. With `LOG_LEVEL=nonsense` in such a file, the API started on
+  port 4040 without an error. The README now says what the notice can also mean and how to check.
+  Documentation only; DECISIONS ("Node.js reports an unreadable apps/api/.env as not found; the
+  README says so") says why the scripts do not check.
+- A variable exported with an empty value wins over the `.env` files, and the apps then treat it
+  as not set: with `API_PORT=` in the shell, Node.js ignored `API_PORT=4010` in the file, so the
+  API would use its default port, without a message. The README's check, `printenv`, prints an
+  empty line for such a variable, which looks like nothing; it now suggests
+  `env | grep '^NAME='`, and both templates say that an empty value from the shell wins.
+  Documentation only.
+- The templates asked for plain `NAME=value` lines but did not say that Node.js and Next.js end
+  an unquoted value at `#`, even without a space before it (`API_HOST=a#b` reads as `a`), where
+  Docker Compose needs the space. Both templates say so now. Documentation only.
+
+Not changed: a byte order mark at the start of `apps/api/.env` hides the first variable from
+Node.js (see Notes & limitations above). Rejecting such names in `parseEnv` would be code for an
+editor setting that the templates' leading comments already sidestep.
+
+How to verify the fixes: the first command reports `Tests  20 passed (20)` on a machine with zsh
+(11 without it), and the second `Tests  1 passed | 88 skipped (89)`.
+
+```sh
+pnpm exec vitest run build-log.test.ts
+pnpm exec vitest run git-hooks.test.ts -t "build log"
+```
+
+What Node.js does with an unreadable `.env` file and with an empty variable from the shell, in a
+new scratch folder: the third line prints ".env not found. Continuing without it." and then
+`undefined`, and the last line prints `""`.
+
+```sh
+(d=$(mktemp -d) && cd "$d" || exit
+  printf 'LOG_LEVEL=nonsense\n' > .env && chmod 000 .env
+  node --env-file-if-exists=.env -p 'process.env.LOG_LEVEL'
+  chmod 600 .env && printf 'API_PORT=4010\n' > .env
+  API_PORT= node --env-file-if-exists=.env -p 'JSON.stringify(process.env.API_PORT)')
+```
 
 ## #5 - GitHub Actions CI
 
