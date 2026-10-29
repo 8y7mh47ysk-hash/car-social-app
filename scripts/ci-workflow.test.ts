@@ -192,7 +192,10 @@ describe("ci.yml", () => {
     // "Cache pnpm" (instruction 5). Without a `version` input, pnpm/action-setup installs the
     // version in package.json's packageManager, an exact version that may carry Corepack's
     // integrity hash (`+sha512.<hex>`), which the action strips. setup-node's pnpm cache asks pnpm
-    // where its store is, so pnpm must be set up first, and both before the install.
+    // where its store is, so pnpm must be set up first, and both before the install. Neither
+    // action gets other inputs: a `node-version` would win over .nvmrc, so CI would test another
+    // Node.js than developers use, and pnpm/action-setup's own `cache` would cache the store a
+    // second time (docs/DECISIONS.md, "CI is one GitHub Actions job that runs the root scripts").
     const position = (find: (step: (typeof steps)[number]) => boolean): number => {
       const index = steps.findIndex(find);
       expect(index).toBeGreaterThanOrEqual(0);
@@ -204,9 +207,9 @@ describe("ci.yml", () => {
 
     expect(pnpm).toBeLessThan(node);
     expect(node).toBeLessThan(install);
-    expect(steps[pnpm]?.with?.["version"]).toBeUndefined();
+    expect(steps[pnpm]?.with).toBeUndefined();
     expect(rootPackage.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+(?:\+sha\d+\.[\da-f]+)?$/u);
-    expect(steps[node]?.with).toMatchObject({ "node-version-file": ".nvmrc", cache: "pnpm" });
+    expect(steps[node]?.with).toEqual({ "node-version-file": ".nvmrc", cache: "pnpm" });
   });
 
   it("installs exactly what the lockfile says, then lints, type-checks, tests and builds", () => {
