@@ -1652,7 +1652,7 @@ from the repository root:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm exec vitest run --project scripts            # "Test Files  6 passed (6)", "Tests  124 passed (124)"
+pnpm exec vitest run --project scripts            # "Test Files  6 passed (6)", "Tests  132 passed (132)"
 pnpm peers check                                  # "No peer dependency issues found"
 pnpm build 2>&1 | tee build.log                   # the route table, then "Done"
 node scripts/check-build-warnings.ts build.log    # "Found no warning or error lines ...", status 0
@@ -1826,10 +1826,17 @@ How to verify, from the repository root:
 
 ```sh
 pnpm exec vitest run scripts/check-start.test.ts   # "Tests  28 passed (28)" since wave w0 round 3
+                                                    # (31 since round 4)
 pnpm build && node scripts/check-start.ts           # "Both apps started: the API answered ..."
-LOG_LEVEL=loud node scripts/check-start.ts          # "`pnpm start` exited with code 1 before
-                                                    # both apps answered.", then the API's error
+rm -r apps/api/dist && node scripts/check-start.ts  # "`pnpm start` exited with code 1 before
+                                                    # both apps answered.", then Node.js's error
+pnpm build
 ```
+
+Until round 4 of the wave w0 review the third line was `LOG_LEVEL=loud node scripts/check-start.ts`,
+which made the API refuse to start; since then the check sets `LOG_LEVEL` itself (see "Review
+fixes (wave w0, round 4)" below), so the step removes the API's build instead and the last line
+builds it again.
 
 **Review fixes (wave w0, round 2)**
 
@@ -1878,7 +1885,8 @@ pnpm 12.11.2, Docker Engine 29.9.1 and Compose 5.1.3, the runner image's version
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run scripts/check-start.test.ts workspace.test.ts   # "Tests  33 passed (33)"
+pnpm exec vitest run scripts/check-start.test.ts workspace.test.ts   # "Tests  33 passed (33)";
+                                                                     # 36 since round 4
 pnpm build
 node scripts/check-start.ts & sleep 0.2; kill -INT $!; wait $!; echo "status $?"
 # "Interrupted by SIGINT: stopped the apps." and "status 130"; if it says "Both apps started",
@@ -1950,7 +1958,8 @@ has still not run on GitHub (see Owner actions).
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run --project scripts     # "Test Files  6 passed (6)", "Tests  124 passed (124)"
+pnpm exec vitest run --project scripts     # "Test Files  6 passed (6)", "Tests  124 passed (124)";
+                                           # 132 since round 4
 pnpm exec vitest run workspace.test.ts     # "Tests  5 passed (5)"
 pnpm build
 node scripts/check-start.ts                # "Both apps started: ..."
@@ -1974,6 +1983,69 @@ NODE_ENV=staging node scripts/check-start.ts; echo "status $?"
   901 to 902 s, and 32 s more in one), and the time asleep accounts for each run's extra time. No
   time limit can absorb that, so no test changes for it; long runs need a Mac that stays awake. The
   comment in `workspace.test.ts` that put its clean-up's time-out down to swapping now says so.
+
+**Review fixes (wave w0, round 4)**
+
+Echo reviewed instructions 5 and 7 and took them over from Alpha. This round's focus was
+integration: every root script, the git hooks, CI's steps and the apps were run together, on this
+branch and on fresh clones. Each fix has a test that fails without it, checked by making the
+change it guards against:
+
+- Run before a push with `LOG_FORMAT=pretty` in `apps/api/.env`, as the README suggests for
+  development, the start check missed the API's error and fatal lines, which CI fails on: the
+  check reads them from JSON lines, and pino-pretty writes `ERROR:` and `FATAL:`. `LOG_LEVEL=error`
+  or `silent` hid the API's warnings the same way (w0.V3.Charlie.3). With the compiled API changed
+  to log an error and a fatal line as it starts, the check passed with either setting. It now
+  gives the apps `LOG_FORMAT=json` and `LOG_LEVEL=info`, the API's defaults, as it already sets
+  the hosts and ports; the same build then failed with both lines listed, whether the settings
+  came from the shell or from `apps/api/.env` (see "The start check sets the API's log format
+  and level itself" in docs/DECISIONS.md).
+- Five changes to the start check's time limits passed every test (w0.V3.Charlie.1): its deadline
+  moved back after the first two requests, the one-minute limit set to 15 or 120 s, the
+  ten-second stop limit to 2 or 30 s, a wait after SIGKILL three times the one its message names,
+  and a request limit of 5 or 8 s. A new test stubs `fetch` so that the first request to each app
+  takes 1.5 s and expects a 5-second limit to end the check after 5 to 6.5 s (with the deadline
+  moved back it took 8.1 s, moved between the two requests 6.6 s); the default limits are
+  exported and pinned; the test with a process outside the command's group gives the check a
+  2-second stop limit and expects both waits and no longer one (4 to 6 s; a doubled wait after
+  SIGKILL took 6.3 s); and the hanging-request test expects less than 4.5 s instead of 10. Under a
+  full test run in parallel, and with every core of the Mac kept busy, these three took 5.0, 4.3
+  and 2.3 s.
+- The test that keeps Node.js warnings visible to the build-log and start checks matched flags
+  with dashes only and read only the workflow's `NODE_OPTIONS` (w0.V3.Charlie.2). Node.js 24 also
+  takes `--no_warnings`, `--disable_warning` and `--redirect_warnings`, and pnpm 12 runs every
+  script with its node-options setting as `NODE_OPTIONS`, even over the environment's; `nodeOptions`
+  in `pnpm-workspace.yaml` and `pnpm_config_node_options` set it (tested in a scratch workspace,
+  where `.npmrc` and `npm_config_node_options` did not). `scripts/ci-workflow.test.ts` now reads
+  underscores as dashes and checks `pnpm_config_node_options`, every step's script (which must
+  not write to `$GITHUB_ENV` either), pnpm's own node-options setting without the machine's
+  global configuration, and every `package.json` script; ten such changes each fail it.
+- `"test": "vitest run || true"` and `"format:check": "prettier --check . || true"` passed every
+  test (w0.V3.Charlie.4), although CI must call those scripts exactly.
+  `scripts/package-scripts.test.ts` now runs the root `test`, `format:check` and `build` scripts
+  as pnpm does, with this repository's tools, on small folders whose check fails and passes.
+  Eight changes each fail it: a `|| true` on each script, a test script that runs one project or
+  none, a format check of another folder or one that rewrites files, and a build of one package.
+- The set-up test let through a `node-version` next to `node-version-file`, which makes
+  setup-node ignore `.nvmrc`, and `cache: true` on pnpm/action-setup, which caches the store a
+  second time; it now expects exactly the inputs that ci.yml gives both actions. The telemetry
+  test read only the job's env, so a step that set `NEXT_TELEMETRY_DISABLED` back to 0 passed it
+  (w0.V3.Charlie.5); it now reads every step's.
+- Docs: CI does not install "the latest Node.js 24", as the notes above and docs/DECISIONS.md
+  said. setup-node takes the newest Node.js 24 cached on the runner image (`check-latest` is
+  off): 24.22.1 in image 20261026.180.1, while 24.22.2 was the latest release. The round-1
+  integration step that provoked a failure with `LOG_LEVEL=loud` now removes the API's build
+  instead, because the check sets `LOG_LEVEL` itself.
+
+How to verify, from the repository root:
+
+```sh
+pnpm exec vitest run --project scripts     # "Test Files  6 passed (6)", "Tests  132 passed (132)"
+pnpm build
+LOG_FORMAT=pretty NODE_ENV=staging node scripts/check-start.ts; echo "status $?"
+# fails on Next.js's "⚠ You are using a non-standard "NODE_ENV" value ..." lines, "status 1"; the
+# API's lines in what the apps printed are JSON ({"level":30,...}), although the shell said pretty
+```
 
 ## #6 - Architecture and decision docs
 
@@ -2109,7 +2181,7 @@ Charlie reviewed this instruction and changed:
 pnpm run                              # lists db:migrate, db:seed, docker:up, docker:down, docker:logs
 pnpm db:migrate; echo "status $?"     # db:migrate: not available yet. ... instruction 26. ... status 1
 pnpm db:seed; echo "status $?"        # db:seed: not available yet. ... instruction 26. ... status 1
-pnpm exec vitest run --project scripts  # "Tests  124 passed (124)"
+pnpm exec vitest run --project scripts  # "Tests  132 passed (132)"
 ```
 
 Without Docker, `pnpm docker:up` prints "Docker is not installed, or the `docker` command is not
@@ -2238,7 +2310,7 @@ How to verify, from the repository root:
 
 ```sh
 pnpm exec vitest run scripts/check-docker.test.ts scripts/package-scripts.test.ts
-# "Test Files  2 passed (2)" and "Tests  46 passed (46)"; 48 since round 3
+# "Test Files  2 passed (2)" and "Tests  46 passed (46)"; 48 since round 3, 51 since round 4
 ```
 
 **Review fixes (wave w0, round 3)**
@@ -2256,6 +2328,23 @@ How to verify, from the repository root:
 
 ```sh
 pnpm exec vitest run scripts/check-docker.test.ts   # "Tests  35 passed (35)"
+```
+
+**Review fixes (wave w0, round 4)**
+
+Echo took this instruction over with instruction 5 (see there). The scripts needed no change.
+`scripts/package-scripts.test.ts` now also runs the root `test`, `format:check` and `build`
+scripts, which CI relies on, against checks that fail and pass. With the release binaries of
+Docker Compose 2.23.1 (the oldest that the Docker check lets through), 5.1.3 (the runner image's)
+and 5.6.1 (the latest), checksum-verified, `docker compose --profile '*' config --services`
+listed postgres, redis, api and web, so the `docker:down` script's every-profile form works with
+each, and `config --quiet` printed nothing. There is still no Docker on this Mac, so the scripts
+themselves ran only against the stand-in `docker` of their tests.
+
+How to verify, from the repository root:
+
+```sh
+pnpm exec vitest run scripts/package-scripts.test.ts   # "Tests  16 passed (16)"
 ```
 
 ## #8 - Structured logging with request IDs
