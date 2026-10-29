@@ -2184,7 +2184,7 @@ Keep entries brief. Details belong in code comments and the build log.
   instead of `docker-compose.yml` and merged a `docker-compose.Override.yml` on top, with every
   test and the hook passing (w0.V3.Alpha.1): Vitest's triggers are case-sensitive and never look
   inside a dot folder. APFS also folds a long s (U+017F) and a Kelvin sign (U+212A) to s and k: in
-  round 4, Compose on this Mac used a `compose.yaml` spelt with a long s.
+  round 4, Compose on the build machine (macOS) used a `compose.yaml` spelt with a long s.
 - Decision: `infra/compose.test.ts` matches the names with the regular-expression flags `i` and
   `u`, which fold letters as APFS does (under `u`, those two are the only characters outside
   ASCII that fold to an ASCII letter). `lint-staged.config.ts` gets a seventh task: a staged YAML
@@ -2218,9 +2218,9 @@ Keep entries brief. Details belong in code comments and the build log.
   (`sha256:` and 64 hex digits). The template parser fails on any line that is neither blank, a
   comment nor `NAME=value`, and on a second line for a name; its message gives the line's number,
   not its text, which could hold a secret.
-- Trade-offs: changing a timing or the placeholders' message now means changing a test too,
-  which is the friction the replaced entry chose. A digest is not checked against its tag: a
-  wrong digest under the right tag would pass, so a new one is read from the registry when it is
-  pinned (infra/README.md, "Security notes") until instruction 106's update checks do it. Only
-  the template must keep the plain form: a developer's own `.env` may use any form Compose reads,
-  and these checks never see it.
+- Trade-offs: changing a timing or the placeholders' message now means changing a test too, the
+  friction that "The compose tests accept only the settings they check" chose. A digest is not
+  checked against its tag: a wrong digest under the right tag would pass, so a new one is read
+  from the registry when it is pinned (infra/README.md, "Security notes") until instruction 106's
+  update checks do it. Only the template must keep the plain form: a developer's own `.env` may
+  use any form Compose reads, and these checks never see it.
