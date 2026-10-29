@@ -1418,6 +1418,11 @@ None for this instruction.
   them.
 - If instruction 102 switches the web app to Next.js's standalone output, its `server.js` does
   not load `next.config.ts`, so the server-variable check must move to `instrumentation.ts`.
+- Storybook's Next.js framework for Vite (instruction 22) loads `next.config.ts` too: its plugin
+  (`vite-plugin-storybook-nextjs` 10.6.5, read in round 4 of the wave w0 review) passes the dev
+  server phase when `NODE_ENV` is `development`, as in `storybook dev`, the test phase when it is
+  `test` and the build phase otherwise. So once the web app has required server variables,
+  `storybook dev` needs them as `next dev` does, unless instruction 22 makes the check skip it.
 
 **Review fixes (wave w0, round 1)**
 
