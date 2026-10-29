@@ -389,15 +389,15 @@ flowchart TB
   a URL is hidden with it. In such free text a `?` or `#` counts only when a `/` or a `*` comes
   before it in its run of text without whitespace, so "ready?" and "#12" stay readable. Every
   request target that Node.js accepts starts with `/` or `*` or holds `://`, so a quoted request
-  URL is covered, but a URL written without either, such as `example.com?key=abc` or a bare
+  URL is covered, but a URL written without any of them, such as `example.com?key=abc` or a bare
   `?code=abc`, is logged as it is. String values are cut to 8192 characters and request URLs to
-  256; object keys, and the number of keys and items, are logged as they are. Fastify's lines for a 404 and for a URL its router rejects
-  would repeat the raw URL, so the API logs them without it ("route not found", "malformed URL",
-  "route parameter too long"). Never put a secret in a log message: inside free text only URL
-  parts can be recognised. For the same reason, log the parsed fields you need, not raw bodies as
-  strings (a raw webhook body, #91, is free text to the logger) or whole objects whose keys and
-  size a client chooses, and never put a secret in a URL path, which is logged as it is: tokens in
-  links (#39, #41) go in the query string.
+  256; object keys, and the number of keys and items, are logged as they are. Fastify's lines for
+  a 404 and for a URL its router rejects would repeat the raw URL, so the API logs them without it
+  ("route not found", "malformed URL", "route parameter too long"). Never put a secret in a log
+  message: inside free text only URL parts can be recognised. For the same reason, log the parsed
+  fields you need, not raw bodies as strings (a raw webhook body, #91, is free text to the logger)
+  or whole objects whose keys and size a client chooses, and never put a secret in a URL path,
+  which is logged as it is: tokens in links (#39, #41) go in the query string.
 - **Control characters.** JSON escapes line breaks, ESC and the other C0 control characters, but
   not DEL, the C1 controls (U+0080 to U+009F), the line and paragraph separators or Unicode's
   bidirectional controls, and a client can send all of those in a header value or a JSON body.
