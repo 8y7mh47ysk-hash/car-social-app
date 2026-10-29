@@ -496,11 +496,11 @@ that fails without it:
   stylesheet, and the shipped CSS holds only the pages' classes. `globals.test.ts` keeps no list
   of utilities: it renders the root layout around the home page and checks that every class in
   the markup has a rule, and that two sentinel class names get none, one written only in the test
-  and one only in `apps/web/postcss.config.mjs`. Removing `source()`, widening it to apps/web,
-  removing the `@source not` line, a misspelt class and a colour that the theme lacks each fail
-  the test, from the repository root and from apps/web; a page that drops a class passes it
-  (docs/DECISIONS.md, "Tailwind CSS scans only the app's source; the test checks every class the
-  pages use").
+  and one only in `apps/web/postcss.config.mjs`, where the test also checks that it stays.
+  Removing `source()`, widening it to apps/web, removing the `@source not` line, a misspelt class
+  and a colour that the theme lacks each fail the test, from the repository root and from
+  apps/web; a page that drops a class passes it (docs/DECISIONS.md, "Tailwind CSS scans only the
+  app's source; the test checks every class the pages use").
 - `pnpm audit` reported 17 advisories, 5 of them high, where round 3 had ended with one: zod 4.6.5
   (GHSA-mrhx-c7xc-m3w5, high: memory exhaustion on a large array), fast-uri 3.1.8 and 4.2.2 under
   Fastify and commitlint (two moderate and two low advisories), and undici 8.11.2 under jsdom in
