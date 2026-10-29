@@ -1995,15 +1995,17 @@ Render every diagram. This needs network access; the first run downloads mermaid
 Puppeteer downloads a headless Chrome into `~/.cache/puppeteer`. From the repository root:
 
 ```sh
+out=$(mktemp -d)
 pnpm dlx --allow-build=puppeteer @mermaid-js/mermaid-cli@12.0.0 \
-  -i docs/ARCHITECTURE.md -o /tmp/architecture.md
-ls /tmp/architecture-*.svg
+  -i docs/ARCHITECTURE.md -o "$out/architecture.md"
+ls "$out"
 ```
 
-After pnpm's install output, the first command prints `Found 6 mermaid charts in Markdown input`,
-a ✅ line for each diagram and one for `/tmp/architecture.md`, and exits with code 0; `ls` lists
-`/tmp/architecture-1.svg` to `/tmp/architecture-6.svg`. Open one in a browser to look at it.
-GitHub renders the diagrams too, once the repository is there.
+The first command makes a new folder that only you can open. After pnpm's install output, the
+second prints `Found 6 mermaid charts in Markdown input`, a ✅ line for each diagram and one for
+the `architecture.md` it writes, and exits with code 0; `ls` lists `architecture-1.svg` to
+`architecture-6.svg` and `architecture.md`. Open one in a browser to look at it (on macOS,
+`open "$out/architecture-1.svg"`). GitHub renders the diagrams too, once the repository is there.
 
 Check that the decisions log kept every earlier entry (472e750 is the last commit on main before
 the Phase 0 work started), in bash or zsh:
@@ -2080,6 +2082,19 @@ Charlie reviewed this instruction and changed:
   writing to `process.stdout` or `process.stderr` directly would skip the logger. Its
   deployment notes named only one of the two start flags that a Dockerfile must keep; they
   name `--no-strip-types` too. All six diagrams still render with the command above.
+
+**Review fixes (wave w0, round 4)**
+
+Alpha reviewed this instruction and changed:
+
+- The render check wrote to fixed names in the shared `/tmp` (`/tmp/architecture.md` and
+  `/tmp/architecture-1.svg` to `-6.svg`), here and in `docs/ARCHITECTURE.md`. Every account on
+  the machine can create files there, and mermaid-cli writes with Node.js's `writeFile`, which
+  follows a symbolic link: another account could leave a link under one of those names, and the
+  check would overwrite whichever of your files it points to. The steps above now write to a new
+  folder that `mktemp -d` makes and only you can open. All six diagrams render with them.
+
+To check: run the render steps under "How to verify" above; they print what is described there.
 
 ## #7 - Developer scripts
 
@@ -2468,9 +2483,9 @@ They end with `Tests  193 passed (193)`, `Tests  4 passed | 23 skipped (27)` and
 messages for yourself, from `apps/api`:
 
 ```sh
-mv node_modules/pino-pretty /tmp/pino-pretty-link   # as a production install leaves it out
+mv node_modules/pino-pretty node_modules/.pino-pretty-aside   # as a production install leaves it out
 LOG_FORMAT=pretty node src/server.ts; echo "exit code $?"
-mv /tmp/pino-pretty-link node_modules/pino-pretty   # put it back
+mv node_modules/.pino-pretty-aside node_modules/pino-pretty   # put it back
 ```
 
 The second command prints only "LOG_FORMAT=pretty needs pino-pretty, a development dependency

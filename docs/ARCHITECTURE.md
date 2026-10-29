@@ -470,8 +470,10 @@ These are decided by later instructions, not here:
   the repository root:
 
   ```sh
+  out=$(mktemp -d)
   pnpm dlx --allow-build=puppeteer @mermaid-js/mermaid-cli@12.0.0 \
-    -i docs/ARCHITECTURE.md -o /tmp/architecture.md
+    -i docs/ARCHITECTURE.md -o "$out/architecture.md"
+  ls "$out"
   ```
 
   pnpm installs it in a temporary folder with its usual safeguards, which the repository's own
@@ -479,8 +481,10 @@ These are decided by later instructions, not here:
   the one allowed here, Puppeteer's, which downloads a headless Chrome to `~/.cache/puppeteer`
   the first time. (`npx` would take the newest version that each of the tool's roughly 200
   packages allows, however new, and run every install script.) The command writes one SVG file
-  per diagram next to the output file (`/tmp/architecture-1.svg` and so on) and exits with an
-  error on any syntax error.
+  per diagram next to the output file (`architecture-1.svg` and so on) and exits with an error on
+  any syntax error. The output goes to a new folder that `mktemp -d` makes and only you can open,
+  not to fixed names in the shared `/tmp`, where another account could have put a link that
+  sends the files over one of your own.
 
 - In sequence diagrams, write `#35;` for `#`. A bare `#` there starts a comment that silently cuts
   the rest of the label, and the check above still passes. Flowcharts are not affected.
