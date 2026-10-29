@@ -338,12 +338,12 @@ Co-Authored-By: Name <email@example.com>
   footer, so it too needs a blank line before it; reword such a line if it belongs to the body.
   So does a line that starts with one word, a space and `#`, such as `the #6 entry ...`: when a
   body line wraps there, rewrap it or write "instruction 6" instead.
-- Messages that git writes itself are accepted as they are: merges, reverts, and `fixup!`,
-  `squash!` and `amend!` commits. commitlint skips every check for any message that starts like
-  one of them, even one written by hand (`Merge branch ...`, `Revert ...`, `revert ...`,
-  `Reapply ...`), and also for `Merged ...`, `Automatic merge ...`, `Auto-merged ...` and a
-  version number on its own (`1.2.3`, `v1.2.3`, `chore: 1.2.3`). Write your own as
-  `revert: ...` or `chore(release): ...` so they are checked.
+- Messages that git or GitHub write themselves skip every check: merges (they start with
+  `Merge branch`, `Merge branches`, `Merge remote-tracking branch`, `Merge tag`, `Merge commit` or
+  `Merge pull request`), reverts (`Revert "..."`, or `Reapply "..."` for a revert that is
+  reverted) and `fixup!`, `squash!` and `amend!` commits. Only the start of a message counts, so
+  a message that you write in one of these forms is not checked either; write a revert of your
+  own as `revert: ...`. Every other message gets every check.
 
 To check a message without committing: `printf 'feat: add x\n' | pnpm exec commitlint`.
 

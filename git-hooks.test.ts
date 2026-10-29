@@ -187,11 +187,34 @@ describe("commit-msg hook", { timeout: 20_000 }, () => {
       `docs: cite the source\n\nSee https://example.com/${"u".repeat(100)}\n`,
     ],
     ["git's merge message", "Merge branch 'w0/build/alpha'\n"],
+    // How every message that git or GitHub writes begins, which commitlint.config.mjs lets through.
+    ["git's message for a merge into another branch", "Merge branch 'main' into feature\n"],
+    ["git's message for an octopus merge", "Merge branches 'a' and 'b'\n"],
+    ["git's message for pulling a remote branch", "Merge remote-tracking branch 'origin/main'\n"],
+    ["git's message for merging a tag", "Merge tag 'v1.0.0'\n"],
+    ["git's message for merging a commit", `Merge commit '${"0".repeat(40)}'\n`],
+    [
+      "GitHub's message for merging a pull request",
+      "Merge pull request #12 from owner/feature\n\nAdd the garage page\n",
+    ],
+    [
+      "git's message for finishing a merge, with its comments",
+      "Merge branch 'feature'\n\n# Conflicts:\n#\tREADME.md\n",
+    ],
     [
       "git's revert message",
       `Revert "feat(api): add the health route"\n\nThis reverts commit ${"0".repeat(40)}.\n`,
     ],
+    [
+      "git's message for reverting a revert",
+      `Reapply "feat(api): add the health route"\n\nThis reverts commit ${"0".repeat(40)}.\n`,
+    ],
     ["a fixup! commit for git rebase --autosquash", "fixup! feat(api): add the health route\n"],
+    ["a squash! commit", "squash! feat(api): add the health route\n"],
+    [
+      "an amend! commit, with its new message",
+      "amend! feat(api): add the health route\n\nfeat(api): add the health routes\n",
+    ],
     [
       "the comment lines and diff that git adds for an editor, however long",
       `feat: add the garage page\n\n# ${"c".repeat(120)}\n` +
@@ -253,6 +276,26 @@ describe("commit-msg hook", { timeout: 20_000 }, () => {
         "the #6 entry came after #7.\n",
       ["footer-leading-blank"],
     ],
+    // commitlint's own list of messages to skip, which commitlint.config.mjs replaces, let these
+    // through unchecked: it matched lines like git's anywhere in a message, and hand-written
+    // subjects that only start like git's.
+    [
+      "a body line that reads like a merge message",
+      "Feat: Add stuff.\n\nMerge the old parser into the new one.\n",
+      ["type-case", "type-enum", "subject-case", "subject-full-stop"],
+    ],
+    [
+      "a body line that names a branch as git's merge message does",
+      "feat: Add the parser\n\nMerge branch work\n",
+      ["subject-case"],
+    ],
+    [
+      "a hand-written subject that starts like a merge message",
+      "Merge the old parser into the new one\n",
+      ["type-empty", "subject-empty"],
+    ],
+    ["a hand-written revert", "revert the logger change\n", ["type-empty", "subject-empty"]],
+    ["a version number on its own", "1.2.3\n", ["type-empty", "subject-empty"]],
   ] as const)("rejects %s", async ([, message, rules], { expect }) => {
     const result = await commitMsgHook(message);
 

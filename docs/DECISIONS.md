@@ -391,6 +391,7 @@ Keep entries brief. Details belong in code comments and the build log.
   including hand-written ones. (Corrected in round 3 of the wave w0 review: commitlint's defaults
   also skip every check for `revert ...`, `Reapply ...`, `Merged ...`, `Automatic merge ...`,
   `Auto-merged ...` and a version number on its own, such as `1.2.3` or `chore: 1.2.3`.)
+- Superseded by: Commit messages skip the checks only when they start as git's own do
 
 ### PostgreSQL 18 with pgvector, from the pgvector/pgvector image
 
@@ -2166,3 +2167,29 @@ Keep entries brief. Details belong in code comments and the build log.
   looked at again. Without the fallback, the replaced entry's reason to keep to core commands
   (a small switch to Valkey) no longer applies; whether to use Redis's own modules is for the
   instructions that need them. Recording the choice is not legal advice.
+
+### Commit messages skip the checks only when they start as git's own do
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Bravo (wave w0 review, round 4)
+- Context: replaces the part of "Commit message rules" that kept commitlint's own list of
+  messages to skip. That entry and the README described the list as messages that start like
+  git's; round 3 corrected it to a longer list, still incomplete (w0.V3.Echo.2). In
+  @commitlint/is-ignored 21.2.3 (`lib/defaults.js`) the merge patterns have the `m` flag, so a line
+  such as "Merge the old parser into the new one.", "Merge branch work" or "Merge tag v1" anywhere
+  in a message skipped every check: "Feat: Add Stuff." with such a body line was committed through
+  the real hook. Hand-written subjects such as "revert the logger change", "Merged ..." and a
+  version number, also after `chore(release):` or with `[skip ci]`, were skipped too. Two messages
+  that git itself writes on `main` were rejected: an octopus merge's ("Merge branches 'a' and
+  'b'") and a merged commit's ("Merge commit '<sha>'").
+- Decision: `commitlint.config.mjs` sets `defaultIgnores: false` and its own `ignores`. A message
+  skips the checks only when it starts as git's or GitHub's do: `Merge ` followed by `branch`,
+  `branches`, `remote-tracking branch`, `tag`, `commit` or `pull request` and a space;
+  `Revert "` or `Reapply "`; or `amend! `, `fixup! ` or `squash! `. The patterns have no `m`
+  flag, so only the start of the message counts. `git-hooks.test.ts` runs a message of each form
+  through the real commit-msg hook, and five that the old list let through must now be rejected.
+  The rest of the replaced entry holds.
+- Trade-offs: a message written by hand in one of git's forms still skips the checks; only its
+  first line could tell it apart, and that is what git writes too. Messages that other tools write
+  (Bitbucket's "Merged PR ...", `npm version`'s bare version number) are now checked and rejected;
+  nothing here writes them. If git or GitHub change their wording, the hook rejects their messages
+  until the list has the new form.
