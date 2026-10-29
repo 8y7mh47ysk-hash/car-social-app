@@ -2199,3 +2199,28 @@ Keep entries brief. Details belong in code comments and the build log.
   in one place, the test. A staged `compose.yaml` no longer runs every test, only the one that
   refuses it. The names are those of the checked Compose release; a default name added by a later
   Compose must be added to the test. Windows's own case folding was not checked, only APFS's.
+
+### The compose tests pin every value but the digests, and read every line of the env template
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Charlie (wave w0 review, round 4)
+- Context: "The compose tests accept only the settings they check" asks for a test of each
+  setting's value, and infra/README.md said the checks had one, but the health-check timings,
+  the placeholders' image and commands (only a final `; exit 1` was checked) and the project name
+  had none: a 10-minute start interval, a placeholder that first runs a downloaded script or never
+  exits, and another project name, which starts PostgreSQL and Redis on new, empty volumes, all
+  passed (w0.V3.Alpha.3). The `.env.example` checks read only `NAME=value` lines, while Compose
+  also reads `export NAME=value`, `NAME = value`, `NAME: value` and indented lines, a later line
+  winning: an appended `export POSTGRES_PASSWORD=...` passed every test and, once copied to `.env`
+  as the docs say, overrode the developer's own password.
+- Decision: the tests compare the timings with the values infra/README.md gives, the placeholders'
+  commands exactly and their image with the official `alpine` image at an exact release (the same
+  for both), and the name with `apex-garage`. The image digests alone are checked for their form
+  (`sha256:` and 64 hex digits). The template parser fails on any line that is neither blank, a
+  comment nor `NAME=value`, and on a second line for a name; its message gives the line's number,
+  not its text, which could hold a secret.
+- Trade-offs: changing a timing or the placeholders' message now means changing a test too,
+  which is the friction the replaced entry chose. A digest is not checked against its tag: a
+  wrong digest under the right tag would pass, so a new one is read from the registry when it is
+  pinned (infra/README.md, "Security notes") until instruction 106's update checks do it. Only
+  the template must keep the plain form: a developer's own `.env` may use any form Compose reads,
+  and these checks never see it.
