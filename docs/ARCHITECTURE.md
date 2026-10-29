@@ -379,7 +379,10 @@ flowchart TB
   `100-continue` (417); it also closes the connection of a `CONNECT` request without answering.
   `apps/api/src/logging.test.ts` checks the 400s, the 431 and the 417.
   A route that writes its response to `reply.raw` itself, as a Server-Sent Events stream might
-  (#72), sends only the headers it writes there, so it must include `reply.getHeaders()`.
+  (#72), sends only the headers it writes there, so it must include `reply.getHeaders()`. It must
+  also call `reply.hijack()` first and return nothing: a handler that writes the headers itself
+  and then returns a value makes Fastify write them a second time, and the
+  `ERR_HTTP_HEADERS_SENT` that this throws goes unhandled, so one request stops the API.
 - **Redaction.** Before a line is written, the values of sensitive keys (passwords, tokens,
   cookies, authorization headers, API keys and similar) are replaced with `[Redacted]` at any
   depth. A request URL is logged with its credentials and everything after its first `?` or `#`

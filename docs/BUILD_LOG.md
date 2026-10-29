@@ -2598,6 +2598,12 @@ Alpha reviewed this instruction and changed:
   another account could have made a folder of that name first: the link would have gone into
   that folder, and putting it back would have failed. The steps now set it aside inside
   `node_modules`.
+- A rule for routes that write to `reply.raw` (Server-Sent Events, #72). `docs/ARCHITECTURE.md`
+  said only that such a route must include `reply.getHeaders()`. A probe route that wrote its
+  headers to `reply.raw` and then returned a value made Fastify 5.12.7 write the headers a second
+  time, and the `ERR_HTTP_HEADERS_SENT` this threw went unhandled, which in the API means a fatal
+  line and exit code 1: one request stops it. With `reply.hijack()` first, or nothing returned,
+  the same route answers with its `x-request-id`. The document now says to do both.
 
 To check the fixes, from the repository root:
 
