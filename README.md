@@ -213,17 +213,18 @@ are not checked.
   unstaged changes and untracked files are set aside while it runs and put back afterwards. In
   order, it runs ESLint with `--fix` and then Prettier on the staged files (fixes are added to the
   commit; any ESLint warning fails), `pnpm typecheck` for the whole repository when a staged file
-  is TypeScript, JSON or a pnpm workspace file, and `vitest related` for the unit tests that
-  import a staged file. When a test file is staged, it also checks that `pnpm test` runs it
-  (`test-suite.test.ts`): a test file that no Vitest project includes would never run. Staging a
-  `package.json`, a pnpm lockfile or workspace file, a tsconfig, a Vitest config or setup file, a
-  PostCSS config, a git hook or its config, the API's entrypoint (`apps/api/src/server.ts`, which
-  its tests start as a separate process), a file that tests read instead of importing
+  is TypeScript, JSON, `pnpm-lock.yaml` or `pnpm-workspace.yaml`, and `vitest related` for the
+  unit tests that import a staged file. When a test file is staged, it also checks that `pnpm test`
+  runs it (`test-suite.test.ts`): a test file that no Vitest project includes would never run.
+  Staging a `package.json`, a pnpm lockfile or workspace file, a tsconfig, a Vitest config or setup
+  file, a PostCSS config, a git hook or its config, the API's entrypoint (`apps/api/src/server.ts`,
+  which its tests start as a separate process), a file that tests read instead of importing
   (`docker-compose.yml`, an `.env.example` template, a `.gitignore`, a CI workflow,
   `eslint.config.mjs`, `.nvmrc` or `.node-version`) or another file that Docker Compose reads by
   default (such as `compose.yaml` or `docker-compose.override.yml`, which `infra/compose.test.ts`
-  refuses) runs every test instead. This README is the exception: `git-hooks.test.ts` runs the
-  recovery steps below from it, but a README change runs no tests here, only in CI. A staged env
+  refuses) runs every test instead. Two documents are exceptions: `git-hooks.test.ts` runs the
+  recovery steps below from this README, and `build-log.test.ts` runs steps from
+  `docs/BUILD_LOG.md`, but a change to either runs those tests only in CI, not here. A staged env
   file (`.env`, `.env.*`, `*.env` or `.envrc`, in any folder, dot folders such as `.devcontainer/`
   included), which only `git add --force` can stage, runs `env-files.test.ts`, which then fails the
   commit. Deleted files count as staged, so deleting a module that is still imported fails the type
