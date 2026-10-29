@@ -144,13 +144,25 @@ function stringsIn(value: unknown): string[] {
   return [];
 }
 
-/** NAME=value lines in an env file, including commented-out ones such as "# NAME=value". */
+/**
+ * The NAME=value lines of an env file, including commented-out ones such as "# NAME=value". Every
+ * other line must be blank or a comment, and each name may appear once: Compose's own parser also
+ * reads "export NAME=value", "NAME = value", "NAME: value" and indented lines, and a later line
+ * for a name wins, so such a line could set a password or COMPOSE_PROFILES behind these checks'
+ * backs. The error names the line by its number only, because the line could hold a secret.
+ */
 function envEntries(text: string): Map<string, { value: string; commented: boolean }> {
   const entries = new Map<string, { value: string; commented: boolean }>();
-  for (const line of text.split("\n")) {
+  for (const [index, line] of text.split("\n").entries()) {
+    const where = `line ${String(index + 1)} of the env file`;
     const match = /^(#\s*)?([A-Z][A-Z0-9_]*)=(.*)$/.exec(line);
     if (match?.[2] !== undefined && match[3] !== undefined) {
+      if (entries.has(match[2])) {
+        throw new Error(`${where} sets ${match[2]} a second time`);
+      }
       entries.set(match[2], { value: match[3], commented: match[1] !== undefined });
+    } else if (line !== "" && !line.startsWith("#")) {
+      throw new Error(`${where} is neither NAME=value nor a comment`);
     }
   }
   return entries;
@@ -470,13 +482,25 @@ describe("the helpers these checks use", () => {
 
   it("read set and commented-out env entries, but not prose", () => {
     const parsed = envEntries(
-      "A=1\n# B=\n#   openssl rand -hex 32\n# Prose = not a variable\nC=\n",
+      "A=1\n# B=\n#   openssl rand -hex 32\n# Prose = not a variable\n\nC=\n",
     );
     expect([...parsed]).toEqual([
       ["A", { value: "1", commented: false }],
       ["B", { value: "", commented: true }],
       ["C", { value: "", commented: false }],
     ]);
+  });
+
+  it("refuse env lines that Compose reads in other forms, without printing them", () => {
+    // Compose 5.6.1 read each of these lines as A=s3cret, and the last line for a name wins.
+    for (const line of ["export A=s3cret", "A = s3cret", "A: s3cret", "  A=s3cret", "\tA=s3cret"]) {
+      expect(() => envEntries(`A=\n${line}\n`), line).toThrow(
+        /^line 2 of the env file is neither NAME=value nor a comment$/,
+      );
+    }
+    expect(() => envEntries("A=\n# A=s3cret\n")).toThrow(
+      /^line 2 of the env file sets A a second time$/,
+    );
   });
 
   it("recognise the file names Compose reads by default, in any folder and any letter case", () => {

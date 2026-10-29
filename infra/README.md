@@ -217,7 +217,9 @@ and once the API image has a health check, `web` should wait for `service_health
   dependencies are the ones described here, the placeholders run the pinned Alpine image only to
   print their reminder and exit with an error, the project is named `apex-garage`, every image is
   pinned to an exact release and a digest, and `.env.example` lists exactly the variables the
-  file reads, with the right defaults. Every setting's value is checked, except that a digest is
+  file reads, with the right defaults, each once and as a plain `NAME=value` line (Compose also
+  reads forms such as `export NAME=value`, and a later line wins, so the checks refuse every other
+  line that is not blank or a comment). Every setting's value is checked, except that a digest is
   checked for its form only, because it changes with every rebuild of its tag: when you pin a new
   one, read it from the registry as "Security notes" says. A new setting needs a test for its
   value before the checks accept it.
