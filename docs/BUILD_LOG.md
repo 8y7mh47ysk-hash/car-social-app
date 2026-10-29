@@ -1767,7 +1767,9 @@ in `docs/DEPENDENCIES.md`.
   Node.js 24.2 or later (`import.meta.main`). CI and `.nvmrc` install the latest Node.js 24; on
   an older one the tests fail, so the checks cannot pass quietly. `engines` still allows 24.0
   (see docs/DECISIONS.md).
-  (Since the wave w0 review, `engines` requires 24.15 and `pnpm install` enforces it.)
+  (Since the wave w0 review, `engines` requires 24.15 and `pnpm install` enforces it. Corrected
+  in round 4: CI's setup-node takes the newest Node.js 24 cached on the runner image, which can
+  trail the latest release by a week, such as 24.22.1 when 24.22.2 was out.)
 - The action SHAs do not update themselves; Dependabot arrives with instruction 106.
 
 **Review fixes (wave w0, round 1)**

@@ -772,9 +772,12 @@ Keep entries brief. Details belong in code comments and the build log.
   imports them (tested).
 - Decision: keep `import.meta.main`, Node.js's own way to tell a program from an import. CI
   installs the latest Node.js 24 (`.nvmrc` says `24`; the runner image has 24.21.0), and so do
-  nvm and similar tools on developers' machines. A Node.js on which it does not work fails the
-  tests instead of passing quietly: they run both programs and expect their messages and exit
-  statuses (with the check disabled on purpose, 17 of them failed).
+  nvm and similar tools on developers' machines. (Corrected in round 4 of the wave w0 review:
+  setup-node takes the newest Node.js 24 cached on the runner image, because `check-latest` is
+  off, and GitHub updates that image weekly: 24.22.1 in image 20261026.180.1, while the latest
+  release was 24.22.2.) A Node.js on which it does not work fails the tests instead of passing
+  quietly: they run both programs and expect their messages and exit statuses (with the check
+  disabled on purpose, 17 of them failed).
 - Trade-offs: `engines` in the root `package.json` (instruction 1) still accepts Node.js 24.0 and
   24.1, which lack it; raising it to `>=24.2` would state the real minimum. That field belongs to
   instruction 1, so the change is proposed in review instead of made here. Two alternatives were
