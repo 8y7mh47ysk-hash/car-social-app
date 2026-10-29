@@ -1,4 +1,11 @@
-@import "tailwindcss";
+/* Tailwind CSS writes a rule for each class name that it finds in its sources, which are named
+   here, relative to this file, so that Next.js (which runs in apps/web) and the tests (which also
+   run from the repository root) compile the same stylesheet: the web app's source files, but not
+   its tests. Without source(), Tailwind CSS would read every file in the working folder, the docs
+   included. A package whose components use Tailwind classes, such as packages/ui (instructions
+   9-16), needs an @source line of its own. */
+@import "tailwindcss" source("..");
+@source not "../**/*.test.*";
 
 /* Placeholder styling until the design system (instructions 9-11) defines the real theme. */
 :root {
