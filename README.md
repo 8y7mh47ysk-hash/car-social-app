@@ -144,7 +144,9 @@ Settings can also live in a gitignored `.env` file next to the app: copy the app
 create one, and make the copy readable by your user only (`chmod 600`, as for the root `.env`),
 because settings can include secrets. Until `apps/api/.env` exists, the API prints Node.js's
 notice ".env not found. Continuing without it." as it starts (twice in `pnpm dev`); that is
-expected.
+expected. Node.js prints the same notice for a file that it cannot read, and the API then starts
+without the file's settings: if the notice appears although the file exists, check with
+`ls -l apps/api/.env` that it belongs to you and that you can read it.
 
 | File            | Read by                                                                 | Template                |
 | --------------- | ----------------------------------------------------------------------- | ----------------------- |
@@ -152,11 +154,13 @@ expected.
 | `apps/api/.env` | The API, in `pnpm dev` and `pnpm start`                                 | `apps/api/.env.example` |
 | `apps/web/.env` | Next.js, in `pnpm dev`, `pnpm build`, `pnpm start` and `pnpm typecheck` | `apps/web/.env.example` |
 
-Variables set in the shell win over the files: if an error names a variable that the file sets
-correctly, the shell has exported its own value (check with `printenv LOG_LEVEL`, for example,
-which prints nothing for a variable that is not set). `WEB_HOST` and `WEB_PORT` work only from
-the shell, because Next.js opens its port before it reads `.env` files. The templates explain
-each variable and the rules for adding one; the design is in
+Variables set in the shell win over the files, even with an empty value, which the apps treat as
+not set (so the default applies): if an error names a variable that the file sets correctly, or a
+setting in the file has no effect, the shell has exported its own value. For example,
+`env | grep '^LOG_LEVEL='` prints the shell's value (`LOG_LEVEL=` for an empty one) and nothing
+for a variable that is not set, and `unset LOG_LEVEL` removes it from that shell. `WEB_HOST` and
+`WEB_PORT` work only from the shell, because Next.js opens its port before it reads `.env` files.
+The templates explain each variable and the rules for adding one; the design is in
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
 The API logs one JSON object per line. To read its log in a terminal while developing, add
@@ -220,17 +224,18 @@ are not checked.
   file, a PostCSS config, a git hook or its config, the API's entrypoint (`apps/api/src/server.ts`,
   which its tests start as a separate process), a file that tests read instead of importing
   (`docker-compose.yml`, an `.env.example` template, a `.gitignore`, a CI workflow,
-  `eslint.config.mjs`, `.nvmrc` or `.node-version`) runs every test instead. Two documents are
-  exceptions: `git-hooks.test.ts` runs the recovery steps below from this README, and
-  `build-log.test.ts` runs steps from `docs/BUILD_LOG.md`, but a change to either runs those tests
-  only in CI, not here. A staged env file (`.env`, `.env.*`, `*.env` or `.envrc`, in any folder,
-  dot folders such as `.devcontainer/` included), which only `git add --force` can stage, runs
-  `env-files.test.ts`, which then fails the commit. A staged YAML file (`.yml` or `.yaml`, in any
-  letter case and any folder) runs `infra/compose.test.ts`, which fails the commit when git tracks
-  another file that Docker Compose reads by default, such as `compose.yaml` or
-  `docker-compose.override.yml` (on macOS also `Compose.YAML`). Deleted files count as staged, so
-  deleting a module that is still imported fails the type check. A failing step does not stop the
-  others, so one run shows every problem.
+  `eslint.config.mjs`, `.nvmrc` or `.node-version`) runs every test instead. A staged
+  `docs/BUILD_LOG.md` runs `build-log.test.ts`, which pastes the log's steps that set your files
+  aside or try to commit an env file into shells. This README is the exception: `git-hooks.test.ts`
+  runs the recovery steps below from it, but a README change runs no tests here, only in CI. A
+  staged env file (`.env`, `.env.*`, `*.env` or `.envrc`, in any folder, dot folders such as
+  `.devcontainer/` included), which only `git add --force` can stage, runs `env-files.test.ts`,
+  which then fails the commit. A staged YAML file (`.yml` or `.yaml`, in any letter case and any
+  folder) runs `infra/compose.test.ts`, which fails the commit when git tracks another file that
+  Docker Compose reads by default, such as `compose.yaml` or `docker-compose.override.yml` (on
+  macOS also `Compose.YAML`). Deleted files count as staged, so deleting a module that is still
+  imported fails the type check. A failing step does not stop the others, so one run shows every
+  problem.
 - **pre-merge-commit** ([`.husky/pre-merge-commit`](.husky/pre-merge-commit)) runs the same
   checks on what a merge brings in when `git merge` (or a `git pull` that merges) commits without
   conflicts; git runs pre-commit only for commits you make with `git commit`.

@@ -40,9 +40,10 @@ export default defineConfig({
       // Read from disk or through git by infra/compose.test.ts (the compose file and the root
       // template), env-files.test.ts (the ignore rules and the templates),
       // scripts/ci-workflow.test.ts (the workflows), env-access.test.ts (the ESLint config) and
-      // workspace.test.ts (the Node.js version files). README.md and docs/BUILD_LOG.md, from which
-      // git-hooks.test.ts and build-log.test.ts run steps, are left out on purpose: they change
-      // often (docs/DECISIONS.md, "README changes do not run every test"), and CI runs those tests.
+      // workspace.test.ts (the Node.js version files). README.md, which git-hooks.test.ts reads, is
+      // left out on purpose: see docs/DECISIONS.md, "README changes do not run every test". So is
+      // docs/BUILD_LOG.md, which build-log.test.ts reads: a task in lint-staged.config.ts runs only
+      // that test for it.
       `${root}docker-compose.yml`,
       `${root}**/.env.example`,
       `${root}**/.gitignore`,

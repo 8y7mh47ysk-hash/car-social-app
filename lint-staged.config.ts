@@ -64,4 +64,10 @@ export default {
   //    docker-compose.yml, whatever its folder or letter case. Unlike Vitest's rerun triggers, this
   //    pattern matches upper-case extensions and files in dot folders.
   [yamlFiles]: () => "vitest run --project infra",
+
+  // 8. build-log.test.ts pastes the build log's steps that set a developer's files aside or try to
+  //    commit an env file into shells. No test imports the log, so step 4 never picks that test
+  //    for it: run it, once, when the log is staged. The README's steps, which git-hooks.test.ts
+  //    runs, still run only in CI (docs/DECISIONS.md, "README changes do not run every test").
+  "docs/BUILD_LOG.md": () => "vitest run --project tooling build-log.test.ts",
 } satisfies Configuration;

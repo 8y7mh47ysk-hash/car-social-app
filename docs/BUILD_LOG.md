@@ -551,7 +551,9 @@ No owner actions.
   Prettier fixes are added to the commit. A failing task does not stop the others. Since the
   round-3 review, two more tasks follow: `test-suite.test.ts` once when a test file is staged, and
   `env-files.test.ts` once when an env file is staged (see #4); since the round-4 review of
-  instruction 3, a third: the infra tests once when a YAML file is staged (see #3).
+  instruction 3, a seventh: the infra tests once when a YAML file is staged (see #3); and since the
+  round-4 review of instruction 4, an eighth: `build-log.test.ts` once when `docs/BUILD_LOG.md` is
+  staged.
 - `.husky/commit-msg` runs commitlint with `commitlint.config.mjs`: Conventional Commits
   (`@commitlint/config-conventional`) plus the team rules (lowercase scope and subject, subject at
   most 72 characters, a blank line before the body and before the footer, so the
@@ -586,6 +588,7 @@ pnpm install --frozen-lockfile          # a fresh install prints ". prepare$ hus
 git config --get core.hooksPath         # prints .husky/_
 pnpm exec vitest run git-hooks.test.ts  # "Tests  103 passed (103)" since the wave w0 round-4 review
 pnpm exec vitest run git-hooks.test.ts  # "Tests  93 passed (93)" since the wave w0 round-4 review
+pnpm exec vitest run git-hooks.test.ts  # "Tests  89 passed (89)" since the wave w0 round-4 review
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
@@ -780,6 +783,7 @@ How to verify, from the repository root:
 
 ```sh
 pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  15 passed | 88 skipped (103)"
+pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  9 passed | 80 skipped (89)"
 pnpm exec vitest run typecheck.test.ts -t "root type check"  # "Tests  2 passed | 13 skipped (15)"
 ```
 
@@ -842,6 +846,7 @@ fresh clone of this round's final branch, with 610 tests, at a load average of 3
 
 ```sh
 pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 93 skipped (103)"
+pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 79 skipped (89)"
 ```
 
 No owner actions.
@@ -912,6 +917,7 @@ the zsh tests are skipped):
 
 ```sh
 pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 93 skipped (103)"
+pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 79 skipped (89)"
 pnpm exec vitest run readme.test.ts                    # "Tests  3 passed (3)"
 ```
 
@@ -1560,28 +1566,35 @@ API_PORT=99999 LOG_LEVEL=loud pnpm --filter @apex/api start
 # then pnpm reports "Command failed with exit code 1"
 ```
 
-The API reads `apps/api/.env`, and the shell wins over it. The first line sets an `apps/api/.env`
-that you already have aside, in a new folder `apps/api/.env.backup` (gitignored, like every
-`.env.*` name). If that folder already exists, because these lines ran before without the clean-up
-below, `mkdir` says "File exists" and the first backup is kept. The next two lines write a copy of
-the template that sets port 4010, only while the backup folder exists.
+The API reads `apps/api/.env`, and the shell wins over it. The first command below sets an
+`apps/api/.env` that you already have aside, in a new folder `apps/api/.env.set-aside`
+(gitignored, like every `.env.*` name), or, if you have none, leaves a file named `none` there.
+Then it writes a copy of the template that sets port 4010. It does all of this only if it can
+create the folder: if `mkdir` says "File exists", it changes nothing. Either these lines ran before
+without the clean-up below (the folder still holds what they set aside, and `apps/api/.env` is
+still their copy), or a file or folder of yours has that name: then rename yours and paste the
+lines again.
 
 ```sh
-mkdir apps/api/.env.backup && { [ ! -e apps/api/.env ] || mv apps/api/.env apps/api/.env.backup/; }
-[ -d apps/api/.env.backup ] && cp apps/api/.env.example apps/api/.env && chmod 600 apps/api/.env
-[ -d apps/api/.env.backup ] && echo "API_PORT=4010" >> apps/api/.env
+mkdir apps/api/.env.set-aside &&
+  if [ -e apps/api/.env ] || [ -L apps/api/.env ]; then mv apps/api/.env apps/api/.env.set-aside/; else touch apps/api/.env.set-aside/none; fi &&
+  cp apps/api/.env.example apps/api/.env && chmod 600 apps/api/.env && echo "API_PORT=4010" >> apps/api/.env
 pnpm --filter @apex/api dev
 ```
 
 The API logs "Server listening at http://127.0.0.1:4010", and in a second terminal
 `curl http://127.0.0.1:4010/health` prints `{"status":"ok"}`. Press Ctrl+C, then run
 `LOG_LEVEL=warn pnpm --filter @apex/api dev`: the API still answers on port 4010, but logs nothing
-for the start or for requests (those lines are at info level). Press Ctrl+C, then clean up. This
-line deletes the copy, puts your own file back if you had one and removes the backup folder; once
-that is done, it does nothing, so running it twice is safe:
+for the start or for requests (those lines are at info level). Press Ctrl+C, then clean up. These
+lines put your own file back, or delete the copy if you had none, and then remove the folder.
+Pasted again, they change nothing. If `rmdir` says "Directory not empty", another program has put
+a file into the folder (Finder's `.DS_Store`, or an editor's swap file) and the rest is already
+done: look at what is left, then delete the folder with `rm -r apps/api/.env.set-aside`.
 
 ```sh
-[ ! -d apps/api/.env.backup ] || { rm -f apps/api/.env; [ ! -e apps/api/.env.backup/.env ] || mv apps/api/.env.backup/.env apps/api/.env; rmdir apps/api/.env.backup; }
+if [ -e apps/api/.env.set-aside/.env ] || [ -L apps/api/.env.set-aside/.env ]; then mv -f apps/api/.env.set-aside/.env apps/api/.env
+elif [ -e apps/api/.env.set-aside/none ]; then rm -f apps/api/.env apps/api/.env.set-aside/none; fi
+[ ! -d apps/api/.env.set-aside ] || rmdir apps/api/.env.set-aside
 ```
 
 The web app's guard and phase checks:
@@ -1626,6 +1639,10 @@ None for this instruction.
 - `pnpm dev` keeps watching after an environment error ("Failed running 'src/server.ts'. Waiting
   for file changes before restarting..."); saving a fixed `apps/api/.env` restarts it.
   `pnpm start` exits with code 1.
+- Node.js does not remove a UTF-8 byte order mark from `apps/api/.env`: the mark becomes part of
+  the first variable's name, so a variable on the first line of a file that an editor saved with
+  one is ignored. Next.js removes the mark. The templates begin with comments, so copies of them
+  are not affected (found in round 4 of the wave w0 review).
 - `next typegen`, which `pnpm typecheck` runs, loads the Next.js config in the build phase, so
   once a required public variable exists, type checks (and CI) need it set too.
 - Next.js prints "Failed to load next.config.ts", then the error as
@@ -1639,6 +1656,11 @@ None for this instruction.
   them.
 - If instruction 102 switches the web app to Next.js's standalone output, its `server.js` does
   not load `next.config.ts`, so the server-variable check must move to `instrumentation.ts`.
+- Storybook's Next.js framework for Vite (instruction 22) loads `next.config.ts` too: its plugin
+  (`vite-plugin-storybook-nextjs` 10.6.5, read in round 4 of the wave w0 review) passes the dev
+  server phase when `NODE_ENV` is `development`, as in `storybook dev`, the test phase when it is
+  `test` and the build phase otherwise. So once the web app has required server variables,
+  `storybook dev` needs them as `next dev` does, unless instruction 22 makes the check skip it.
 
 **Review fixes (wave w0, round 1)**
 
@@ -1759,7 +1781,7 @@ How to verify the fixes:
 ```sh
 pnpm exec vitest run env-access.test.ts               # "Tests  64 passed (64)"
 pnpm exec vitest run apps/api/src/env-file.test.ts    # "Tests  6 passed (6)"
-pnpm exec vitest run git-hooks.test.ts -t "runs every test when"  # "Tests  21 passed | 55 skipped (76)"; 21 of 88 since round 3
+pnpm exec vitest run git-hooks.test.ts -t "runs every test when"  # "Tests  21 passed | 55 skipped (76)"; 21 of 88 since round 3, of 89 since round 4
 mkdir -p apps/web/src/app/probe
 printf '"use client";\n\nexport { serverEnvSchema } from "../../env/server-schema";\n' \
   > apps/web/src/app/probe/leak.tsx
@@ -1770,12 +1792,16 @@ pnpm exec eslint apps/api/src/probe.ts    # 1 error: "Use the global process. ..
 rm apps/api/src/probe.ts
 ```
 
-The hook refusing an env file (the commit fails, so nothing else you have staged is committed;
-it took as long as `pnpm test` until round 3, and takes a few seconds since):
+The hook refusing an env file: the `git commit` below fails, and the failure of
+`env-files.test.ts` ("are never committed") names `infra/probe.env`. Nothing else you have staged
+is committed; it took as long as `pnpm test` until round 3, and takes a few seconds since. If the
+commit goes through instead, the hook did not catch the file, or did not run because the hooks
+are not installed in this checkout (`pnpm install` installs them): the `git reset` on the same
+line then takes the commit back, and the last line removes the file.
 
 ```sh
 printf 'SECRET=x\n' > infra/probe.env && git add --force infra/probe.env
-git commit -m "chore: try to commit an env file"   # fails: env-files.test.ts, "are never committed"
+git commit -m "chore: try to commit an env file" && git reset --quiet --soft HEAD~1
 git rm --cached --quiet infra/probe.env && rm infra/probe.env
 ```
 
@@ -1824,7 +1850,7 @@ otherwise:
   `process.getBuiltinModule("process")` to the routes that the env lint rules let through.
 
 How to verify the fixes: these two commands report `Tests  7 passed | 81 skipped (88)` and
-`Tests  35 passed (35)`.
+`Tests  35 passed (35)` (since round 4: 7 passed of 89, and 50 passed).
 
 ```sh
 pnpm exec vitest run git-hooks.test.ts -t "env file"
@@ -1833,12 +1859,13 @@ pnpm exec vitest run env-files.test.ts build-log.test.ts
 
 The hook refusing an env file in a dot folder: the `git commit` below fails within a second or
 two, and the failure of `env-files.test.ts` names `.apex-probe/probe.env`. Nothing else you have
-staged is committed, and the last line removes the file again.
+staged is committed, and the last line removes the file again. If the commit goes through, the
+`git reset` takes it back, as above.
 
 ```sh
 mkdir .apex-probe && printf 'SECRET=x\n' > .apex-probe/probe.env
 git add --force .apex-probe/probe.env
-git commit -m "chore: try to commit an env file in a dot folder"
+git commit -m "chore: try to commit an env file in a dot folder" && git reset --quiet --soft HEAD~1
 git rm --cached --quiet .apex-probe/probe.env && rm .apex-probe/probe.env && rmdir .apex-probe
 ```
 
@@ -1851,6 +1878,92 @@ git rm --cached --quiet .apex-probe/probe.env && rm .apex-probe/probe.env && rmd
   instruction was finished, as the log's introduction says such counts are: run again at that
   commit (`bc024e2`), `pnpm test` printed exactly `Test Files  10 passed (10)` and
   `Tests  144 passed (144)`. Today every test passes, and there are more of them.
+
+**Review fixes (wave w0, round 4)**
+
+Delta reviewed this instruction with a focus on failure modes: settings that are missing,
+unreadable or overridden, steps that fail half-way and get pasted again, first runs, and Linux CI
+against macOS. The three open items from the round-3 verification came first. Checked by running:
+the API's `dev` and `start` scripts with invalid, unreadable and shell-emptied settings (on port
+4040); Node.js's and Next.js's `.env` parsers on CRLF line ends, a byte order mark, `#`, `$`,
+`export` and quotes; the steps above in sh and zsh in scratch folders; and, in a fresh clone of
+the review branch, every "How to verify" step above, with the API on port 4040 instead of 4010
+and the web app on 3040: `pnpm test` (834 tests passed), `pnpm build` (which logged "Running
+next.config.ts took 67ms"), the set-aside command also pasted a second time, the build check
+with a temporary `SESSION_SECRET` (the build succeeded without it, `next start` exited with code
+1 naming it, and with it in `apps/web/.env` served the page), and both commit probes, which the
+hook refused in under a second each and which, with the hooks removed, left the branch and the
+index as they were. Fixes, each with a test that fails without it unless it says otherwise:
+
+- The clean-up of the steps that show the API reading `apps/api/.env` deleted the developer's
+  restored file when it was pasted again after `rmdir` had failed, for example because Finder had
+  put a `.DS_Store` into the backup folder (w0.V3.Bravo.1). The guards that kept the file when a
+  file of the developer's was already called `apps/api/.env.backup` had no test, and the text gave
+  "File exists" only one cause (w0.V3.Bravo.2). The steps now set the file aside in
+  `apps/api/.env.set-aside`, an unusual name, and leave a file `none` there when there was none:
+  the clean-up deletes the copy only while that file is there, and restores with `mv -f`, so an
+  `alias mv='mv -i'` cannot stop it or take the next pasted line as its answer. Everything the
+  first command does depends on `mkdir` creating the folder, and a symbolic link is moved aside and
+  back as it is. `build-log.test.ts` runs 7 scenarios of these steps in sh and zsh (15 tests, 5
+  before): twice each, a file that another program puts into the folder, a file of yours with the
+  folder's name, a file that holds exactly what the copy holds, a link whose target is gone, and
+  `mv`, `cp` and `rm` that ask first. It also reads the copy as Node.js does, so a template without
+  a final newline, which would join the port line to a comment, fails it. Each of 12 mutations of
+  the steps fails 2 to 10 of the tests; round 3's steps fail 6.
+- A commit that changed only `docs/BUILD_LOG.md` never ran `build-log.test.ts` in the pre-commit
+  hook (w0.V3.Bravo.3): in a scratch clone, a commit that turned the `mkdir` above into `mkdir -p`
+  went through. A new task in `lint-staged.config.ts` (the eighth since the round-4 merges, after
+  instruction 3's YAML task) now runs that file, once, when the log is
+  staged, and in a fresh clone the same commit is refused within 3 seconds. `git-hooks.test.ts`
+  checks the task (89 tests now). The README, `vitest.config.ts`, the #2 entry and DECISIONS ("A
+  staged build log runs build-log.test.ts in the pre-commit hook") describe it.
+- The steps above that try to commit an env file could pass, or commit, for the wrong reason. The
+  round-2 one ended its commit line with a `#` comment, so pasted into zsh without
+  `interactivecomments` the commit failed on "pathspec '#' did not match", which looks like the
+  hook's refusal. And where the hooks are not installed (a new worktree before `pnpm install`),
+  both commits went through and put their `SECRET=x` file on the current branch. The comment is
+  now in the text, and `&& git reset --quiet --soft HEAD~1` takes such a commit back;
+  `build-log.test.ts` pastes both blocks into scratch repositories with a refusing hook and with
+  none (5 tests).
+- An `apps/api/.env` that the API cannot read, for example one created with `sudo`, is ignored:
+  Node.js prints ".env not found. Continuing without it.", which the README called expected, and
+  the API starts with its defaults. With `LOG_LEVEL=nonsense` in such a file, the API started on
+  port 4040 without an error. The README now says what the notice can also mean and how to check.
+  Documentation only; DECISIONS ("Node.js reports an unreadable apps/api/.env as not found; the
+  README says so") says why the scripts do not check.
+- A variable exported with an empty value wins over the `.env` files, and the apps then treat it
+  as not set: with `API_PORT=` in the shell, Node.js ignored `API_PORT=4010` in the file, so the
+  API would use its default port, without a message. The README's check, `printenv`, prints an
+  empty line for such a variable, which looks like nothing; it now suggests
+  `env | grep '^NAME='`, and both templates say that an empty value from the shell wins.
+  Documentation only.
+- The templates asked for plain `NAME=value` lines but did not say that Node.js and Next.js end
+  an unquoted value at `#`, even without a space before it (`API_HOST=a#b` reads as `a`), where
+  Docker Compose needs the space. Both templates say so now. Documentation only.
+
+Not changed: a byte order mark at the start of `apps/api/.env` hides the first variable from
+Node.js (see Notes & limitations above). Rejecting such names in `parseEnv` would be code for an
+editor setting that the templates' leading comments already sidestep.
+
+How to verify the fixes: the first command reports `Tests  20 passed (20)` on a machine with zsh
+(11 without it), and the second `Tests  1 passed | 88 skipped (89)`.
+
+```sh
+pnpm exec vitest run build-log.test.ts
+pnpm exec vitest run git-hooks.test.ts -t "build log"
+```
+
+What Node.js does with an unreadable `.env` file and with an empty variable from the shell, in a
+new scratch folder: the third line prints ".env not found. Continuing without it." and then
+`undefined`, and the last line prints `""`.
+
+```sh
+(d=$(mktemp -d) && cd "$d" || exit
+  printf 'LOG_LEVEL=nonsense\n' > .env && chmod 000 .env
+  node --env-file-if-exists=.env -p 'process.env.LOG_LEVEL'
+  chmod 600 .env && printf 'API_PORT=4010\n' > .env
+  API_PORT= node --env-file-if-exists=.env -p 'JSON.stringify(process.env.API_PORT)')
+```
 
 ## #5 - GitHub Actions CI
 

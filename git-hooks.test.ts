@@ -322,6 +322,7 @@ describe("pre-commit hook", { timeout: 30_000 }, () => {
   const suiteCheck = "vitest run --project tooling test-suite.test.ts";
   const envCheck = "vitest run --project tooling env-files.test.ts";
   const composeCheck = "vitest run --project infra";
+  const buildLogCheck = "vitest run --project tooling build-log.test.ts";
 
   /**
    * The stand-in for each tool: appends its name and arguments to $STUB_LOG, appends a line to
@@ -719,6 +720,27 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
 
     expect((await othersOnly.preCommit()).code).toBe(0);
     expect(await vitestCalls(othersOnly)).toEqual([`${relatedTests} ${others.join(" ")}`]);
+  });
+
+  // build-log.test.ts runs steps from docs/BUILD_LOG.md, which no test imports, so `vitest related`
+  // never picks it for the log.
+  it("runs the build log's tests once when the build log is staged, and for no other file", async () => {
+    const repo = await createRepo();
+    const docs = ["docs/BUILD_LOG.md", "docs/guide.md", "notes/docs/BUILD_LOG.md"];
+    for (const file of docs) {
+      await repo.write(file, "# Notes\n");
+    }
+    await repo.git("add", ...docs);
+
+    expect((await repo.preCommit()).code).toBe(0);
+    expect(await vitestCalls(repo)).toEqual([`${relatedTests} ${docs.join(" ")}`, buildLogCheck]);
+
+    const otherDocs = await createRepo();
+    await otherDocs.write("notes/docs/BUILD_LOG.md", "# Notes\n");
+    await otherDocs.git("add", "notes/docs/BUILD_LOG.md");
+
+    expect((await otherDocs.preCommit()).code).toBe(0);
+    expect(await vitestCalls(otherDocs)).toEqual([`${relatedTests} notes/docs/BUILD_LOG.md`]);
   });
 
   it("checks a commit that only deletes a file", async () => {

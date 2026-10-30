@@ -2368,3 +2368,46 @@ Keep entries brief. Details belong in code comments and the build log.
   from the registry when it is pinned (infra/README.md, "Security notes") until instruction 106's
   update checks do it. Only the template must keep the plain form: a developer's own `.env` may
   use any form Compose reads, and these checks never see it.
+
+### A staged build log runs build-log.test.ts in the pre-commit hook
+
+- Date: 2026-10-11 · Instruction: #2, #4 · Author: Delta (wave w0 review, round 4)
+- Context: `build-log.test.ts` (round 3 of the wave w0 review) pastes the steps in
+  `docs/BUILD_LOG.md` that set a developer's `apps/api/.env` aside into shells. It reads the log
+  from disk, which `vitest related` cannot trace, and the log was neither a rerun trigger nor
+  matched by a task, so a commit that broke those steps passed the hook (round-3 verification
+  item w0.V3.Bravo.3): the trade-off sat only in the test's header comment, and the README still
+  called itself the only such exception. "README changes do not run every test" says to revisit
+  once such tests live in a file of their own, which a task could run in seconds.
+- Decision: a seventh task in `lint-staged.config.ts` (the eighth since the round-4 merges, after
+  the YAML task of "A staged YAML file runs the compose tests, which match file names as macOS
+  does"), for the pattern `docs/BUILD_LOG.md` (with a slash, so it matches that file only), runs
+  `vitest run --project tooling build-log.test.ts` once. The log does not become a rerun
+  trigger, and the README's steps still run only in CI. `git-hooks.test.ts` checks that the task
+  runs once for the log and not for other documents or a `BUILD_LOG.md` in another folder; the
+  README, `vitest.config.ts` and BUILD_LOG #2 name it.
+- Trade-offs: a commit that stages the log, as most review rounds do, takes one to two seconds
+  longer (1.3 to 2.2 s for the file's 20 tests at load averages of 1.7 to 2.4, most of it in the
+  git commands of the tests that try to commit an env file). The pattern is one more name to keep
+  in step: a test that reads another document needs its own task or trigger. CI runs the test
+  either way, and `git commit --no-verify` still skips it.
+
+### Node.js reports an unreadable apps/api/.env as not found; the README says so
+
+- Date: 2026-10-11 · Instruction: #4 · Author: Delta (wave w0 review, round 4)
+- Context: found in round 4 of the wave w0 review. For a file it cannot read (for example one
+  that `sudo` created, owned by another user), `node --env-file-if-exists=.env` prints ".env not
+  found. Continuing without it." and goes on: with `LOG_LEVEL=nonsense` in an unreadable
+  `apps/api/.env`, the API started with its defaults and no error. The README called that notice
+  expected. Next.js instead logs "Failed to load env from .env" with the `EACCES` error, and then
+  carries on as well.
+- Decision: keep Node's flag ("The API loads apps/api/.env with Node's --env-file-if-exists"
+  still holds) and document the case: the README says that the notice also appears for a file
+  the API cannot read, which the API then ignores, and how to check it (`ls -l apps/api/.env`).
+- Trade-offs: the scripts could check first (`[ ! -e .env ] || [ -r .env ] || exit 1`), but a
+  compound command can keep the shell between pnpm and Node.js: with macOS's `sh`, a SIGTERM to
+  the script's process then stopped the shell and left Node.js running, and `production.test.ts`
+  starts the script with `exec`. Reading the file in `server.ts` would lose `node --watch`'s
+  restart when `.env` changes, and tests that start `server.ts` would read a developer's file.
+  Once a variable is required (Phase 2), an unreadable file stops the API anyway, with the notice
+  just above the error.
