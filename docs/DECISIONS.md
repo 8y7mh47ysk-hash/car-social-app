@@ -96,7 +96,9 @@ Keep entries brief. Details belong in code comments and the build log.
   to `pnpm-workspace.yaml`.
 - Decision: keep the default. Write version ranges whose lower bound is already a day old (zod
   is `^4.6.5`, which resolved to 4.6.5) and never commit an automatically added
-  `minimumReleaseAgeExclude` entry without recording why here.
+  `minimumReleaseAgeExclude` entry without recording why here. (zod was raised to `^4.6.7` in
+  round 4 of the wave w0 review, for an advisory: see "zod 4.6.7, fast-uri and undici for
+  security advisories".)
 - Trade-offs: we can be up to a day behind the newest patch release.
 
 ### pnpm workspace settings: catalogs and an explicit install-script list
@@ -391,6 +393,7 @@ Keep entries brief. Details belong in code comments and the build log.
   including hand-written ones. (Corrected in round 3 of the wave w0 review: commitlint's defaults
   also skip every check for `revert ...`, `Reapply ...`, `Merged ...`, `Automatic merge ...`,
   `Auto-merged ...` and a version number on its own, such as `1.2.3` or `chore: 1.2.3`.)
+- Superseded by: Commit messages skip the checks only when they start as git's own do
 
 ### PostgreSQL 18 with pgvector, from the pgvector/pgvector image
 
@@ -1738,6 +1741,7 @@ Keep entries brief. Details belong in code comments and the build log.
   fetches would cover both, but only after a build. The `?inline` specifier is held in a variable,
   so that TypeScript, which does not know Vite's queries, does not look it up; Zod checks what the
   import returns.
+- Superseded by: Tailwind CSS scans only the app's source; the test checks every class the pages use
 
 ### Redis reads its password from a config file that Compose writes
 
@@ -1953,6 +1957,9 @@ Keep entries brief. Details belong in code comments and the build log.
   blocks in eight entries, most of them other engineers', was out of proportion. New README blocks
   must keep comments out. Whether other documents with commented blocks, such as infra/README.md,
   move their comments out of the blocks is left to their owners; until then the README names them.
+  (Corrected in round 4 of the wave w0 review: infra/README.md's blocks lost their comments in
+  round 3, as the correction above says, so no document outside `docs/` has commented blocks and
+  the README names none.)
 
 ### A staged test file makes the hook check that a Vitest project runs it
 
@@ -2002,7 +2009,10 @@ Keep entries brief. Details belong in code comments and the build log.
   (`experimental.agentUpgrade`, `"security"` by default): it stops the first such command with
   "SecurityFatalError: Your version of Next.js is affected by a known security vulnerability" and a
   retry within five minutes continues. With a person at a terminal it offers an upgrade menu
-  instead, and in CI it does nothing.
+  instead, and in CI it does nothing. (Corrected in round 4 of the wave w0 review: a third
+  advisory against the same versions was already published, GHSA-673q-mjm6-r5xr, critical:
+  unauthenticated remote code execution in `use cache` functions that return typed arrays, first
+  fixed in 16.4.1, so 16.4.2 fixes it too.)
 - Decision: the catalog asks for `next` and `eslint-config-next` `^16.4.2` and `vitest` `^4.1.12`,
   so no install can go back to an affected release; the lockfile changes only those packages and
   their `@next/*` and `@vitest/*` parts. Next.js's check stays on: it is how this was found. Its
@@ -2013,7 +2023,9 @@ Keep entries brief. Details belong in code comments and the build log.
   to CI, `pnpm audit` is the check to run by hand. `pnpm audit` still reports one advisory:
   braces up to 3.0.3 (GHSA-vfj7-8cjw-p6xm, high: denial of service through deeply nested
   patterns), which only eslint-config-next's lint tooling uses and for which no fixed release
-  exists yet.
+  exists yet. (Corrected in round 4 of the wave w0 review: GitHub withdrew the braces advisory on
+  2026-10-23, and the advisories that `pnpm audit` reported by then were fixed in that round; see
+  "zod 4.6.7, fast-uri and undici for security advisories".)
 
 ### The engines test falls back when a frozen store cannot see new packages
 
@@ -2218,3 +2230,82 @@ Keep entries brief. Details belong in code comments and the build log.
   line break in a message or a stack, which pino-pretty keeps, still starts a new line; that
   format is for a developer's own terminal. Characters that are only invisible, such as U+200B,
   are not escaped: they neither act on a terminal nor reorder text.
+### Commit messages skip the checks only when they start as git's own do
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Bravo (wave w0 review, round 4)
+- Context: replaces the part of "Commit message rules" that kept commitlint's own list of
+  messages to skip. That entry and the README described the list as messages that start like
+  git's; round 3 corrected it to a longer list, still incomplete (w0.V3.Echo.2). In
+  @commitlint/is-ignored 21.2.3 (`lib/defaults.js`) the merge patterns have the `m` flag, so a line
+  such as "Merge the old parser into the new one.", "Merge branch work" or "Merge tag v1" anywhere
+  in a message skipped every check: "Feat: Add Stuff." with such a body line was committed through
+  the real hook. Hand-written subjects such as "revert the logger change", "Merged ..." and a
+  version number, also after `chore(release):` or with `[skip ci]`, were skipped too. Two messages
+  that git itself writes on `main` were rejected: an octopus merge's ("Merge branches 'a' and
+  'b'") and a merged commit's ("Merge commit '<sha>'").
+- Decision: `commitlint.config.mjs` sets `defaultIgnores: false` and its own `ignores`. A message
+  skips the checks only when it starts as git's or GitHub's do: `Merge ` followed by `branch`,
+  `branches`, `remote-tracking branch`, `tag`, `commit` or `pull request` and a space;
+  `Revert "` or `Reapply "`; or `amend! `, `fixup! ` or `squash! `. The patterns have no `m`
+  flag, so only the start of the message counts. `git-hooks.test.ts` runs a message of each form
+  through the real commit-msg hook, and five that the old list let through must now be rejected.
+  The rest of the replaced entry holds.
+- Trade-offs: a message written by hand in one of git's forms still skips the checks; only its
+  first line could tell it apart, and that is what git writes too. Messages that other tools write
+  (Bitbucket's "Merged PR ...", `npm version`'s bare version number) are now checked and rejected;
+  nothing here writes them. If git or GitHub change their wording, the hook rejects their messages
+  until the list has the new form.
+
+### Tailwind CSS scans only the app's source; the test checks every class the pages use
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Bravo (wave w0 review, round 4)
+- Context: replaces "The web tests compile the global stylesheet with Tailwind CSS", whose test
+  checked four utilities that the layout and the home page used (round 3 made it import both, so
+  that the pre-commit hook runs it). Unless the stylesheet names its sources, Tailwind CSS scans
+  the working folder: apps/web for `next build`, but the whole repository for `pnpm test` and the
+  hook, which run from the root. There the docs named the checked classes, so the test still passed
+  after the home page dropped one (w0.V3.Echo.3), and the test's own strings supplied two of the
+  four (w0.V3.Echo.4). The CSS that `next build` shipped held `.inline`, from the word `inline` in
+  `globals.test.ts`. A misspelt class, such as `tracking-tigth` on the home page, passed the test
+  and the hook, because the list could not see it.
+- Decision: `apps/web/src/app/globals.css` imports Tailwind CSS with `source("..")`, the app's
+  `src` folder relative to the stylesheet, and adds `@source not "../**/*.test.*"`, so Next.js,
+  Vitest and any working folder compile the same stylesheet from the app's own source files.
+  `globals.test.ts` renders the root layout around the home page and checks that every class in
+  the markup has a rule in the compiled stylesheet, and that two sentinel class names get none:
+  one written only in the test and one only in `apps/web/postcss.config.mjs`, outside `src`. The
+  rest of the replaced entry holds: Vite compiles the stylesheet through `postcss.config.mjs`, and
+  PostCSS configs are rerun triggers.
+- Trade-offs: a page can drop a class without a change to the test, which keeps no list. A class
+  that Tailwind CSS uses only to mark elements for variants (`group`, `peer`) has no rule, so a
+  page that uses one needs it left out of the check by name. Pages that a static render cannot
+  draw (async Server Components, providers) will need the test changed when they come (instruction
+  17). A package whose components use Tailwind classes, such as packages/ui, needs an `@source`
+  line in globals.css; until it has one, the test fails on the classes of its components that the
+  home page renders. The sentinel in `postcss.config.mjs` is a comment that has to stay there, in
+  backticks (Tailwind CSS ignores a class name that a full stop follows); the test checks both.
+
+### zod 4.6.7, fast-uri and undici for security advisories
+
+- Date: 2026-10-11 · Instruction: #1 · Author: Bravo (wave w0 review, round 4)
+- Context: round 3 of the wave w0 review ended with one advisory in `pnpm audit` (braces, which
+  GitHub withdrew on 2026-10-23). In round 4 it reported 17, 5 of them high. zod 4.6.5 has
+  GHSA-mrhx-c7xc-m3w5 (high): validating a large array keeps an issue for every failing element,
+  without limit, until the process runs out of memory. Every package validates with zod, and
+  instructions 27 and 28 validate request bodies with it. fast-uri 3.1.8 and 4.2.2, which Fastify
+  and (through ajv) commitlint use, have GHSA-w74x-v6f9-j3xg and GHSA-wjr9-j795-jxcr (moderate)
+  and GHSA-xhq7-xmqj-769h and GHSA-333x-w4r6-6crp (low), each against both lines. undici 8.11.2,
+  which only jsdom uses, in the web tests, has four high and four moderate advisories. The fixed
+  releases (zod 4.6.6, fast-uri 3.1.9 and 4.2.3, undici 8.12.2) are past the one-day release-age
+  hold.
+- Decision: the catalog asks for `zod` `^4.6.7`, the latest release, so that no install can go
+  back to an affected one. fast-uri and undici are not direct dependencies, and the ranges of the
+  packages that use them already allow the fixed releases, so
+  `pnpm update --recursive fast-uri undici` moved the lockfile to fast-uri 3.1.9 and 4.2.3 and
+  undici 8.12.3 and changed nothing else. `pnpm audit` then reported no known vulnerabilities.
+- Trade-offs: only the lockfile keeps fast-uri and undici on the fixed releases; an install that
+  resolves again picks the newest release in range, which can only be newer. Overrides in
+  pnpm-workspace.yaml would hold them too, but would have to be removed again by hand. Packages
+  with newer releases but no advisory (Next.js 16.4.3, React 19.3.1, typescript-eslint 8.72.1 and
+  a few others) wait for a deliberate update. `pnpm audit` stays a check to run by hand until
+  instruction 106 adds dependency scanning to CI.
