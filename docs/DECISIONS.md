@@ -2115,6 +2115,7 @@ Keep entries brief. Details belong in code comments and the build log.
   a list of forbidden settings (a merge key, `extends` or a new Compose feature gets round it),
   and running `docker compose config` in the tests (Docker is not installed everywhere the tests
   run; CI's Compose step does run it).
+- Superseded by: A staged YAML file runs the compose tests, which match file names as macOS does
 
 ### The pgvector image lags the official postgres image's security rebuilds
 
@@ -2125,8 +2126,13 @@ Keep entries brief. Details belong in code comments and the build log.
   the newest, while the official `postgres:18.6-trixie` is also rebuilt for Debian's security
   updates, last on 2026-10-21. In the round-3 review's VM, the pinned image still had packages
   that trixie's security suite has since replaced (`liblzma5` and `xz-utils` 5.8.1-1+deb13u1, not
-  +deb13u2; `libpcre2-8-0` 10.46-1~deb13u2, not ~deb13u3), which the official image already had,
-  and build tools that the official image does not ship (binutils, cpp, dpkg-dev, python3).
+  +deb13u2; `libpcre2-8-0` 10.46-1~deb13u2, not ~deb13u3), which the official image already had.
+  (Corrected in round 4 of the wave w0 review: this also said that the image ships build tools
+  that the official image does not, binutils, cpp, dpkg-dev and python3. Its build step installs
+  them and removes them again: dpkg lists them as removed with only their config files left
+  (`rc`), none of their programs is in the image, and both images have the same 145 installed
+  packages. On 2026-10-29 those differed only in `liblzma5`, `xz-utils`, `libpcre2-8-0` and
+  `tzdata` (2026c against 2026e), and the official image had been rebuilt again on 2026-10-28.)
 - Decision: keep `pgvector/pgvector`, and move the digest to each newer `0.8.x-pg18-trixie` build
   as soon as pgvector publishes one. Whether instruction 102, which builds the hardened images,
   should build this one too (the official image plus PGDG's `postgresql-18-pgvector` package,
@@ -2134,9 +2140,10 @@ Keep entries brief. Details belong in code comments and the build log.
   BUILD_LOG #3.
 - Trade-offs: until then the database container can lag Debian's security fixes by weeks; the
   ports are on 127.0.0.1 only, which limits who can reach PostgreSQL. Our own image would remove
-  the lag and the build tools but adds a Dockerfile and its builds to maintain, which the original
-  entry rejected while no Docker engine was available to build and test one. Instruction 106's
-  update checks should compare against the official image's rebuilds, not only pgvector's tags.
+  the lag (and the removed tools' leftover config files) but adds a Dockerfile and its builds to
+  maintain, which the original entry rejected while no Docker engine was available to build and
+  test one. Instruction 106's update checks should compare against the official image's
+  rebuilds, not only pgvector's tags.
 
 ### The pre-commit hook runs env-files.test.ts for an env file staged in any folder
 
@@ -2310,3 +2317,54 @@ Keep entries brief. Details belong in code comments and the build log.
   with newer releases but no advisory (Next.js 16.4.3, React 19.3.1, typescript-eslint 8.72.1 and
   a few others) wait for a deliberate update. `pnpm audit` stays a check to run by hand until
   instruction 106 adds dependency scanning to CI.
+
+### A staged YAML file runs the compose tests, which match file names as macOS does
+
+- Date: 2026-10-11 · Instruction: #2, #3 · Author: Charlie (wave w0 review, round 4)
+- Context: replaces one part of "The compose tests accept only the settings they check": the
+  check that no other file Compose reads by default is tracked matched the names in lower case
+  only, and a Vitest rerun trigger made staging one run every test. Compose looks each name up in
+  the file system, and on macOS's case-insensitive APFS, Compose 5.6.1 read a `Compose.yaml`
+  instead of `docker-compose.yml` and merged a `docker-compose.Override.yml` on top, with every
+  test and the hook passing (w0.V3.Alpha.1): Vitest's triggers are case-sensitive and never look
+  inside a dot folder. APFS also folds a long s (U+017F) and a Kelvin sign (U+212A) to s and k: in
+  round 4, Compose on the build machine (macOS) used a `compose.yaml` spelt with a long s.
+- Decision: `infra/compose.test.ts` matches the names with the regular-expression flags `i` and
+  `u`, which fold letters as APFS does (under `u`, those two are the only characters outside
+  ASCII that fold to an ASCII letter). `lint-staged.config.ts` gets a seventh task: a staged YAML
+  file (`*.{[yY][mM][lL],[yY][aA][mM][lL]}`, which lint-staged matches in every folder, dot
+  folders included) runs `vitest run --project infra` once. The trigger glob for the other names
+  leaves `vitest.config.ts`, because the test only asks git which files are tracked;
+  `docker-compose.yml` stays a trigger, because tests read it. `git-hooks.test.ts` checks the task
+  for six names, upper-case extensions and a dot folder among them. The rest of the replaced
+  entry holds: the strict schemas, the exact Redis config and the refused YAML warnings.
+- Trade-offs: every staged YAML file (a workflow, the pnpm lockfile) now runs the infra tests,
+  about a second, also when it is no Compose file: matching the extension keeps the list of names
+  in one place, the test. A staged `compose.yaml` no longer runs every test, only the one that
+  refuses it. The names are those of the checked Compose release; a default name added by a later
+  Compose must be added to the test. Windows's own case folding was not checked, only APFS's.
+
+### The compose tests pin every value but the digests, and read every line of the env template
+
+- Date: 2026-10-11 · Instruction: #3 · Author: Charlie (wave w0 review, round 4)
+- Context: "The compose tests accept only the settings they check" asks for a test of each
+  setting's value, and infra/README.md said the checks had one, but the health-check timings,
+  the placeholders' image and commands (only a final `; exit 1` was checked) and the project name
+  had none: a 10-minute start interval, a placeholder that first runs a downloaded script or never
+  exits, and another project name, which starts PostgreSQL and Redis on new, empty volumes, all
+  passed (w0.V3.Alpha.3). The `.env.example` checks read only `NAME=value` lines, while Compose
+  also reads `export NAME=value`, `NAME = value`, `NAME: value` and indented lines, a later line
+  winning: an appended `export POSTGRES_PASSWORD=...` passed every test and, once copied to `.env`
+  as the docs say, overrode the developer's own password.
+- Decision: the tests compare the timings with the values infra/README.md gives, the placeholders'
+  commands exactly and their image with the official `alpine` image at an exact release (the same
+  for both), and the name with `apex-garage`. The image digests alone are checked for their form
+  (`sha256:` and 64 hex digits). The template parser fails on any line that is neither blank, a
+  comment nor `NAME=value`, and on a second line for a name; its message gives the line's number,
+  not its text, which could hold a secret.
+- Trade-offs: changing a timing or the placeholders' message now means changing a test too, the
+  friction that "The compose tests accept only the settings they check" chose. A digest is not
+  checked against its tag: a wrong digest under the right tag would pass, so a new one is read
+  from the registry when it is pinned (infra/README.md, "Security notes") until instruction 106's
+  update checks do it. Only the template must keep the plain form: a developer's own `.env` may
+  use any form Compose reads, and these checks never see it.

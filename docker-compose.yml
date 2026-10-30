@@ -1,9 +1,12 @@
 # Local services for Apex Garage (playbook instruction 3): PostgreSQL and Redis, plus placeholders
 # for the API and web apps. How to use it: infra/README.md. Trade-offs: docs/DECISIONS.md.
 #
-#   cp .env.example .env && chmod 600 .env   # then set POSTGRES_PASSWORD and REDIS_PASSWORD
-#   docker compose up -d --wait              # starts postgres and redis only, waits until healthy
-#   docker compose ps                        # both show "(healthy)"
+# Copy the template and set POSTGRES_PASSWORD and REDIS_PASSWORD in the copy; then start postgres
+# and redis only, waiting until both are healthy, and list them ("(healthy)" for both):
+#
+#   cp .env.example .env && chmod 600 .env
+#   docker compose up -d --wait
+#   docker compose ps
 #
 # Ports are published on 127.0.0.1 only, so other machines cannot reach these services. On Linux
 # that needs Docker Engine 28 or later: older engines let machines on the same network reach them.
@@ -47,9 +50,9 @@ services:
       driver: local
 
   redis:
-    # Redis 8.10.2 on Alpine 3.23 (licence notes in docs/DECISIONS.md). The digest pins this exact
+    # Redis 8.10.3 on Alpine 3.23 (licence notes in docs/DECISIONS.md). The digest pins this exact
     # multi-platform build: always change the tag and the digest together.
-    image: redis:8.10.2-alpine3.23@sha256:0bf6577d7774e592b29d093e3ac9390eb91e13d72c21e506afce736de5e0eeb0
+    image: redis:8.10.3-alpine3.23@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537
     restart: unless-stopped
     # Redis reads its settings, the password among them, from the redis-config file (see configs
     # at the end). Keep redis-server as the first word: the image drops root privileges only when

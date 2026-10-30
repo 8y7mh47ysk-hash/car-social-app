@@ -550,7 +550,8 @@ No owner actions.
   `vitest related --run --passWithNoTests` for the tests that import a staged file. ESLint and
   Prettier fixes are added to the commit. A failing task does not stop the others. Since the
   round-3 review, two more tasks follow: `test-suite.test.ts` once when a test file is staged, and
-  `env-files.test.ts` once when an env file is staged (see #4).
+  `env-files.test.ts` once when an env file is staged (see #4); since the round-4 review of
+  instruction 3, a third: the infra tests once when a YAML file is staged (see #3).
 - `.husky/commit-msg` runs commitlint with `commitlint.config.mjs`: Conventional Commits
   (`@commitlint/config-conventional`) plus the team rules (lowercase scope and subject, subject at
   most 72 characters, a blank line before the body and before the footer, so the
@@ -561,9 +562,11 @@ No owner actions.
   tests read instead of importing: `docker-compose.yml`, an `.env.example` template, a
   `.gitignore`, a CI workflow or (since the wave w0 review) `eslint.config.mjs`; since the
   round-2 review of this instruction, a PostCSS config; since the round-3 review of this
-  instruction, `.nvmrc` and `.node-version`; and since the round-3 review of instruction 3,
-  another file that Docker Compose reads by default (`compose.yaml`, `docker-compose.override.yml`
-  and their variants), which `infra/compose.test.ts` refuses. An env file staged with
+  instruction, `.nvmrc` and `.node-version`. From the round-3 to the round-4 review of
+  instruction 3, so did another file that Docker Compose reads by default (`compose.yaml`,
+  `docker-compose.override.yml` and the other lower-case names), which `infra/compose.test.ts`
+  refuses; since round 4 a staged YAML file, in any letter case and any folder, runs only the infra
+  tests, through a lint-staged task of its own (see #3). An env file staged with
   `git add --force` ran every test from the round-2 review of instruction 4; since round 3 it runs
   only `env-files.test.ts`, through a lint-staged task of its own (see #4).
 - `git-hooks.test.ts` (54 tests): 28 commit messages through the real commit-msg hook and
@@ -582,6 +585,7 @@ Run from the repository root:
 pnpm install --frozen-lockfile          # a fresh install prints ". prepare$ husky"
 git config --get core.hooksPath         # prints .husky/_
 pnpm exec vitest run git-hooks.test.ts  # "Tests  103 passed (103)" since the wave w0 round-4 review
+pnpm exec vitest run git-hooks.test.ts  # "Tests  93 passed (93)" since the wave w0 round-4 review
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
@@ -1024,7 +1028,7 @@ Without Docker (this is what ran on the build machine):
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm exec vitest run --project infra   # "Tests  40 passed (40)" since the wave w0 review, round 3
+pnpm exec vitest run --project infra   # "Tests  46 passed (46)" since the wave w0 review, round 4
 pnpm test                              # every test passes; when #3 was finished: "Test Files  6
                                        # passed (6)" and "Tests  44 passed (44)"
 pnpm typecheck && pnpm lint            # both exit with code 0
@@ -1331,22 +1335,29 @@ JSON Schemas (Ajv 8.20.0; valid as written and after interpolation, and a misspe
   into an interactive zsh started with `zsh -f`). The blocks now hold commands only.
 - Recorded: the pinned `pgvector/pgvector` build (2026-10-01, still the newest) lacks Debian
   security updates that the official `postgres:18.6-trixie` (rebuilt 2026-10-21) has (`xz-utils`
-  and `liblzma5`, `libpcre2-8-0`) and ships build tools the official image does not. Decision:
-  "The pgvector image lags the official postgres image's security rebuilds"; owner action below.
+  and `liblzma5`, `libpcre2-8-0`). (Corrected in round 4: this also said that it ships build tools
+  the official image does not; its build removes them, and only their config files are left.)
+  Decision: "The pgvector image lags the official postgres image's security rebuilds"; owner
+  action below.
 
 How to verify the fixes:
 
 ```sh
-pnpm exec vitest run --project infra   # "Tests  40 passed (40)"
+pnpm exec vitest run --project infra   # "Tests  40 passed (40)" then; 46 since round 4
 pnpm exec vitest run --project tooling git-hooks.test.ts -t "compose"
-# "Tests  3 passed": staging docker-compose.yml, compose.yaml or docker-compose.override.yml
-# runs every test
+# "Tests  3 passed" then: staging docker-compose.yml, compose.yaml or docker-compose.override.yml
+# ran every test. Since round 4 "Tests  8 passed": docker-compose.yml still runs every test, and
+# a staged YAML file runs the infra tests (see the round-4 fixes below)
 pnpm test && pnpm typecheck && pnpm lint && pnpm format:check   # all exit with code 0
 ```
 
-With Docker, from the repository root, after the commands under "How to verify" above:
+With Docker, from the repository root, with the root `.env` set up as under "How to verify"
+above. (Corrected in round 4: this said "after the commands under "How to verify" above", whose
+last step removes the containers, so `docker compose start redis` failed with "service "redis"
+has no container to start" and nothing was checked. The first line now starts the services.)
 
 ```sh
+docker compose up -d --wait              # both services report "Healthy"
 docker compose stop redis
 # put a new password in .env as REDIS_PASSWORD, for example the output of openssl rand -hex 32
 docker compose start redis
@@ -1366,6 +1377,108 @@ Owner action: decide whether instruction 102 should build our own PostgreSQL ima
   owner; Valkey is not wanted", which supersedes "Redis 8 under its AGPLv3 option, with Valkey as
   the fallback"; the owner action above is marked done, and the `redis` row of
   docs/DEPENDENCIES.md says so. `docker-compose.yml` already pinned Redis 8 and does not change.
+
+**Review fixes (wave w0, round 4)**
+
+Charlie reviewed this instruction, took it over and followed the README and every "How to
+verify" step above literally, from a fresh clone: on the build machine, with the Docker Compose
+5.6.1 parser for macOS (SHA-256 checked against the release's `checksums.txt`), and with the
+containers in a throwaway Debian 13 VM (Lima 2.2.1 and the Debian image checked against their
+published checksums; Docker Engine 29.9.2 and Compose 5.6.1 from Docker's signed apt repository).
+
+- Fixed (docs): the Docker steps of the round-3 fixes said to run them "after the commands under
+  How to verify above", whose last step removes the containers. Run so in the VM,
+  `docker compose start redis` failed with 'service "redis" has no container to start' and
+  `docker compose ps redis` listed nothing, so nothing was checked. The block now starts the
+  services first, and then gave the documented results.
+- Fixed (open item w0.V3.Alpha.1): a committed file that Compose reads by default, in another
+  letter case (`Compose.yaml`, `docker-compose.Override.yml`), passed every test and the hook,
+  while Compose on macOS used it instead of, or on top of, `docker-compose.yml`. APFS also folds a
+  long s (U+017F) to s and a Kelvin sign (U+212A) to k: on the build machine, Compose 5.6.1 used a
+  `compose.yaml` spelt with a long s. The test matches the names with the `i` and `u` flags, and a
+  seventh pre-commit task runs the infra tests whenever a YAML file is staged, in any letter case
+  and any folder, dot folders included; Vitest's rerun triggers see neither, so the trigger glob
+  for those names left `vitest.config.ts`. In a clone of this branch, committing `Compose.YAML`,
+  `.devcontainer/compose.yaml` or `docker-compose.Override.yml` failed in about a second, and an
+  ordinary YAML file went through. Decision: "A staged YAML file runs the compose tests, which
+  match file names as macOS does".
+- Fixed (tests, open item w0.V3.Alpha.3 and one more case of it): the health-check timings, the
+  placeholders' image and commands and the project name had no test of their value, although the
+  docs said every setting had one. 14 deliberate breakages passed: a 10-minute interval, time-out
+  or start interval, 1,000 retries, no start period, a placeholder image from another registry,
+  a placeholder that first runs a downloaded script or never exits, and another project name,
+  under which PostgreSQL and Redis start on new, empty volumes. All 14 now fail a test; only the
+  images' digests are checked for their form alone.
+- Fixed (tests): the template checks read only `NAME=value` lines, but Compose also reads
+  `export NAME=value`, `NAME = value`, `NAME: value` and indented lines, and a later line wins.
+  With `export POSTGRES_PASSWORD=<value>` appended to `.env.example`, every test passed, and after
+  the documented copy to `.env`, Compose gave PostgreSQL that committed value instead of the one
+  set above it; `export COMPOSE_PROFILES=app` made a plain `docker compose up` start the
+  placeholders. Every other line that is not blank or a comment, and a second line for a name, now
+  fail the tests (7 of 7 such breakages), with the line's number but not its text. Decision: "The
+  compose tests pin every value but the digests, and read every line of the env template".
+- Fixed (security release): Redis 8.10.3 (2026-10-26) fixes a heap buffer overflow on the cluster
+  bus, which this file does not use, so it was not exposed; the version policy asks for the latest
+  release. The `redis:8.10.3-alpine3.23` build of 2026-10-26 has the same entrypoint (identical
+  SHA-256), settings, modules and Alpine 3.23.7 as the 8.10.2 build and adds `zstd-libs`; Redis's
+  licence file is unchanged. In the VM, every step under "How to verify" gave the documented
+  results with it, the server ran as the `redis` user, and a watcher running as `nobody` found the
+  password in none of 23,971 scans of every process's command line during five restarts.
+- Fixed (docs): the three commands at the top of `docker-compose.yml` had comments after them.
+  Pasted into zsh, `chmod` failed on the comment's words and Compose stopped with
+  "no such service: #". The explanations now come first, and a test keeps the commands quoted in
+  `docker-compose.yml` and `.env.example` free of comments.
+- Fixed (docs): `infra/README.md` did not say that `docker compose --profile app up` does not
+  return once the placeholders exit, or that Ctrl+C then stops PostgreSQL and Redis too (seen in
+  the VM); it now does, and says what `-d` and `-d --wait` do.
+- Fixed (docs, open item w0.V3.Alpha.2): the pinned pgvector image does not ship build tools. Its
+  build removes them; dpkg keeps only their config files, and both it and the official
+  `postgres:18.6-trixie` have the same 145 installed packages (checked in the VM). Corrected in the
+  decision "The pgvector image lags the official postgres image's security rebuilds" and in the
+  round-3 note above.
+- Checked, no change needed: in the VM, the other steps above and the commands in
+  `infra/README.md` gave the documented results: health, versions, pgvector, the refused wrong
+  password, the append-only file, Redis's command line, data across `down` and `up`, the
+  placeholders and their removal, a plain `down` breaking the next `--profile app up`, `restart`
+  keeping the old Redis password while `up -d` recreates the container with the new one, a
+  PostgreSQL password changed with `\password`, the connection URLs from the host, and both ports
+  refused on the VM's own network address. The file is valid for the Compose 5.6.1 parser and for
+  both compose-spec JSON Schemas (the compose-spec repository's and compose-go 2.16.1's, with Ajv
+  8.20.0; four deliberately invalid documents were refused). The 137 deliberate breakages of the
+  earlier rounds still fail a test wherever they apply to the file (125, eight of them rewritten
+  for the new Redis line and header; the other 12 were written for older versions of the file).
+
+How to verify the fixes:
+
+```sh
+pnpm exec vitest run --project infra   # "Tests  46 passed (46)"
+pnpm exec vitest run --project tooling git-hooks.test.ts -t "compose"   # "Tests  8 passed"
+pnpm test && pnpm typecheck && pnpm lint && pnpm format:check          # all exit with code 0
+```
+
+Then, from the repository root, check in a scratch clone that the hook refuses a file Compose
+reads by default in another letter case or in a dot folder, and lets other YAML files through:
+
+```sh
+d=$(mktemp -d) && git clone --quiet . "$d/try" && cd "$d/try" && pnpm install --frozen-lockfile
+printf 'services: {}\n' > Compose.YAML && git add Compose.YAML
+git commit -m "test: add a compose file"     # rejected: × ... is the only Compose file that ...
+git rm --quiet --cached Compose.YAML && rm Compose.YAML
+mkdir .devcontainer && printf 'services: {}\n' > .devcontainer/compose.yaml
+git add .devcontainer && git commit -m "test: add a dev container"   # rejected the same way
+git rm --quiet -r --cached .devcontainer && rm -r .devcontainer
+printf 'a: 1\n' > example.yml && git add example.yml
+git commit -m "test: add a yaml file"        # passes, after ✔ vitest run --project infra
+cd - && rm -rf "$d"
+```
+
+With Docker and the root `.env` set up as under "How to verify" above, those steps check the new
+Redis image too; to see its version:
+
+```sh
+docker compose up -d --wait
+docker compose exec redis redis-cli INFO server | grep redis_version   # redis_version:8.10.3
+```
 
 ## #4 - Typed environment loader
 

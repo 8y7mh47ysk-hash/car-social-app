@@ -24,8 +24,10 @@ const envExampleText = readFileSync(join(repoRoot, ".env.example"), "utf8");
 // and ["true"] would make a placeholder exit with status 0), network_mode: host (no port
 // publishing, so every listening port is open), build (no Dockerfile exists yet), a health check's
 // disable, or volume options that put the data elsewhere. Add a setting here only together with a
-// test for its value. Ports use the short "IP:host:container" form, volumes "source:target",
-// environments the map form and a service's configs the long form.
+// test for its value: the tests below pin every value, except that the images' digests only need
+// the right form, because a digest changes with every rebuild of its tag. Ports use the short
+// "IP:host:container" form, volumes "source:target", environments the map form and a service's
+// configs the long form.
 const healthcheckSchema = z.strictObject({
   test: z.array(z.string()),
   interval: z.string(),
@@ -142,13 +144,30 @@ function stringsIn(value: unknown): string[] {
   return [];
 }
 
-/** NAME=value lines in an env file, including commented-out ones such as "# NAME=value". */
+/** The commands that a file's comments quote: comment lines indented by three spaces or more. */
+function quotedCommands(text: string): string[] {
+  return text.split("\n").flatMap((line) => /^# {3,}(\S.*)$/.exec(line)?.[1] ?? []);
+}
+
+/**
+ * The NAME=value lines of an env file, including commented-out ones such as "# NAME=value". Every
+ * other line must be blank or a comment, and each name may appear once: Compose's own parser also
+ * reads "export NAME=value", "NAME = value", "NAME: value" and indented lines, and a later line
+ * for a name wins, so such a line could set a password or COMPOSE_PROFILES behind these checks'
+ * backs. The error names the line by its number only, because the line could hold a secret.
+ */
 function envEntries(text: string): Map<string, { value: string; commented: boolean }> {
   const entries = new Map<string, { value: string; commented: boolean }>();
-  for (const line of text.split("\n")) {
+  for (const [index, line] of text.split("\n").entries()) {
+    const where = `line ${String(index + 1)} of the env file`;
     const match = /^(#\s*)?([A-Z][A-Z0-9_]*)=(.*)$/.exec(line);
     if (match?.[2] !== undefined && match[3] !== undefined) {
+      if (entries.has(match[2])) {
+        throw new Error(`${where} sets ${match[2]} a second time`);
+      }
       entries.set(match[2], { value: match[3], commented: match[1] !== undefined });
+    } else if (line !== "" && !line.startsWith("#")) {
+      throw new Error(`${where} is neither NAME=value nor a comment`);
     }
   }
   return entries;
@@ -157,10 +176,13 @@ function envEntries(text: string): Map<string, { value: string; commented: boole
 /**
  * True for the file names Docker Compose reads without being told: compose.yaml, compose.yml,
  * docker-compose.yaml and docker-compose.yml, and each of them with ".override" before the
- * extension, which Compose merges on top. It prefers compose.yaml to docker-compose.yml.
+ * extension, which Compose merges on top. It prefers compose.yaml to docker-compose.yml. Compose
+ * looks each name up in the file system, so on a case-insensitive one, as macOS and Windows use,
+ * it also reads "Compose.YAML", and on macOS even a name with a long s (U+017F) for the s or a
+ * Kelvin sign (U+212A) for the k: with "u", "i" folds letters the same way.
  */
 function isComposeDefaultFile(path: string): boolean {
-  return /(?:^|\/)(?:docker-)?compose(?:\.override)?\.ya?ml$/.test(path);
+  return /(?:^|\/)(?:docker-)?compose(?:\.override)?\.ya?ml$/iu.test(path);
 }
 
 /** Every path in git's index: the files that are committed or staged. */
@@ -258,6 +280,29 @@ describe("docker-compose.yml", () => {
     expect(redis.image).toMatch(/^redis:\d+\.\d+\.\d+-[\w.]+@sha256:[0-9a-f]{64}$/);
   });
 
+  it("times the health checks as infra/README.md describes them", () => {
+    // Every 10 s, every second while a service starts (for up to 30 s for PostgreSQL, which may
+    // first initialise an empty volume, and 10 s for Redis), a 5 s time-out, and five failures in
+    // a row before a service counts as unhealthy. A longer interval or time-out keeps
+    // `docker compose up --wait` and the API placeholder waiting; more retries hide a broken
+    // server for longer. The next test checks the commands, and the schema above allows no other
+    // setting.
+    expect(postgres.healthcheck).toMatchObject({
+      interval: "10s",
+      timeout: "5s",
+      retries: 5,
+      start_period: "30s",
+      start_interval: "1s",
+    });
+    expect(redis.healthcheck).toMatchObject({
+      interval: "10s",
+      timeout: "5s",
+      retries: 5,
+      start_period: "10s",
+      start_interval: "1s",
+    });
+  });
+
   it("health-checks postgres over TCP and Redis with the password from its own config file", () => {
     // TCP, because a Unix-socket check would pass against the temporary server that runs during
     // first-time initialisation. CMD-SHELL, because a shell must expand the container's
@@ -315,13 +360,28 @@ describe("docker-compose.yml", () => {
     expect(web.depends_on).toEqual({ api: { condition: "service_started" } });
   });
 
-  it("keeps the app placeholders honest: each exits with an error", () => {
-    // A placeholder that exited with status 0 would look as if the app had run. Neither builds
-    // anything (the schema above allows no `build`): no Dockerfile exists yet, and instruction 102
-    // adds the images.
-    for (const [name, placeholder] of Object.entries({ api, web })) {
-      expect(placeholder.command.at(-1), name).toMatch(/; exit 1$/);
-    }
+  it("keeps the app placeholders honest: each prints its reminder and exits with an error", () => {
+    // A placeholder that exited with status 0 would look as if the app had run, and one that
+    // never exited would keep `docker compose up` waiting. Each runs only `echo` in the official
+    // alpine image, at an exact release: anything else would run next to PostgreSQL and Redis, on
+    // their network. Neither builds anything (the schema above allows no `build`): no Dockerfile
+    // exists yet, and instruction 102 adds the images.
+    expect(api.image).toMatch(/^alpine:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$/);
+    expect(web.image).toBe(api.image);
+    const reminder = (app: string) => [
+      "sh",
+      "-c",
+      `echo "Placeholder: ${app} has no image yet. Run it on the host: pnpm dev" >&2; exit 1`,
+    ];
+    expect(api.command).toEqual(reminder("the API"));
+    expect(web.command).toEqual(reminder("the web app"));
+  });
+
+  it("names the project apex-garage, which names its containers and data volumes", () => {
+    // Compose names the volumes after the project (apex-garage_postgres-data): under another name,
+    // PostgreSQL and Redis would start with new, empty volumes while the data stayed in the old
+    // ones (docs/DECISIONS.md, "A fixed Compose project name: apex-garage").
+    expect(compose.name).toBe("apex-garage");
   });
 
   it("keeps data in named volumes at the paths the images use", () => {
@@ -354,7 +414,9 @@ describe("docker-compose.yml", () => {
 
   it("is the only Compose file that Compose reads by default", () => {
     // Compose prefers a compose.yaml to this file and merges a docker-compose.override.yml on top
-    // of it, so a committed one would change what runs without any check here seeing it.
+    // of it, so a committed one would change what runs without any check here seeing it. On
+    // macOS, "Compose.yaml" does the same. The pre-commit hook runs this test whenever a YAML
+    // file is staged (lint-staged.config.ts).
     expect(trackedFiles().filter(isComposeDefaultFile)).toEqual(["docker-compose.yml"]);
   });
 });
@@ -387,6 +449,20 @@ describe(".env.example", () => {
         expect(value, name).toBe("");
       }
     }
+  });
+});
+
+describe("the commands quoted in docker-compose.yml and .env.example", () => {
+  // People paste them into a terminal, and on macOS its shell is zsh, which at its prompt passes a
+  // `#` and the words after it to the command (its interactivecomments option is off by default):
+  // `docker compose up -d --wait   # starts ...` stopped with "no such service: #".
+  it.for<[string, string]>([
+    ["docker-compose.yml", composeText],
+    [".env.example", envExampleText],
+  ])("hold no # comments in %s", ([, text]) => {
+    const commands = quotedCommands(text);
+    expect(commands.length).toBeGreaterThan(0);
+    expect(commands.filter((command) => /(?:^|\s)#/.test(command))).toEqual([]);
   });
 });
 
@@ -423,9 +499,15 @@ describe("the helpers these checks use", () => {
     expect(plainDefaults("${B:-${C}} ${D:?x} ${E-1} $${F:-1}")).toEqual([]);
   });
 
+  it("find the commands that comments quote", () => {
+    expect(
+      quotedCommands("# Prose.\n#\n#   cp a b\n#    ls   # list\n#  two spaces\n  #   x\n"),
+    ).toEqual(["cp a b", "ls   # list"]);
+  });
+
   it("read set and commented-out env entries, but not prose", () => {
     const parsed = envEntries(
-      "A=1\n# B=\n#   openssl rand -hex 32\n# Prose = not a variable\nC=\n",
+      "A=1\n# B=\n#   openssl rand -hex 32\n# Prose = not a variable\n\nC=\n",
     );
     expect([...parsed]).toEqual([
       ["A", { value: "1", commented: false }],
@@ -434,7 +516,19 @@ describe("the helpers these checks use", () => {
     ]);
   });
 
-  it("recognise the file names Compose reads by default, in any folder", () => {
+  it("refuse env lines that Compose reads in other forms, without printing them", () => {
+    // Compose 5.6.1 read each of these lines as A=s3cret, and the last line for a name wins.
+    for (const line of ["export A=s3cret", "A = s3cret", "A: s3cret", "  A=s3cret", "\tA=s3cret"]) {
+      expect(() => envEntries(`A=\n${line}\n`), line).toThrow(
+        /^line 2 of the env file is neither NAME=value nor a comment$/,
+      );
+    }
+    expect(() => envEntries("A=\n# A=s3cret\n")).toThrow(
+      /^line 2 of the env file sets A a second time$/,
+    );
+  });
+
+  it("recognise the file names Compose reads by default, in any folder and any letter case", () => {
     for (const path of [
       "compose.yaml",
       "compose.yml",
@@ -443,6 +537,15 @@ describe("the helpers these checks use", () => {
       "compose.override.yaml",
       "docker-compose.override.yml",
       "infra/compose.yaml",
+      ".devcontainer/compose.yaml",
+      // Names that Compose 5.6.1 read on macOS's case-insensitive file system in the wave w0
+      // review (round 4). The one with a long s (U+017F) replaced docker-compose.yml; the last
+      // one has a Kelvin sign (U+212A) for the k.
+      "Compose.yaml",
+      "docker-compose.Override.yml",
+      "COMPOSE.OVERRIDE.YAML",
+      "compo\u017fe.yaml",
+      "doc\u212aer-compose.override.yml",
     ]) {
       expect(isComposeDefaultFile(path), path).toBe(true);
     }
@@ -451,6 +554,10 @@ describe("the helpers these checks use", () => {
       "my-compose.yml",
       "compose.json",
       "compose.yaml.bak",
+      // A dotless i (U+0131) and a capital I with a dot (U+0130): macOS does not fold them to an
+      // "i", and neither does the check.
+      "compose.overr\u0131de.yaml",
+      "compose.overr\u0130de.yaml",
     ]) {
       expect(isComposeDefaultFile(path), path).toBe(false);
     }

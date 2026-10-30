@@ -13,7 +13,7 @@ Docker.
 | Service    | What                                                         | Host address     | Data volume     |
 | ---------- | ------------------------------------------------------------ | ---------------- | --------------- |
 | `postgres` | PostgreSQL 18.6 with the pgvector 0.8.7 extension available  | `127.0.0.1:5432` | `postgres-data` |
-| `redis`    | Redis 8.10.2, password required, append-only file on         | `127.0.0.1:6379` | `redis-data`    |
+| `redis`    | Redis 8.10.3, password required, append-only file on         | `127.0.0.1:6379` | `redis-data`    |
 | `api`      | Placeholder in the `app` profile: prints a reminder, exits 1 | none             | none            |
 | `web`      | Placeholder in the `app` profile: prints a reminder, exits 1 | none             | none            |
 
@@ -153,6 +153,11 @@ The `api` and `web` services are in the `app` profile, so a plain `docker compos
 Neither app has a container image yet: run both on the host with `pnpm dev`.
 `docker compose --profile app up` starts PostgreSQL and Redis, waits until they are healthy, and
 then each placeholder prints that reminder and exits with status 1. They are never restarted.
+The command itself does not return: it stays attached to the output of PostgreSQL and Redis until
+you press Ctrl+C, which stops those two as well (start them again with
+`docker compose up -d --wait`). With `-d` it returns at once, and
+`docker compose --profile app logs api web` shows the reminders; with `-d --wait` it fails with
+"container ... exited (1)", because the placeholders exit.
 
 Remove them with the profile as well: `docker compose --profile app down`. A plain
 `docker compose down` only handles the services outside a profile, so it leaves both exited
@@ -208,13 +213,21 @@ and once the API image has a health check, `web` should wait for `service_health
 - `pnpm test` includes `infra/compose.test.ts`, static checks that need no Docker. The file may
   hold only the services and settings the checks know (so no `env_file`, `extends`, `include`,
   `entrypoint`, `network_mode`, YAML merge key and so on), and the repository no other file that
-  Compose reads by default, such as a `compose.yaml` or a `docker-compose.override.yml`. Within
-  that: only `postgres` and `redis` start by default, ports stay on `127.0.0.1`, passwords have
-  no default and stay off command lines, PostgreSQL comes from the pgvector image, Redis's config
-  file holds exactly its password and the append-only setting, the health checks, environments,
-  ports and dependencies are the ones described here, the placeholders exit with an error,
-  images are pinned, and `.env.example` lists exactly the variables the file reads, with the
-  right defaults. A new setting needs a test for its value before the checks accept it.
+  Compose reads by default, such as a `compose.yaml` or a `docker-compose.override.yml`, in any
+  letter case (on macOS, Compose also reads a `Compose.YAML`); the pre-commit hook runs these
+  checks whenever a YAML file is staged. Within that: only `postgres` and `redis` start by
+  default, ports stay on `127.0.0.1`, passwords have no default and stay off command lines,
+  PostgreSQL comes from the pgvector image, Redis's config file holds exactly its password and the
+  append-only setting, the health checks (commands and timings), environments, ports and
+  dependencies are the ones described here, the placeholders run the pinned Alpine image only to
+  print their reminder and exit with an error, the project is named `apex-garage`, every image is
+  pinned to an exact release and a digest, and `.env.example` lists exactly the variables the
+  file reads, with the right defaults, each once and as a plain `NAME=value` line (Compose also
+  reads forms such as `export NAME=value`, and a later line wins, so the checks refuse every other
+  line that is not blank or a comment). Every setting's value is checked, except that a digest is
+  checked for its form only, because it changes with every rebuild of its tag: when you pin a new
+  one, read it from the registry as "Security notes" says. A new setting needs a test for its
+  value before the checks accept it.
 
 ## What comes next
 
