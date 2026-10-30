@@ -79,6 +79,18 @@ const rootScripts = rootPackage.scripts;
 /** pnpm's own commands that CI runs; any other `pnpm <name>` must be a root package.json script. */
 const PNPM_COMMANDS = new Set(["install", "peers"]);
 
+/**
+ * Node.js flags that hide its warnings: all of them, its deprecation warnings, the ones it names,
+ * or all of them sent to a file instead of stderr.
+ */
+const WARNING_FLAGS = /--(?:no-warnings|no-deprecation|disable-warning|redirect-warnings)\b/u;
+
+/**
+ * Whether `text`, a NODE_OPTIONS value or a script, holds a flag that hides Node.js warnings.
+ * Node.js also takes underscores for the dashes in a flag's name, as in `--no_warnings`.
+ */
+const hidesWarnings = (text: string): boolean => WARNING_FLAGS.test(text.replaceAll("_", "-"));
+
 describe.each(workflows)("$file", ({ text, workflow }) => {
   const jobs = Object.values(workflow.jobs);
   const steps = jobs.flatMap((job) => job.steps);
@@ -180,7 +192,10 @@ describe("ci.yml", () => {
     // "Cache pnpm" (instruction 5). Without a `version` input, pnpm/action-setup installs the
     // version in package.json's packageManager, an exact version that may carry Corepack's
     // integrity hash (`+sha512.<hex>`), which the action strips. setup-node's pnpm cache asks pnpm
-    // where its store is, so pnpm must be set up first, and both before the install.
+    // where its store is, so pnpm must be set up first, and both before the install. Neither
+    // action gets other inputs: a `node-version` would win over .nvmrc, so CI would test another
+    // Node.js than developers use, and pnpm/action-setup's own `cache` would cache the store a
+    // second time (docs/DECISIONS.md, "CI is one GitHub Actions job that runs the root scripts").
     const position = (find: (step: (typeof steps)[number]) => boolean): number => {
       const index = steps.findIndex(find);
       expect(index).toBeGreaterThanOrEqual(0);
@@ -192,9 +207,9 @@ describe("ci.yml", () => {
 
     expect(pnpm).toBeLessThan(node);
     expect(node).toBeLessThan(install);
-    expect(steps[pnpm]?.with?.["version"]).toBeUndefined();
+    expect(steps[pnpm]?.with).toBeUndefined();
     expect(rootPackage.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+(?:\+sha\d+\.[\da-f]+)?$/u);
-    expect(steps[node]?.with).toMatchObject({ "node-version-file": ".nvmrc", cache: "pnpm" });
+    expect(steps[node]?.with).toEqual({ "node-version-file": ".nvmrc", cache: "pnpm" });
   });
 
   it("installs exactly what the lockfile says, then lints, type-checks, tests and builds", () => {
@@ -219,14 +234,21 @@ describe("ci.yml", () => {
   });
 
   it("turns off Next.js's telemetry for every step", () => {
+    // Set once for the job; a step's own env could set it back.
     for (const job of Object.values(ci.workflow.jobs)) {
       expect(job.env?.["NEXT_TELEMETRY_DISABLED"]).toBe("1");
+      for (const step of job.steps) {
+        expect(step.env?.["NEXT_TELEMETRY_DISABLED"] ?? "1", step.name).toBe("1");
+      }
     }
   });
 
   it("never hides Node.js warnings, which the build-log and start checks fail on", () => {
-    // NODE_NO_WARNINGS=1, or NODE_OPTIONS with one of these flags, would keep every Node.js
-    // warning out of the output that those checks read, and CI would pass them.
+    // NODE_NO_WARNINGS=1, or NODE_OPTIONS with a flag that hides warnings, would keep Node.js's
+    // warnings out of the output that those checks read, and CI would pass them. pnpm also reads
+    // its node-options setting, which it passes to every script as NODE_OPTIONS, from
+    // pnpm_config_node_options. A step's script can set either for itself, or for every later step
+    // by writing it to $GITHUB_ENV, which no step here needs.
     const envs = [
       ci.workflow.env,
       ...Object.values(ci.workflow.jobs).flatMap((job) => [
@@ -234,11 +256,58 @@ describe("ci.yml", () => {
         ...job.steps.map((s) => s.env),
       ]),
     ];
-    for (const env of envs) {
-      expect(env?.["NODE_NO_WARNINGS"]).toBeUndefined();
-      expect(String(env?.["NODE_OPTIONS"] ?? "")).not.toMatch(
-        /--(?:no-warnings|no-deprecation|disable-warning|redirect-warnings)\b/u,
-      );
+    for (const [name, value] of envs.flatMap((env) => Object.entries(env ?? {}))) {
+      expect(name).not.toBe("NODE_NO_WARNINGS");
+      if (/^(?:NODE_OPTIONS|pnpm_config_node_options)$/iu.test(name)) {
+        expect(hidesWarnings(String(value)), `${name}: ${String(value)}`).toBe(false);
+      }
+    }
+    for (const run of runs) {
+      expect(run).not.toMatch(/\bNODE_NO_WARNINGS\b|\bGITHUB_ENV\b/u);
+      expect(hidesWarnings(run), run).toBe(false);
+    }
+  });
+
+  it("gets no flag that hides Node.js warnings from pnpm's node-options setting", () => {
+    // pnpm runs every script with its node-options setting as NODE_OPTIONS, even over a
+    // NODE_OPTIONS of the environment, and pnpm-workspace.yaml can set it (`nodeOptions`). pnpm is
+    // asked for the setting as CI's runner sees it: without an outer pnpm's settings or this
+    // machine's global pnpm configuration.
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => !/^(?:npm|pnpm)_config_/iu.test(name)),
+    );
+    const result = spawnSync("pnpm", ["config", "get", "node-options"], {
+      cwd: repoRoot,
+      env: { ...env, XDG_CONFIG_HOME: temporaryDirectory("apex-pnpm-config-") },
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(hidesWarnings(result.stdout), result.stdout).toBe(false);
+  });
+
+  it("builds and starts the apps with package scripts that hide no Node.js warnings", () => {
+    // `pnpm build` and `pnpm start` run the packages' own scripts, so a flag or NODE_NO_WARNINGS
+    // there would hide the warnings of `next build`, `next start` or the API from those checks.
+    const manifests = spawnSync("git", ["ls-files", "-z", "--", "package.json", "*/package.json"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    })
+      .stdout.split("\0")
+      .filter((file) => file !== "");
+    const scripts = manifests.flatMap((file) =>
+      Object.values(
+        z
+          .object({ scripts: z.record(z.string(), z.string()).default({}) })
+          .parse(JSON.parse(readFileSync(join(repoRoot, file), "utf8"))).scripts,
+      ),
+    );
+
+    expect(manifests).toContain("apps/web/package.json");
+    for (const script of scripts) {
+      expect(script).not.toMatch(/\bNODE_NO_WARNINGS\b/u);
+      expect(hidesWarnings(script), script).toBe(false);
     }
   });
 

@@ -7,7 +7,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, it, vi, type TestContext } from "vitest";
 
-import { checkStart } from "./check-start.ts";
+import {
+  checkStart,
+  REQUEST_TIMEOUT_MS,
+  START_TIMEOUT_MS,
+  STOP_TIMEOUT_MS,
+} from "./check-start.ts";
 
 // Runs the start check against a stand-in for `pnpm start`: a Node.js script that serves the two
 // apps' answers on WEB_PORT and API_PORT, or misbehaves in the ways its first argument names. The
@@ -31,6 +36,8 @@ const WARNING =
  * configuration it cannot serve; "log-warn" logs an info line and then a warning as the API does
  * (JSON lines, with pnpm's prefix); "exit" prints an error and exits with code 3; "stubborn" ignores
  * SIGTERM; "error-on-stop" prints an error line on SIGTERM, as pnpm does for the apps it stops.
+ * Unless it exits, it then prints the addresses it listens on and the API's logging settings that
+ * it was given (LOG_FORMAT and LOG_LEVEL).
  * Two modes start a helper process and add its process ID to the file: "escaped", one that leaves
  * the process group but keeps the output open for 30 s, and "left-behind", one that stays in the
  * group and ignores SIGTERM but does not hold the output. The stand-in and its helpers end by
@@ -99,6 +106,7 @@ if (modes.has("log-warn")) {
 
 const apiHost = process.env.API_HOST ?? "127.0.0.1";
 const webHost = process.env.WEB_HOST ?? "127.0.0.1";
+const logging = \`\${process.env.LOG_FORMAT} lines at level \${process.env.LOG_LEVEL}\`;
 createServer((request, response) => {
   response.writeHead(modes.has("health-503") ? 503 : 200, { "content-type": "application/json" });
   response.end(JSON.stringify({ status: modes.has("bad-health") ? "starting" : "ok" }));
@@ -117,6 +125,7 @@ if (!modes.has("no-web")) {
   }).listen(Number(process.env.WEB_PORT), webHost);
 }
 console.log(\`stand-in started: the API on \${apiHost}, the web app on \${webHost}\`);
+console.log(\`stand-in logging: \${logging}\`);
 `;
 
 /** The context's onTestFinished, which also works for tests that run concurrently. */
@@ -243,10 +252,16 @@ async function checkStandIn(
 const apiUrl = (port: number): string => `the API (GET http://127.0.0.1:${String(port)}/health)`;
 const webUrl = (port: number): string => `the web app (GET http://127.0.0.1:${String(port)}/)`;
 
-/** What the check says when a process outside the command's group holds the output. */
-const ESCAPED =
-  "The apps' output was still open 1 s after SIGKILL: a process outside the command's " +
-  "process group holds it, and may still be running.";
+/**
+ * What the check says when a process outside the command's group holds the output, `stopSeconds`
+ * after SIGKILL.
+ */
+const escaped = (stopSeconds: number): string =>
+  `The apps' output was still open ${String(stopSeconds)} s after SIGKILL: a process outside ` +
+  "the command's process group holds it, and may still be running.";
+
+/** The same, with the 1-second stop limit that most tests give the check. */
+const ESCAPED = escaped(1);
 
 describe("checkStart", { timeout: 20_000 }, () => {
   it("passes when both apps answer on the ports it gives them, and stops them", async ({
@@ -280,6 +295,24 @@ describe("checkStart", { timeout: 20_000 }, () => {
     );
   });
 
+  it("has the API log JSON lines at level info, whatever LOG_FORMAT and LOG_LEVEL say", async ({
+    onTestFinished,
+  }) => {
+    // The README suggests LOG_FORMAT=pretty in apps/api/.env, whose "ERROR:" and "FATAL:" lines the
+    // check cannot tell from other text, and LOG_LEVEL=error or silent would leave warnings out;
+    // CI's API logs JSON lines at level info, the default.
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
+    vi.stubEnv("LOG_FORMAT", "pretty");
+    vi.stubEnv("LOG_LEVEL", "silent");
+
+    const { result } = await checkStandIn("ok", onTestFinished);
+
+    expect(result.problem, result.output).toBeUndefined();
+    expect(result.output).toContain("stand-in logging: json lines at level info");
+  });
+
   it("fails at once when the command stops before both apps answer, keeping its output", async ({
     onTestFinished,
   }) => {
@@ -295,6 +328,52 @@ describe("checkStart", { timeout: 20_000 }, () => {
     );
     expect(result.output).toContain("the API failed to start");
     expect(seconds).toBeLessThan(7.5);
+  });
+
+  it("counts its time limit from the start of the command, the first requests included", async ({
+    onTestFinished,
+  }) => {
+    // Here the first request to each app takes 1.5 s (fetch is stubbed), the web app never
+    // answers and the apps get 5 s. Counted from the start, the limit ends the check after 5 s and
+    // a little more; counted from after the first two requests, after 8 s at the earliest. The stub
+    // replaces fetch for this whole file, so this test must stay in a suite that runs its tests one
+    // at a time, as this one does.
+    const realFetch = globalThis.fetch;
+    const asked = new Set<string>();
+    const slowFirstRequests = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        const url = input instanceof Request ? input.url : input.toString();
+        if (!asked.has(url)) {
+          asked.add(url);
+          await sleep(1_500);
+        }
+        return realFetch(input, init);
+      });
+    onTestFinished(() => {
+      slowFirstRequests.mockRestore();
+    });
+
+    const { result, seconds } = await checkStandIn("no-web", onTestFinished, {
+      timeoutMs: 5_000,
+      stopTimeoutMs: 1_000,
+    });
+
+    expect(result.problem).toMatch(/^After 5 s, the web app \(.+\) did not answer \(.+\)\.$/u);
+    expect(asked.size).toBe(2);
+    expect(seconds).toBeGreaterThanOrEqual(5);
+    expect(seconds).toBeLessThan(6.5);
+  });
+
+  it("gives the apps a minute, ten seconds after each stop signal and 2 s for each request", () => {
+    // The limits that docs/DECISIONS.md and docs/BUILD_LOG.md promise ("within a minute", "ten
+    // seconds later"). The other tests give the check shorter ones, except for the request limit,
+    // which they measure (see "gives up on a request that gets no answer").
+    expect({ START_TIMEOUT_MS, STOP_TIMEOUT_MS, REQUEST_TIMEOUT_MS }).toEqual({
+      START_TIMEOUT_MS: 60_000,
+      STOP_TIMEOUT_MS: 10_000,
+      REQUEST_TIMEOUT_MS: 2_000,
+    });
   });
 
   it("fails, and kills the apps, when they do not stop within its time limit after SIGTERM", async ({
@@ -320,14 +399,19 @@ describe("checkStart", { timeout: 20_000 }, () => {
     onTestFinished,
   }) => {
     // SIGKILL reaches only the command's process group. A process that left it, but still holds
-    // the output, would otherwise keep the check waiting until it ended.
-    const started = Date.now();
-    const { result, running } = await checkStandIn("escaped", onTestFinished);
+    // the output, would otherwise keep the check waiting until it ended (30 s here). The check
+    // waits its stop limit after SIGTERM and again after SIGKILL: with a 2-second limit, 4 s and a
+    // little more, where a wait after SIGKILL twice as long would take 6 s or more.
+    const { result, seconds, running } = await checkStandIn("escaped", onTestFinished, {
+      timeoutMs: 2_000,
+      stopTimeoutMs: 2_000,
+    });
 
-    expect(result.problem).toBe(ESCAPED);
-    expect(result.stopProblem).toBe(ESCAPED);
+    expect(result.problem).toBe(escaped(2));
+    expect(result.stopProblem).toBe(escaped(2));
     expect(running).toBe(false);
-    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(seconds).toBeGreaterThanOrEqual(4);
+    expect(seconds).toBeLessThan(6);
   });
 
   it("kills the processes that the command leaves behind in its group", async ({
@@ -485,14 +569,15 @@ describe.concurrent("checkStart, when an app answers wrongly", { timeout: 20_000
     onTestFinished,
   }) => {
     // Each request may take 2 s, so the check ends at most one request and one pause after its
-    // own 2-second limit.
-    const started = Date.now();
-    const { result } = await checkStandIn("web-hang", onTestFinished);
+    // own 2-second limit: in less than 4.5 s, where requests that may take 5 s would keep it
+    // waiting for more than 5.
+    const { result, seconds } = await checkStandIn("web-hang", onTestFinished);
 
     expect(result.problem).toMatch(
       /^After 2 s, the web app \(GET http:\/\/127\.0\.0\.1:\d+\/\) did not answer \(.+\)\.$/u,
     );
-    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(seconds).toBeGreaterThanOrEqual(2);
+    expect(seconds).toBeLessThan(4.5);
   });
 
   it("reports every problem, one per line: no answer, then no stop on SIGTERM", async ({
