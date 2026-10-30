@@ -1,4 +1,15 @@
 # git runs this hook instead of pre-commit when `git merge` (or a `git pull` that merges) makes a
 # merge commit without conflicts. It runs the same checks on what the merge brings in. A merge that
 # stops with conflicts is finished with `git commit`, which runs pre-commit.
+#
+# git has already written the merge's tree when it runs this hook, so a fix that a task stages
+# (ESLint's or Prettier's) would miss the merge commit and stay staged after it. When the tasks
+# change what is staged, the hook stops the merge instead, and `git commit` finishes it with the
+# fixes, checking everything again.
+merged=$(git write-tree)
 . "$(dirname "$0")/pre-commit"
+if [ "$(git write-tree)" != "$merged" ]; then
+  echo "The checks changed files that the merge brings in, and git would leave those fixes out" \
+    "of the merge commit. They are staged: run git commit to finish the merge with them." >&2
+  exit 1
+fi

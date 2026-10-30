@@ -2183,7 +2183,8 @@ Keep entries brief. Details belong in code comments and the build log.
   (an owner action in BUILD_LOG #3, w0.I0.12 in the review log). In a message of 2026-10-22 the
   owner chose Redis 8, accepted its AGPL-3.0 licence and said that Valkey is not wanted.
 - Decision: Redis 8 stays, as `docker-compose.yml` pins it (`redis:8.10.2-alpine3.23` at its
-  digest), used unmodified under its AGPLv3 option in a container of its own. Valkey is no longer
+  digest; since round 4 of the review `redis:8.10.3-alpine3.23`, the security release, whose
+  `LICENSE.txt` is identical: see BUILD_LOG #3, round 4), used unmodified under its AGPLv3 option in a container of its own. Valkey is no longer
   the fallback; using it would need a new decision by the owner. The rest of the replaced entry
   holds: the apps only talk to Redis over its protocol, and `maxmemory-policy` stays `noeviction`
   for BullMQ.
@@ -2436,3 +2437,25 @@ Keep entries brief. Details belong in code comments and the build log.
   pino-pretty's text (its format is meant for people and changes with its options, and
   `LOG_LEVEL` would still hide lines), and refusing to run while either variable says something
   else (the README's own advice would then stop the pre-push check).
+
+### A merge whose checks fix a file stops, so that git commit adds the fixes
+
+- Date: 2026-10-11 · Instruction: #2 · Author: Integrator (wave w0, round 4)
+- Context: "Merge commits that git makes run the pre-commit checks" runs the pre-commit tasks from
+  `.husky/pre-merge-commit`. git has already written the merge's tree when it runs that hook, so
+  a fix that ESLint or Prettier stages there misses the merge commit and stays staged after it.
+  Found while integrating round 4: the union merges of `docs/DECISIONS.md` twice joined two
+  entries without a blank line; Prettier added it, `git merge` committed the tree without it, and
+  the fix was left staged on `main`. A merge commit could therefore hold unformatted files and
+  fail CI's format check while every local check passed.
+- Decision: `.husky/pre-merge-commit` notes the merge's tree (`git write-tree`) before the tasks
+  and compares it afterwards. If the tasks changed what is staged, it prints why and fails, so git
+  stops the merge ("Not committing merge") with the fixes staged, and `git commit` finishes it,
+  running the pre-commit checks on everything the merge brings in, as after any failed check
+  ("A commit that finishes a merge checks everything the merge brings in"). A test in
+  `git-hooks.test.ts` merges with a fixing stand-in and checks that the merge stops and that
+  `git commit` then records the fix; without the comparison the merge commit lacks the fix.
+- Trade-offs: a merge that needs a fix takes one more command and runs the checks twice.
+  Committing the fix in the hook is not possible: git ignores the index the hook leaves for the
+  merge commit, and making a commit of its own inside the hook would split one merge into two
+  commits.

@@ -239,7 +239,9 @@ are not checked.
   problem.
 - **pre-merge-commit** ([`.husky/pre-merge-commit`](.husky/pre-merge-commit)) runs the same
   checks on what a merge brings in when `git merge` (or a `git pull` that merges) commits without
-  conflicts; git runs pre-commit only for commits you make with `git commit`.
+  conflicts; git runs pre-commit only for commits you make with `git commit`. git has already
+  written the merge's content by then, so if ESLint or Prettier fixes a file, the hook stops the
+  merge with the fixes staged: run `git commit` to finish it with them.
 - **commit-msg** ([`.husky/commit-msg`](.husky/commit-msg)) checks the message with commitlint
   (see "Commit messages").
 

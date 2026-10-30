@@ -372,9 +372,9 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
     readonly shell: (script: string, mode: ShellMode) => Promise<Result>;
     /**
      * Runs `git merge --no-ff --no-edit <branch>` and returns its result. The options name a
-     * stand-in that fails.
+     * stand-in that fixes files or fails.
      */
-    readonly merge: (branch: string, options?: { fail?: string }) => Promise<Result>;
+    readonly merge: (branch: string, options?: { fix?: string; fail?: string }) => Promise<Result>;
     /**
      * Runs `git commit --no-edit`, which finishes a merge that stopped, and returns its result.
      * The options name a stand-in that fails.
@@ -491,8 +491,12 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
         mode === "pasted-zsh"
           ? pasteIntoZsh(root, env, script)
           : run("sh", mode === "script" ? ["-e", "-c", script] : ["-c", script], root, env),
-      merge: (branch, { fail = "" } = {}) =>
-        run("git", ["merge", "--no-ff", "--no-edit", branch], root, { ...env, STUB_FAIL: fail }),
+      merge: (branch, { fix = "", fail = "" } = {}) =>
+        run("git", ["merge", "--no-ff", "--no-edit", branch], root, {
+          ...env,
+          STUB_FIX: fix,
+          STUB_FAIL: fail,
+        }),
       finishMerge: ({ fail = "" } = {}) =>
         run("git", ["commit", "--no-edit"], root, { ...env, STUB_FAIL: fail }),
       calls: async () =>
@@ -858,6 +862,29 @@ if [ "$name" = "\${STUB_BLOCK-}" ]; then exec sleep 60; fi
       expect(await repo.git("rev-parse", "HEAD")).toBe(before);
       expect(await repo.status()).toEqual(["M  src/util.ts"]);
       await repo.git("merge", "--abort");
+      expect(await repo.status()).toEqual([]);
+    });
+
+    // git has written the merge's tree before it runs pre-merge-commit, so a fix that a task
+    // stages would miss the merge commit and stay staged after it.
+    it("stops the merge when a check fixes a file, so that git commit adds the fix", async () => {
+      const repo = await prepareMerge();
+      const before = await repo.git("rev-parse", "HEAD");
+
+      const result = await repo.merge("feature", { fix: "prettier" });
+
+      expect(result.code).not.toBe(0);
+      expect(result.output).toContain("The checks changed files that the merge brings in");
+      expect(result.output).toContain("Not committing merge");
+      expect(await repo.git("rev-parse", "HEAD")).toBe(before);
+      expect(await repo.status()).toEqual(["M  src/util.ts"]);
+      await repo.git("rev-parse", "--quiet", "--verify", "MERGE_HEAD");
+
+      const finished = await repo.finishMerge();
+
+      expect(finished.code, finished.output).toBe(0);
+      expect((await repo.git("log", "-1", "--format=%p")).trim().split(" ")).toHaveLength(2);
+      expect(await repo.git("show", "HEAD:src/util.ts")).toBe("export const util = 2;\nfixed\n");
       expect(await repo.status()).toEqual([]);
     });
   });
