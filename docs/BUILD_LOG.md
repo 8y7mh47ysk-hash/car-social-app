@@ -533,6 +533,8 @@ commit through the hook, passed. Then run `git checkout apps/web/src/app/page.ts
 This round's tests change two counts that other entries quote: `pnpm --filter @apex/web test` gives
 49 tests (instruction 4 says 47 since round 2), and `git-hooks.test.ts` has 103 tests, so
 `-t "runs every test when"` gives 21 of 103 and `-t "env file"` 7 of 103 (instruction 4 says 88).
+(After the round-4 merges: 110 tests, 19 of 110 and 7 of 110; see "Integration fixes (wave w0,
+round 4)" under #2.)
 No owner actions.
 
 ## #2 - Git hooks and conventional commits
@@ -586,9 +588,7 @@ Run from the repository root:
 ```sh
 pnpm install --frozen-lockfile          # a fresh install prints ". prepare$ husky"
 git config --get core.hooksPath         # prints .husky/_
-pnpm exec vitest run git-hooks.test.ts  # "Tests  103 passed (103)" since the wave w0 round-4 review
-pnpm exec vitest run git-hooks.test.ts  # "Tests  93 passed (93)" since the wave w0 round-4 review
-pnpm exec vitest run git-hooks.test.ts  # "Tests  89 passed (89)" since the wave w0 round-4 review
+pnpm exec vitest run git-hooks.test.ts  # "Tests  110 passed (110)" since the wave w0 round-4 review
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
@@ -713,7 +713,7 @@ instruction 4 and two merge tests from the round's integration (see below). How 
 the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts   # "Tests  64 passed (64)"; 103 since the round-4 review
+pnpm exec vitest run git-hooks.test.ts   # "Tests  64 passed (64)"; 110 since the round-4 review
 ```
 
 To see a merge stopped by the checks, in a scratch clone (a branch committed with `--no-verify`
@@ -782,8 +782,7 @@ Found while merging the round's five branches, and from the reviewers' hand-offs
 How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  15 passed | 88 skipped (103)"
-pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  9 passed | 80 skipped (89)"
+pnpm exec vitest run git-hooks.test.ts -t "merge"            # "Tests  16 passed | 94 skipped (110)"
 pnpm exec vitest run typecheck.test.ts -t "root type check"  # "Tests  2 passed | 13 skipped (15)"
 ```
 
@@ -845,8 +844,7 @@ fresh clone of this round's final branch, with 610 tests, at a load average of 3
 4.7 to 5.1 s). How to verify, from the repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 93 skipped (103)"
-pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 79 skipped (89)"
+pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 100 skipped (110)"
 ```
 
 No owner actions.
@@ -916,8 +914,7 @@ How to verify, from the repository root (the counts are those on a machine with 
 the zsh tests are skipped):
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 93 skipped (103)"
-pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 79 skipped (89)"
+pnpm exec vitest run git-hooks.test.ts -t "stopped"   # "Tests  10 passed | 100 skipped (110)"
 pnpm exec vitest run readme.test.ts                    # "Tests  3 passed (3)"
 ```
 
@@ -982,13 +979,16 @@ rejected. Fixes, each with a test that fails without it:
   `build-log.test.ts` runs steps from `docs/BUILD_LOG.md`, so a change there runs those tests in
   CI only, too; both now say so (whether the hook should run them is instruction 4's open item
   w0.V3.Bravo.3). The section also called `pnpm-lock.yaml` a pnpm workspace file. Documentation
-  only.
+  only. (Superseded at the round-4 merge: instruction 4's review added a task that runs
+  `build-log.test.ts` when the log is staged, so the README is again the only such document; see
+  "Integration fixes (wave w0, round 4)" below.)
 
 `git-hooks.test.ts` now has 103 tests (88 before), so the counts of the commands above that run it
-are updated. How to verify, from the repository root:
+are updated (110 after the round-4 merges, which the commands give). How to verify, from the
+repository root:
 
 ```sh
-pnpm exec vitest run git-hooks.test.ts -t "commit-msg"   # "Tests  43 passed | 60 skipped (103)"
+pnpm exec vitest run git-hooks.test.ts -t "commit-msg"   # "Tests  43 passed | 67 skipped (110)"
 printf 'Feat: Add stuff.\n\nMerge the old parser into the new one.\n' | pnpm exec commitlint
 # exit code 1, with [type-case], [type-enum], [subject-case] and [subject-full-stop]
 ```
@@ -1001,6 +1001,57 @@ the machine: a documentation change 0.9 to 1.0 s (1.9 s the first time), a chang
 `packages/shared/src/health.ts`, whose related tests include the production build test, 7.6 to
 10.3 s, and a change that runs every test 40.5 to 41.1 s. The README's figures are from the
 round-3 integration. No owner actions.
+
+**Integration fixes (wave w0, round 4)**
+
+- The merges brought together three branches' changes to the hooks: the commit-message forms that
+  skip the checks, from this review; the task for staged YAML files, from the review of
+  instruction 3, which also removed the trigger for other Compose file names and two of its
+  tests; and the task for a staged build log, from the review of instruction 4. In
+  `lint-staged.config.ts` the YAML task is the seventh and the build-log task the eighth (each
+  branch had added a seventh); the "What changed" list above, #4's round-4 note and DECISIONS give
+  the merged order. The README's "Git hooks" section, which two branches had rewritten, keeps both
+  changes and again names the README as the only document whose tests run only in CI.
+- A merge commit could leave out a fix that the checks made (w0.I4.1). git writes the merge's tree
+  before it runs pre-merge-commit, so a fix that ESLint or Prettier stages there missed the merge
+  commit and stayed staged after it. It happened twice in this integration: the union merges of
+  `docs/DECISIONS.md` joined two entries without a blank line, Prettier added it, and the merge
+  commits went in without it. `.husky/pre-merge-commit` now compares the staged tree before and
+  after the tasks and stops the merge when they changed it, with the fixes staged; `git commit`
+  finishes it with them (docs/DECISIONS.md, "A merge whose checks fix a file stops, so that git
+  commit adds the fixes"). A new test in `git-hooks.test.ts` fails without the comparison: the
+  merge commit lacked the fix, which stayed staged.
+- `git-hooks.test.ts` has 110 tests (103 on this review's branch, 93 on instruction 3's, 89 on
+  instruction 4's, plus the test above), and every command in this log that runs it gives the
+  merged count.
+- Run times measured again on `main` after the merges, with 891 tests, in a fresh clone,
+  committing from a non-interactive shell, three rounds of each at a load average of 1.6 to 5.8: a
+  documentation change 1.0 to 1.3 s, a change to `docs/BUILD_LOG.md` 2.3 to 2.4 s, a change to
+  `packages/shared/src/health.ts` 6.6 to 7.2 s, a change to `apps/api/src/lib/redact.ts`, whose
+  related tests start the API, 20.6 to 21.7 s, and a change that runs every test 41.1 to 44.1 s.
+  The README gives these figures.
+
+How to verify, from the repository root:
+
+```sh
+pnpm exec vitest run git-hooks.test.ts -t "adds the fix"   # "Tests  1 passed | 109 skipped (110)"
+```
+
+To see a merge stopped for a fix, in a scratch clone (the branch's commit skips the hooks, so its
+Markdown file lacks the blank line that Prettier adds):
+
+```sh
+d=$(mktemp -d) && git clone -q . "$d" && cd "$d" && pnpm install --frozen-lockfile --offline > /dev/null
+git switch -q -c probe && printf '# Probe\nText.\n' > probe.md && git add probe.md
+git commit -q --no-verify -m "docs: add a probe" && git switch -q main
+git merge --no-ff --no-edit probe   # "The checks changed files that the merge brings in ...",
+                                    # then "Not committing merge", exit code 1
+git commit --no-edit                # finishes the merge
+git show HEAD:probe.md              # "# Probe", a blank line, "Text."
+cd - && rm -rf "$d"
+```
+
+No owner actions.
 
 ## #3 - Docker Compose services
 
@@ -1041,7 +1092,8 @@ pnpm typecheck && pnpm lint            # both exit with code 0
 ```
 
 With Docker installed (see Owner actions; Docker is not installed on the build machine, so these
-were not run there; the reviews ran them in Linux VMs, see the review fixes below):
+were not run there; the reviews ran them in Linux VMs, see the review fixes below; since the
+round-4 integration they have also run under Docker Desktop there):
 
 ```sh
 cp .env.example .env && chmod 600 .env   # then set POSTGRES_PASSWORD and REDIS_PASSWORD;
@@ -1110,9 +1162,10 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
 
 **Owner actions**
 
-- Install Docker on the development Mac: Docker Desktop (free for personal use and for
-  businesses with fewer than 250 employees and under $10 million revenue) or OrbStack (free for
-  personal, non-commercial use; business use needs its paid Pro plan). Then run
+- Done by 2026-10-30 (Docker Desktop; see "Integration fixes (wave w0, round 4)"): install Docker
+  on the development Mac: Docker Desktop (free for personal use and for businesses with fewer
+  than 250 employees and under $10 million revenue) or OrbStack (free for personal,
+  non-commercial use; business use needs its paid Pro plan). Then run
   `cp .env.example .env && chmod 600 .env`, set both passwords, run `docker compose up -d --wait`
   (or `pnpm docker:up`, from instruction 7) and check that `docker compose ps` shows both
   services healthy. The commands under "How to verify" check the rest.
@@ -1129,7 +1182,8 @@ Reasons and alternatives are in `docs/DEPENDENCIES.md` and `docs/DECISIONS.md`.
   file was checked with the real Compose parser, the JSON Schema and the tests above; the health
   check commands were checked against the images' entrypoints, the PostgreSQL documentation and
   a Redis source build. The reviews then ran the containers in Linux VMs (see the review fixes
-  below); they have not yet run under Docker Desktop or OrbStack (owner action).
+  below); they have not yet run under Docker Desktop or OrbStack (owner action). (Since the
+  round-4 integration they have run under Docker Desktop on the build machine; see there.)
 - The apps do not use PostgreSQL or Redis yet; that starts in Phase 2. Connection URLs are in
   `infra/README.md`.
 - Every `docker compose` command for this project needs the two passwords, so CI must pass
@@ -1486,6 +1540,24 @@ docker compose up -d --wait
 docker compose exec redis redis-cli INFO server | grep redis_version   # redis_version:8.10.3
 ```
 
+**Integration fixes (wave w0, round 4)**
+
+- Docker Desktop is now installed on the build machine (Engine 29.9.2, Compose 5.6.1), so the
+  owner action to install Docker is done for this Mac. The "How to verify" steps above with
+  Docker, and the round-3 steps for a new Redis password, ran under Docker Desktop for the first
+  time, in a fresh clone of `main` under a Compose project of their own
+  (`COMPOSE_PROJECT_NAME=apex-integrator`, ports 15499 and 16499 through `POSTGRES_PORT` and
+  `REDIS_PORT`), and each gave the result it states: both services healthy in 6.7 s, PostgreSQL
+  18.6 with pgvector 0.8.7, Redis 8.10.3 with `appendonly yes` and only the config file on its
+  command line, WRONGPASS and exit code 1 for a wrong password, the key kept across
+  `down` and `up`, the placeholder's message and exit code 1, the required-password error, and
+  Redis healthy 30 s after `start` with a new password and answering PONG after `up -d --wait`.
+  The ports listened on 127.0.0.1 only. `down -v` then removed the containers, volumes and
+  network. They have still not run under OrbStack.
+- Fixed (docs): the owner's licence decision in docs/DECISIONS.md ("Redis 8 under AGPLv3,
+  confirmed by the owner; Valkey is not wanted") still named `redis:8.10.2-alpine3.23`; it now
+  notes the move to 8.10.3.
+
 ## #4 - Typed environment loader
 
 **What changed**
@@ -1601,7 +1673,7 @@ The web app's guard and phase checks:
 `pnpm exec vitest run --project web --reporter=verbose` lists
 `server env module > refuses to load outside React Server Components` (importing
 `src/env/server.ts` anywhere but on the server throws) and a `validateWebEnv` test for each
-Next.js phase, and ends with `Tests  35 passed (35)` (47 since round 2 of the wave w0 review).
+Next.js phase, and ends with `Tests  35 passed (35)` (47 since round 2 of the wave w0 review, 49 since round 4).
 
 **Dependencies added**
 
@@ -1781,7 +1853,7 @@ How to verify the fixes:
 ```sh
 pnpm exec vitest run env-access.test.ts               # "Tests  64 passed (64)"
 pnpm exec vitest run apps/api/src/env-file.test.ts    # "Tests  6 passed (6)"
-pnpm exec vitest run git-hooks.test.ts -t "runs every test when"  # "Tests  21 passed | 55 skipped (76)"; 21 of 88 since round 3, of 89 since round 4
+pnpm exec vitest run git-hooks.test.ts -t "runs every test when"  # "Tests  21 passed | 55 skipped (76)"; 21 of 88 since round 3; 19 of 110 since round 4
 mkdir -p apps/web/src/app/probe
 printf '"use client";\n\nexport { serverEnvSchema } from "../../env/server-schema";\n' \
   > apps/web/src/app/probe/leak.tsx
@@ -1850,7 +1922,7 @@ otherwise:
   `process.getBuiltinModule("process")` to the routes that the env lint rules let through.
 
 How to verify the fixes: these two commands report `Tests  7 passed | 81 skipped (88)` and
-`Tests  35 passed (35)` (since round 4: 7 passed of 89, and 50 passed).
+`Tests  35 passed (35)` (since round 4: 7 passed of 110, and 50 passed).
 
 ```sh
 pnpm exec vitest run git-hooks.test.ts -t "env file"
@@ -1915,7 +1987,7 @@ index as they were. Fixes, each with a test that fails without it unless it says
   went through. A new task in `lint-staged.config.ts` (the eighth since the round-4 merges, after
   instruction 3's YAML task) now runs that file, once, when the log is
   staged, and in a fresh clone the same commit is refused within 3 seconds. `git-hooks.test.ts`
-  checks the task (89 tests now). The README, `vitest.config.ts`, the #2 entry and DECISIONS ("A
+  checks the task (89 tests then; 110 after the round-4 merges). The README, `vitest.config.ts`, the #2 entry and DECISIONS ("A
   staged build log runs build-log.test.ts in the pre-commit hook") describe it.
 - The steps above that try to commit an env file could pass, or commit, for the wrong reason. The
   round-2 one ended its commit line with a `#` comment, so pasted into zsh without
@@ -1946,7 +2018,7 @@ Node.js (see Notes & limitations above). Rejecting such names in `parseEnv` woul
 editor setting that the templates' leading comments already sidestep.
 
 How to verify the fixes: the first command reports `Tests  20 passed (20)` on a machine with zsh
-(11 without it), and the second `Tests  1 passed | 88 skipped (89)`.
+(11 without it), and the second `Tests  1 passed | 109 skipped (110)`.
 
 ```sh
 pnpm exec vitest run build-log.test.ts
@@ -2571,7 +2643,8 @@ docker volume ls        # apex-garage_postgres-data and apex-garage_redis-data a
 **Owner actions**
 
 To use the `docker:*` scripts, install Docker Desktop or OrbStack (macOS) or Docker Engine with
-the Compose plugin (Linux), as instruction 3 describes. Nothing else.
+the Compose plugin (Linux), as instruction 3 describes. Nothing else. (Done on the build machine
+by 2026-10-30: Docker Desktop, see #3 and this entry's round-4 review note.)
 
 **Notes & limitations**
 
