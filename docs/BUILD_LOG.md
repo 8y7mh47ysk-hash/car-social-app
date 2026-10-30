@@ -2214,6 +2214,7 @@ the Compose plugin (Linux), as instruction 3 describes. Nothing else.
 - This machine has no Docker, so the tests use a stand-in `docker` command, and CI validates the
   Compose file. The review then ran the scripts against a real engine in a Linux VM (see "Review
   fixes (wave w0, round 1)"); they have not yet run under Docker Desktop or OrbStack.
+  (Since round 4 of the wave w0 review they have run under Docker Desktop; see there.)
 - `db:migrate` and `db:seed` fail on purpose until instruction 26 replaces them.
 - The scripts need a POSIX shell, like the existing ones. The tests pass with `/bin/sh` as bash
   (macOS) and as dash (as on Ubuntu, checked with macOS's `/bin/dash`).
@@ -2338,8 +2339,22 @@ scripts, which CI relies on, against checks that fail and pass. With the release
 Docker Compose 2.23.1 (the oldest that the Docker check lets through), 5.1.3 (the runner image's)
 and 5.6.1 (the latest), checksum-verified, `docker compose --profile '*' config --services`
 listed postgres, redis, api and web, so the `docker:down` script's every-profile form works with
-each, and `config --quiet` printed nothing. There is still no Docker on this Mac, so the scripts
-themselves ran only against the stand-in `docker` of their tests.
+each, and `config --quiet` printed nothing.
+
+Docker Desktop was installed on this Mac during the round (Engine 29.9.2, Compose 5.6.1), so the
+scripts then ran under Docker Desktop for the first time, as a separate Compose project
+(`COMPOSE_PROJECT_NAME=apex-echo` and free host ports in the root `.env`), removed again with
+`down -v` afterwards. `pnpm docker:up` pulled both images and returned once both services were
+healthy (18 s), with both ports published on 127.0.0.1 only; `pnpm docker:logs` and
+`pnpm docker:logs redis` followed the logs and ended on Ctrl+C (status 130); after
+`docker compose --profile app up -d --wait` had run both placeholders, `pnpm docker:down` removed
+them, both services and the network and kept both volumes; and a Redis value written before
+`pnpm docker:down` was there after the next `pnpm docker:up`. With `DOCKER_HOST` pointing at a
+socket that does not exist, `pnpm docker:up` printed the "engine is not running" message and
+exited with status 1; with no `docker` on `PATH`, the check printed the "not installed" one. CI's
+Compose step, run as GitHub runs it, printed nothing and passed, and failed with Compose's
+message when `POSTGRES_PASSWORD` was unset. The engine-too-old and Compose-too-old messages
+remain tested only with a stand-in `docker`.
 
 How to verify, from the repository root:
 
