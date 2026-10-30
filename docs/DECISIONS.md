@@ -2414,6 +2414,7 @@ Keep entries brief. Details belong in code comments and the build log.
   restart when `.env` changes, and tests that start `server.ts` would read a developer's file.
   Once a variable is required (Phase 2), an unreadable file stops the API anyway, with the notice
   just above the error.
+
 ### The start check sets the API's log format and level itself
 
 - Date: 2026-10-11 · Instruction: #5 · Author: Echo (wave w0 review, round 4)
