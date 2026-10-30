@@ -662,23 +662,32 @@ describe("secrets in the logs", () => {
     expect(output()).not.toContain("query-secret");
   });
 
-  // Fastify's warnings about a reply sent twice quote the raw request URL in their messages.
-  it("hides the query string of a raw request URL that a message quotes", async () => {
-    const { app, output, lines } = await buildLoggedApp({ logLevel: "info" });
-    app.get("/twice", (_request, reply) => {
-      void reply.send({ first: true });
-      void reply.send({ second: true });
-    });
-    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+  // Fastify's warnings about a reply sent twice quote the raw request URL in their messages (and
+  // so in err.message and err.stack). Node.js also accepts targets that start with "*".
+  it.each([
+    ["GET", '/twice?q="&token=query-secret', `"/twice?${REDACTED}`],
+    ["OPTIONS", "*?token=query-secret", `"*?${REDACTED}`],
+    ["GET", "*x?token=query-secret", `"*x?${REDACTED}`],
+    ["GET", "*#access_token=query-secret", `"*#${REDACTED}`],
+  ])(
+    "hides the query string of a raw request URL that a message quotes: %s %s",
+    async (method, target, quoted) => {
+      const { app, output, lines } = await buildLoggedApp({ logLevel: "info" });
+      app.all("/*", (_request, reply) => {
+        void reply.send({ first: true });
+        void reply.send({ second: true });
+      });
+      const address = await app.listen({ host: "127.0.0.1", port: 0 });
 
-    await sendRaw(
-      new URL(address),
-      'GET /twice?q="&token=query-secret HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n',
-    );
+      await sendRaw(
+        new URL(address),
+        `${method} ${target} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`,
+      );
 
-    expect(lines().some((line) => line.msg.includes(`"/twice?${REDACTED}`))).toBe(true);
-    expect(output()).not.toContain("query-secret");
-  });
+      expect(lines().some((line) => line.level === 40 && line.msg.includes(quoted))).toBe(true);
+      expect(output()).not.toContain("query-secret");
+    },
+  );
 
   // Node.js attaches the raw bytes of a request it cannot parse to the error that Fastify logs at
   // trace level, so they hold every header the client sent, cookies included.
@@ -697,6 +706,42 @@ describe("secrets in the logs", () => {
       err: { code: "HPE_INVALID_HEADER_TOKEN", rawPacket: REDACTED },
     });
   });
+});
+
+// A client can put C1 controls in a header value (Node.js reads its bytes as Latin-1) and any
+// character in a JSON body, and JSON.stringify writes C1 and bidirectional controls as they are.
+// ESC is escaped by JSON, and pino-pretty drops it from a message: neither format may write it.
+describe("control characters from a client", () => {
+  const CSI = String.fromCodePoint(0x9b);
+  const RIGHT_TO_LEFT_OVERRIDE = String.fromCodePoint(0x202e);
+  const LINE_SEPARATOR = String.fromCodePoint(0x2028);
+  const ESCAPE = String.fromCodePoint(0x1b);
+
+  it.each(["json", "pretty"] as const)(
+    "reach the %s log only as escapes, from a header and a body",
+    async (logFormat) => {
+      const { app, output } = await buildLoggedApp({ logFormat, logLevel: "info" });
+      app.post("/cars", (request) => {
+        const { name } = carBodySchema.parse(request.body);
+        request.log.info({ userAgent: request.headers["user-agent"] }, `car saved: ${name}`);
+        return { saved: name };
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/cars",
+        headers: { "user-agent": `curl${CSI}2J` },
+        payload: { name: `MX-5${RIGHT_TO_LEFT_OVERRIDE}${LINE_SEPARATOR}evil${ESCAPE}[2J` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      for (const character of [CSI, RIGHT_TO_LEFT_OVERRIDE, LINE_SEPARATOR, ESCAPE]) {
+        expect(output()).not.toContain(character);
+      }
+      expect(output()).toContain("curl\\u009b2J");
+      expect(output()).toContain("car saved: MX-5\\u202e\\u2028evil");
+    },
+  );
 });
 
 describe("pretty format", () => {

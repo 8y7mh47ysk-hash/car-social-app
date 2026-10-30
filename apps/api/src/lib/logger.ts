@@ -83,6 +83,30 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Characters that JSON.stringify writes as they are but that a terminal or a log viewer may act
+ * on: DEL and the C1 control characters U+0080 to U+009F (a terminal that reads 8-bit controls
+ * takes U+009B to start a control sequence, as it takes ESC [), the line and paragraph separators
+ * U+2028 and U+2029, which some viewers show as line breaks, and Unicode's bidirectional controls
+ * (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069), which change the order in which
+ * the text around them is shown. Clients can send them all: the C1 characters in a header value,
+ * whose bytes Node.js reads as Latin-1, and any of them in a JSON body. JSON already escapes the
+ * other control characters, ESC included. Source code writes these characters as escapes only.
+ */
+const DISPLAY_CONTROLS = /[\x7f-\x9f\u{61c}\u{200e}\u{200f}\u{2028}-\u{202e}\u{2066}-\u{2069}]/gu;
+
+/**
+ * Writes every display control in `text` as a \u escape. In a JSON line they occur only inside
+ * strings, where the escape stands for the same character, so the line stays valid JSON with the
+ * same values.
+ */
+function escapeDisplayControls(text: string): string {
+  return text.replace(
+    DISPLAY_CONTROLS,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
 /** Written instead of a line that is not a JSON object, so nothing unredacted gets through. */
 function droppedLine(): string {
   const entry = {
@@ -101,12 +125,16 @@ function droppedLine(): string {
  * 1. replaces the value of every sensitive key, at any depth, with "[Redacted]", even when the
  *    value is an object or an array (see isSensitiveKey);
  * 2. hides URL credentials, query strings and fragments in every string value, the message
- *    included (see redactUrls), and cuts every string value to MAX_LOGGED_STRING_LENGTH
- *    characters. Object keys, and the number of keys and items, are left as they are;
+ *    included (see redactUrls for which "?" and "#" start a query string in free text), and then
+ *    cuts every string value to MAX_LOGGED_STRING_LENGTH characters. Object keys, and the number
+ *    of keys and items, are left as they are;
  * 3. adds the ID of the request whose code is running to a line that has none. Lines from
  *    Fastify's per-request loggers (`request.log`) already carry their own request's ID; this
  *    covers every other logger (`app.log` and children made from it), so a service that is never
- *    handed the request still logs its request's ID.
+ *    handed the request still logs its request's ID;
+ * 4. escapes the characters that a terminal or a log viewer could act on (see DISPLAY_CONTROLS),
+ *    in keys and values, so a client's text cannot send control sequences to whoever reads the
+ *    log, break a line in a viewer or reorder what it shows.
  *
  * Apart from URL parts, a secret inside a string cannot be recognised, so never put one in a log
  * message. Log the fields you need from a client's data, not whole objects whose keys and size
@@ -129,7 +157,7 @@ export function finishLogLine(line: string): string {
   if (context !== undefined && entry[REQUEST_ID_LOG_KEY] === undefined) {
     entry[REQUEST_ID_LOG_KEY] = context.requestId;
   }
-  return `${JSON.stringify(entry)}\n`;
+  return `${escapeDisplayControls(JSON.stringify(entry))}\n`;
 }
 
 /**
@@ -292,6 +320,14 @@ function writeAll(fd: number, text: string): void {
  * (its stream API builds one). Standard output is written synchronously (see writeAll), so no
  * line is lost when the process exits. pino-pretty is imported only here, so the JSON format
  * never loads it.
+ *
+ * pino-pretty reads the JSON line back. It removes ESC and the other control characters from a
+ * message and a stack itself, except tabs and line breaks, but not the line and paragraph
+ * separators or the bidirectional controls, and it prints the other fields as JSON, in which DEL
+ * and the C1 controls stay as they are too. So its output gets the same escapes (its colours use
+ * only ESC). A line break in a message or a stack still starts a new line: acceptable for a
+ * format that only a developer's own terminal shows, and one more reason to keep client text out
+ * of messages.
  */
 async function prettyDestination(destination: LogDestination | undefined): Promise<LogDestination> {
   const pinoPretty = await importPinoPretty();
@@ -309,7 +345,7 @@ async function prettyDestination(destination: LogDestination | undefined): Promi
   });
   return {
     write(line) {
-      target.write(prettify(line));
+      target.write(escapeDisplayControls(prettify(line)));
     },
   };
 }

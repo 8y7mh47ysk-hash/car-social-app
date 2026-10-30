@@ -1995,15 +1995,17 @@ Render every diagram. This needs network access; the first run downloads mermaid
 Puppeteer downloads a headless Chrome into `~/.cache/puppeteer`. From the repository root:
 
 ```sh
+out=$(mktemp -d)
 pnpm dlx --allow-build=puppeteer @mermaid-js/mermaid-cli@12.0.0 \
-  -i docs/ARCHITECTURE.md -o /tmp/architecture.md
-ls /tmp/architecture-*.svg
+  -i docs/ARCHITECTURE.md -o "$out/architecture.md"
+ls "$out"
 ```
 
-After pnpm's install output, the first command prints `Found 6 mermaid charts in Markdown input`,
-a ✅ line for each diagram and one for `/tmp/architecture.md`, and exits with code 0; `ls` lists
-`/tmp/architecture-1.svg` to `/tmp/architecture-6.svg`. Open one in a browser to look at it.
-GitHub renders the diagrams too, once the repository is there.
+The first command makes a new folder that only you can open. After pnpm's install output, the
+second prints `Found 6 mermaid charts in Markdown input`, a ✅ line for each diagram and one for
+the `architecture.md` it writes, and exits with code 0; `ls` lists `architecture-1.svg` to
+`architecture-6.svg` and `architecture.md`. Open one in a browser to look at it (on macOS,
+`open "$out/architecture-1.svg"`). GitHub renders the diagrams too, once the repository is there.
 
 Check that the decisions log kept every earlier entry (472e750 is the last commit on main before
 the Phase 0 work started), in bash or zsh:
@@ -2080,6 +2082,22 @@ Charlie reviewed this instruction and changed:
   writing to `process.stdout` or `process.stderr` directly would skip the logger. Its
   deployment notes named only one of the two start flags that a Dockerfile must keep; they
   name `--no-strip-types` too. All six diagrams still render with the command above.
+
+**Review fixes (wave w0, round 4)**
+
+Alpha reviewed this instruction and changed:
+
+- The render check wrote to fixed names in the shared `/tmp` (`/tmp/architecture.md` and
+  `/tmp/architecture-1.svg` to `-6.svg`), here and in `docs/ARCHITECTURE.md`. Every account on
+  the machine can create files there, and mermaid-cli writes with Node.js's `writeFile`, which
+  follows a symbolic link: another account could leave a link under one of those names, and the
+  check would overwrite whichever of your files it points to. The steps above now write to a new
+  folder that `mktemp -d` makes and only you can open. All six diagrams render with them.
+- `docs/ARCHITECTURE.md` ("Observability") now gives the rule for which `?` and `#` start a query
+  string in logged free text (open item w0.V3.Delta.1), and says that log lines escape the
+  control characters that JSON leaves as they are: instruction 8's round-4 notes below.
+
+To check: run the render steps under "How to verify" above; they print what is described there.
 
 ## #7 - Developer scripts
 
@@ -2273,8 +2291,11 @@ pnpm exec vitest run scripts/check-docker.test.ts   # "Tests  35 passed (35)"
 - Redaction (`apps/api/src/lib/redact.ts` and the logger): the values of sensitive keys
   (passwords, secrets, API keys, tokens, cookies, authorization headers, session IDs and similar)
   become `[Redacted]` at any depth; URL credentials, query strings and fragments are hidden in
-  every string; strings are cut to 8192 characters and request URLs to 256. Request lines hold
-  only the method, the shortened URL and the client's address.
+  every string value, the message included; string values are cut to 8192 characters and request
+  URLs to 256. Request lines hold only the method, the shortened URL and the client's address.
+  (Corrected in round 4 of the wave w0 review: this said "every string". Object keys, and the
+  number of keys and items, are logged as they are, and in free text a `?` or `#` starts a query
+  string only after a `/` or `*`: `docs/ARCHITECTURE.md`, "Observability", gives the rules.)
 - `buildApp` (`apps/api/src/app.ts`) takes `logLevel` (default `silent`, so tests stay quiet),
   `logFormat` (default `json`) and `logDestination` (for tests) instead of Fastify's `logger`
   option. `apps/api/src/config.ts` reads `LOG_FORMAT` (`json` or `pretty`, default `json`). Since
@@ -2295,7 +2316,7 @@ pnpm exec vitest run scripts/check-docker.test.ts   # "Tests  35 passed (35)"
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm --filter @apex/api test   # all pass: "Tests  312 passed (312)" after round 3 of the review
+pnpm --filter @apex/api test   # all pass: "Tests  332 passed (332)" after round 4 of the review
 pnpm lint                      # exits with code 0
 pnpm typecheck                 # shared, api and web each report "Done"
 ```
@@ -2422,7 +2443,7 @@ pnpm --filter @apex/api exec vitest run src/server.test.ts -t "pino-pretty|redac
 ```
 
 The first ends with `Tests  193 passed (193)`, the second with `Tests  4 passed | 23 skipped (27)`
-(rounds 2 and 3 added tests to both files).
+(rounds 2 to 4 added tests to both files).
 
 **Review fixes (wave w0, round 2)**
 
@@ -2464,13 +2485,13 @@ pnpm exec vitest run api-console.test.ts
 ```
 
 They end with `Tests  193 passed (193)`, `Tests  4 passed | 23 skipped (27)` and
-`Tests  4 passed (4)` (round 3 added tests to the first two files). To see the pino-pretty
+`Tests  4 passed (4)` (rounds 3 and 4 added tests to the first two files). To see the pino-pretty
 messages for yourself, from `apps/api`:
 
 ```sh
-mv node_modules/pino-pretty /tmp/pino-pretty-link   # as a production install leaves it out
+mv node_modules/pino-pretty node_modules/.pino-pretty-aside   # as a production install leaves it out
 LOG_FORMAT=pretty node src/server.ts; echo "exit code $?"
-mv /tmp/pino-pretty-link node_modules/pino-pretty   # put it back
+mv node_modules/.pino-pretty-aside node_modules/pino-pretty   # put it back
 ```
 
 The second command prints only "LOG_FORMAT=pretty needs pino-pretty, a development dependency
@@ -2488,7 +2509,9 @@ Bravo reviewed this instruction and changed:
   everything after its first `?` or `#` are hidden, whatever they hold. In other strings a URL
   now ends only at whitespace, so a password with an apostrophe
   (`postgres://apex:it's-a-secret@db/apex`) and the raw URL that Fastify quotes when a reply is
-  sent twice are hidden too; text glued to a URL without a space is hidden with it.
+  sent twice are hidden too; text glued to a URL without a space is hidden with it. (Corrected in
+  round 4: the quoted URL's query string was hidden only when a `/` came before its `?`, so not
+  for `*?token=...`; round 4 hides that one too.)
 - Query strings after an `@`. User information ran to the last `@` before the next `/`, so in a
   URL without a path, the `@` of an email address in the query string ended it and took the `?`
   with it: `https://example.com?invite=a@b.com&token=abc` was logged as
@@ -2496,7 +2519,9 @@ Bravo reviewed this instruction and changed:
   (`GET http://x?email=a@b&token=...`). In that case everything after the `://` is now hidden. A
   `?` or `#` with no `/` before it also ended the search for a later one in the same run of text
   (`why?"/reset?token=abc"`), which the change above to whitespace-only runs made more likely.
-  Seeded property tests now check 20,000 random runs of text against these rules.
+  Seeded property tests now check 20,000 random runs of text against these rules. (Corrected in
+  round 4: their generator lost precision, so the two tests drew 2,339 different texts between
+  them; round 4 fixed it.)
 - A value logged under the key `req` that is not a Fastify request (null, an object without a
   `url`, an outgoing `http.ClientRequest`) made the log call throw a TypeError, which fails a
   request or, from a timer, stops the API. The request serializer now logs only the string fields
@@ -2524,7 +2549,8 @@ pnpm --filter @apex/api exec vitest run src/lib/redact.test.ts src/lib/logger.te
 pnpm --filter @apex/api exec vitest run src/server.test.ts -t "reader"
 ```
 
-They end with `Tests  214 passed (214)` and `Tests  4 passed | 23 skipped (27)`. With the API
+They end with `Tests  214 passed (214)` and `Tests  4 passed | 23 skipped (27)` (round 4 added
+tests to the first three files). With the API
 running as above (`pnpm --filter @apex/api dev`), in terminal 2:
 
 ```sh
@@ -2535,3 +2561,56 @@ curl -s -o /dev/null --request-target 'http://x?email=a@b&token=secret-value' ht
 
 Terminal 1 logs the three URLs as `"/reset?[Redacted]"`, `"*?[Redacted]"` and
 `"http://[Redacted]"`, and `secret-value` appears nowhere.
+
+**Review fixes (wave w0, round 4)**
+
+Alpha reviewed this instruction and changed:
+
+- Control characters from clients. JSON escapes ESC, line breaks and the other C0 control
+  characters, but writes DEL, the C1 controls (U+0080 to U+009F), U+2028, U+2029 and Unicode's
+  bidirectional controls as they are, and a client can send them in a header value or a JSON
+  body. A route that logged the user agent and a car name, the kind of field the logging rules
+  say to log, wrote a raw U+009B, which a terminal that reads 8-bit controls takes as the start of
+  a control sequence, and a right-to-left override, which reorders what a log viewer shows. Both
+  formats now write these characters as `\u` escapes, in keys and values, so every line keeps
+  its values; other non-ASCII text is unchanged, and the cost per line is within measurement
+  noise. In the pretty format, pino-pretty itself drops ESC and most other control characters
+  from a message or a stack but keeps line breaks, so a line break in a message still starts a
+  new line in the developer's terminal.
+- Query strings after a `*` (open item w0.V3.Delta.1). In free text a `?` or `#` counted only
+  after a `/`, so the warning Fastify logs when a route replies twice, which quotes the raw
+  request target, held the query string of `OPTIONS *?token=...` (also `*x?token=...` and
+  `*#...`) in its message, `err.message` and `err.stack`, while the request line hid it. A `*` now
+  counts like a `/`. Every target that Node.js accepts starts with `/` or `*` or holds `://`; a
+  URL without them in free text, such as `example.com?key=abc` or a bare `?code=abc`, is still
+  logged as it is, and `docs/ARCHITECTURE.md` now says so instead of promising more.
+- Property tests (open item w0.V3.Delta.2). The seeded generator multiplied in floating point and
+  lost the product's low bits, so the two tests that promised 20,000 random texts each drew 2,339
+  different texts between them. It now works in exact 32-bit arithmetic, each test seeds its
+  own, and a new test fails if fewer than 95% of the 20,000 texts differ.
+- A test now holds the order in which a string is redacted and then cut. Cut first, a string that
+  runs past 8,192 characters can end inside a URL's password, before the `@` that marks it as
+  one, and the start of the password is logged. Swapping the two steps passed every test before.
+- Docs (open item w0.V3.Delta.3). "What changed" above and the decision "Redact every log line
+  after serialisation, in pino's streamWrite hook" said that URL parts are hidden in, and the cut
+  applies to, every string; object keys get neither. Both now say "string values". The round-2
+  pino-pretty steps above moved pino-pretty's link to a fixed name in the shared `/tmp`, where
+  another account could have made a folder of that name first: the link would have gone into
+  that folder, and putting it back would have failed. The steps now set it aside inside
+  `node_modules`.
+- A rule for routes that write to `reply.raw` (Server-Sent Events, #72). `docs/ARCHITECTURE.md`
+  said only that such a route must include `reply.getHeaders()`. A probe route that wrote its
+  headers to `reply.raw` and then returned a value made Fastify 5.12.7 write the headers a second
+  time, and the `ERR_HTTP_HEADERS_SENT` this threw went unhandled, which in the API means a fatal
+  line and exit code 1: one request stops it. With `reply.hijack()` first, or nothing returned,
+  the same route answers with its `x-request-id`. The document now says to do both.
+
+To check the fixes, from the repository root:
+
+```sh
+pnpm --filter @apex/api exec vitest run src/lib/redact.test.ts src/lib/logger.test.ts src/logging.test.ts
+node -e 'import("./apps/api/src/lib/logger.ts").then(({ finishLogLine }) => process.stdout.write(finishLogLine(JSON.stringify({ msg: "MX-5\u009b2J" }))))'
+```
+
+The first ends with `Tests  234 passed (234)`. The second prints `{"msg":"MX-5\u009b2J"}`: the C1
+character U+009B written as a six-character escape, which no terminal acts on.

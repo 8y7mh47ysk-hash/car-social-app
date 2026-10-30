@@ -379,21 +379,36 @@ flowchart TB
   `100-continue` (417); it also closes the connection of a `CONNECT` request without answering.
   `apps/api/src/logging.test.ts` checks the 400s, the 431 and the 417.
   A route that writes its response to `reply.raw` itself, as a Server-Sent Events stream might
-  (#72), sends only the headers it writes there, so it must include `reply.getHeaders()`.
+  (#72), sends only the headers it writes there, so it must include `reply.getHeaders()`. It must
+  also call `reply.hijack()` first and return nothing: a handler that writes the headers itself
+  and then returns a value makes Fastify write them a second time, and the
+  `ERR_HTTP_HEADERS_SENT` that this throws goes unhandled, so one request stops the API.
 - **Redaction.** Before a line is written, the values of sensitive keys (passwords, tokens,
   cookies, authorization headers, API keys and similar) are replaced with `[Redacted]` at any
   depth. A request URL is logged with its credentials and everything after its first `?` or `#`
-  hidden, whatever characters it holds. In every other string value, URL credentials, query
-  strings and fragments are hidden up to the next whitespace, where a URL is taken to end (an
-  encoded URL never holds a space), so a quote or bracket glued to a URL is hidden with it. String
-  values are cut to 8192 characters and request URLs to 256; object keys, and the number of keys
-  and items, are logged as they are. Fastify's lines for a 404 and for a URL its router rejects
-  would repeat the raw URL, so the API logs them without it ("route not found", "malformed URL",
-  "route parameter too long"). Never put a secret in a log message: inside free text only URL
-  parts can be recognised. For the same reason, log the parsed fields you need, not raw bodies as
-  strings (a raw webhook body, #91, is free text to the logger) or whole objects whose keys and
-  size a client chooses, and never put a secret in a URL path, which is logged as it is: tokens in
-  links (#39, #41) go in the query string.
+  hidden, whatever characters it holds. In every other string value, URL credentials are hidden,
+  and so is everything from a query string's `?` or a fragment's `#` up to the next whitespace,
+  where a URL is taken to end (an encoded URL never holds a space), so a quote or bracket glued to
+  a URL is hidden with it. In such free text a `?` or `#` counts only when a `/` or a `*` comes
+  before it in its run of text without whitespace, so "ready?" and "#12" stay readable. Every
+  request target that Node.js accepts starts with `/` or `*` or holds `://`, so a quoted request
+  URL is covered, but a URL written without any of them, such as `example.com?key=abc` or a bare
+  `?code=abc`, is logged as it is. String values are cut to 8192 characters and request URLs to
+  256; object keys, and the number of keys and items, are logged as they are. Fastify's lines for
+  a 404 and for a URL its router rejects would repeat the raw URL, so the API logs them without it
+  ("route not found", "malformed URL", "route parameter too long"). Never put a secret in a log
+  message: inside free text only URL parts can be recognised. For the same reason, log the parsed
+  fields you need, not raw bodies as strings (a raw webhook body, #91, is free text to the logger)
+  or whole objects whose keys and size a client chooses, and never put a secret in a URL path,
+  which is logged as it is: tokens in links (#39, #41) go in the query string.
+- **Control characters.** JSON escapes line breaks, ESC and the other C0 control characters, but
+  not DEL, the C1 controls (U+0080 to U+009F), the line and paragraph separators or Unicode's
+  bidirectional controls, and a client can send all of those in a header value or a JSON body.
+  The logger writes them as `\u` escapes too, in keys and values, so a client's text cannot send
+  control sequences to the terminal that shows the log, break a line in a log viewer or reorder
+  what it shows. `LOG_FORMAT=pretty` escapes the same characters, and pino-pretty itself drops ESC
+  and most other control characters from a message or a stack, but it keeps their line breaks:
+  a line break in a message still starts a new line in the developer's terminal.
 - **Crashes.** An uncaught exception, or a promise rejection that nothing handles, is logged at
   fatal level, redacted and with the ID of the request whose code failed, before the process
   exits with code 1 (`apps/api/src/server.ts`). Node.js's own report would be unredacted text.
@@ -470,8 +485,10 @@ These are decided by later instructions, not here:
   the repository root:
 
   ```sh
+  out=$(mktemp -d)
   pnpm dlx --allow-build=puppeteer @mermaid-js/mermaid-cli@12.0.0 \
-    -i docs/ARCHITECTURE.md -o /tmp/architecture.md
+    -i docs/ARCHITECTURE.md -o "$out/architecture.md"
+  ls "$out"
   ```
 
   pnpm installs it in a temporary folder with its usual safeguards, which the repository's own
@@ -479,8 +496,10 @@ These are decided by later instructions, not here:
   the one allowed here, Puppeteer's, which downloads a headless Chrome to `~/.cache/puppeteer`
   the first time. (`npx` would take the newest version that each of the tool's roughly 200
   packages allows, however new, and run every install script.) The command writes one SVG file
-  per diagram next to the output file (`/tmp/architecture-1.svg` and so on) and exits with an
-  error on any syntax error.
+  per diagram next to the output file (`architecture-1.svg` and so on) and exits with an error on
+  any syntax error. The output goes to a new folder that `mktemp -d` makes and only you can open,
+  not to fixed names in the shared `/tmp`, where another account could have put a link that
+  sends the files over one of your own.
 
 - In sequence diagrams, write `#35;` for `#`. A bare `#` there starts a comment that silently cuts
   the rest of the label, and the check above still passes. Flowcharts are not affected.
