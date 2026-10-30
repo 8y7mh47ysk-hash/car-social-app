@@ -2230,6 +2230,7 @@ Keep entries brief. Details belong in code comments and the build log.
   line break in a message or a stack, which pino-pretty keeps, still starts a new line; that
   format is for a developer's own terminal. Characters that are only invisible, such as U+200B,
   are not escaped: they neither act on a terminal nor reorder text.
+
 ### Commit messages skip the checks only when they start as git's own do
 
 - Date: 2026-10-11 · Instruction: #2 · Author: Bravo (wave w0 review, round 4)
